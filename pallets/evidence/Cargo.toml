@@ -1,0 +1,49 @@
+[package]
+name = "pallet-evidence"
+version = "0.1.0"
+license = "Unlicense"
+edition = "2021"
+publish = false
+
+[dependencies]
+codec = { workspace = true, features = ["derive"] }
+scale-info = { workspace = true, features = ["derive"], default-features = false }
+frame-support = { workspace = true, default-features = false }
+frame-system = { workspace = true, default-features = false }
+sp-runtime = { workspace = true, default-features = false }
+sp-core = { workspace = true, default-features = false }
+frame-benchmarking = { workspace = true, default-features = false, optional = true }
+log = { workspace = true, default-features = false }
+
+# 函数级中文注释：pallet-stardust-ipfs依赖用于IpfsPinner trait
+pallet-stardust-ipfs = { workspace = true, default-features = false }
+# 函数级中文注释：media-utils依赖用于承诺哈希计算和CID验证
+media-utils = { workspace = true, default-features = false }
+## 已移除：pallet-authorizer 依赖
+
+[features]
+default = ["std"]
+std = [
+  "codec/std",
+  "scale-info/std",
+  "frame-support/std",
+  "frame-system/std",
+  "sp-runtime/std",
+  "sp-core/std",
+  "frame-benchmarking?/std",
+  "log/std",
+  "pallet-stardust-ipfs/std",
+  "media-utils/std",
+]
+
+# 启用运行时基准
+runtime-benchmarks = [
+  "frame-benchmarking/runtime-benchmarks",
+  "frame-support/runtime-benchmarks",
+  "frame-system/runtime-benchmarks",
+]
+
+try-runtime = [
+  "frame-support/try-runtime",
+  "frame-system/try-runtime",
+]

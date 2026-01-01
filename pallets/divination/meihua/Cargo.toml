@@ -1,0 +1,67 @@
+[package]
+name = "pallet-meihua"
+version = "0.1.0"
+description = "梅花易数排盘模块 - 区块链去中心化占卜系统"
+license = "Unlicense"
+edition = "2021"
+publish = false
+
+[dependencies]
+# 编解码依赖
+codec = { workspace = true, features = ["derive"] }
+scale-info = { workspace = true, features = ["derive"], default-features = false }
+
+# Substrate 核心框架依赖
+frame-support = { workspace = true, default-features = false }
+frame-system = { workspace = true, default-features = false }
+sp-runtime = { workspace = true, default-features = false }
+sp-std = { workspace = true, default-features = false }
+sp-core = { workspace = true, default-features = false }
+sp-io = { workspace = true, default-features = false }
+
+# 日志依赖
+log = { workspace = true, default-features = false }
+
+# 时间戳依赖 - 用于获取区块时间
+pallet-timestamp = { workspace = true, default-features = false }
+
+# 黄历模块 - 统一农历转换
+pallet-almanac = { path = "../almanac", default-features = false }
+
+# 隐私授权模块 - 加密数据存储和多方授权
+pallet-divination-privacy = { path = "../privacy", default-features = false }
+
+# 占卜通用模块 - DivinationType 枚举等
+pallet-divination-common = { path = "../common", default-features = false }
+
+[dev-dependencies]
+sp-io = { workspace = true, features = ["std"] }
+pallet-balances = { workspace = true, features = ["std"] }
+pallet-timestamp = { workspace = true, features = ["std"] }
+sp-core = { workspace = true, features = ["std"] }
+
+[features]
+default = ["std"]
+std = [
+  "codec/std",
+  "scale-info/std",
+  "frame-support/std",
+  "frame-system/std",
+  "sp-runtime/std",
+  "sp-std/std",
+  "sp-core/std",
+  "sp-io/std",
+  "log/std",
+  "pallet-timestamp/std",
+  "pallet-almanac/std",
+  "pallet-divination-privacy/std",
+  "pallet-divination-common/std",
+]
+runtime-benchmarks = [
+  "frame-support/runtime-benchmarks",
+  "frame-system/runtime-benchmarks",
+]
+try-runtime = [
+  "frame-support/try-runtime",
+  "frame-system/try-runtime",
+]

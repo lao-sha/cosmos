@@ -1,0 +1,76 @@
+[package]
+name = "pallet-liuyao"
+version = "0.1.0"
+description = "六爻排盘系统 - 区块链纳甲六爻占卜模块"
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+# Parity codec
+codec = { workspace = true, features = ["derive"] }
+scale-info = { workspace = true, features = ["derive"] }
+
+# Substrate
+frame-benchmarking = { workspace = true, optional = true }
+frame-support = { workspace = true }
+frame-system = { workspace = true }
+sp-api = { workspace = true }
+sp-runtime = { workspace = true }
+sp-std = { workspace = true }
+sp-core = { workspace = true }
+sp-io = { workspace = true }
+
+# 时间戳
+pallet-timestamp = { workspace = true }
+
+# 余额
+pallet-balances = { workspace = true }
+
+# 黄历模块 - 统一农历转换
+pallet-almanac = { path = "../almanac", default-features = false }
+
+# 隐私授权模块
+pallet-divination-privacy = { path = "../privacy", default-features = false }
+
+# 通用模块 - 押金管理
+pallet-divination-common = { path = "../common", default-features = false }
+
+[dev-dependencies]
+sp-io = { workspace = true }
+
+[features]
+default = ["std"]
+std = [
+    "codec/std",
+    "scale-info/std",
+    "frame-benchmarking?/std",
+    "frame-support/std",
+    "frame-system/std",
+    "sp-api/std",
+    "sp-runtime/std",
+    "sp-std/std",
+    "sp-core/std",
+    "sp-io/std",
+    "pallet-timestamp/std",
+    "pallet-balances/std",
+    "pallet-almanac/std",
+    "pallet-divination-privacy/std",
+    "pallet-divination-common/std",
+]
+runtime-benchmarks = [
+    "frame-benchmarking/runtime-benchmarks",
+    "frame-support/runtime-benchmarks",
+    "frame-system/runtime-benchmarks",
+    "sp-runtime/runtime-benchmarks",
+]
+try-runtime = [
+    "frame-support/try-runtime",
+    "frame-system/try-runtime",
+    "sp-runtime/try-runtime",
+]

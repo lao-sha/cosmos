@@ -1,1 +1,101 @@
+# =========================
+# Rust / Cargo
+# =========================
 target/
+**/*.rs.bk
+*.pdb
+
+# =========================
+# Substrate / Polkadot SDK
+# =========================
+# Chain data (本地运行产生的数据)
+chains/
+*.db
+
+# Nested git repositories
+pallets/divination/xuanxue/
+
+# =========================
+# Node.js / Frontend (Expo/React Native)
+# =========================
+frontend/node_modules/
+frontend/.expo/
+frontend/dist/
+frontend/web-build/
+frontend/*.log
+media-utils/node_modules/
+
+# Expo build artifacts
+*.jks
+*.p8
+*.p12
+*.mobileprovision
+*.orig.*
+
+# Metro bundler
+.metro-health-check*
+
+# =========================
+# IDE / Editor
+# =========================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# =========================
+# OS Generated
+# =========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# =========================
+# Environment & Secrets
+# =========================
+.env
+.env.local
+.env.*.local
+!.env.example
+*.pem
+*.key
+secrets/
+
+# =========================
+# Build & Cache
+# =========================
+*.o
+*.a
+*.so
+*.dylib
+*.wasm
+build/
+out/
+
+# =========================
+# Testing & Coverage
+# =========================
+coverage/
+*.lcov
+.nyc_output/
+
+# =========================
+# Logs
+# =========================
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# =========================
+# Misc
+# =========================
+*.bak
+*.tmp
+*.temp
+*.orig

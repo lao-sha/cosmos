@@ -1,0 +1,71 @@
+[package]
+name = "pallet-bazi-chart"
+version = "0.1.0"
+description = "八字排盘 Pallet - 完整的中国传统命理计算模块"
+authors = ["Stardust Team"]
+homepage = "https://github.com/stardust/stardust"
+edition = "2021"
+license = "MIT-0"
+publish = false
+repository = "https://github.com/stardust/stardust"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+codec = { workspace = true, features = ["derive"] }
+scale-info = { workspace = true, features = ["derive"], default-features = false }
+
+# Substrate FRAME 依赖（使用 workspace 版本）
+frame-benchmarking = { workspace = true, optional = true }
+frame-support = { workspace = true }
+frame-system = { workspace = true }
+
+# Substrate 原语（使用 workspace 版本）
+sp-api = { workspace = true }
+sp-runtime = { workspace = true }
+sp-std = { workspace = true }
+
+# 数学库（no_std 兼容）
+libm = "0.2"
+
+# 玄学公共模块
+pallet-divination-common = { path = "../common", default-features = false }
+
+# 黄历模块（农历转换功能）
+pallet-almanac = { path = "../almanac", default-features = false }
+
+# 隐私模块（隐私模式类型定义）
+pallet-divination-privacy = { path = "../privacy", default-features = false }
+
+[dev-dependencies]
+sp-core = { workspace = true, features = ["std"] }
+sp-io = { workspace = true, features = ["std"] }
+pallet-balances = { workspace = true, features = ["std"] }
+
+[features]
+default = ["std"]
+std = [
+	"codec/std",
+	"frame-benchmarking?/std",
+	"frame-support/std",
+	"frame-system/std",
+	"scale-info/std",
+	"sp-api/std",
+	"sp-runtime/std",
+	"sp-std/std",
+	"pallet-divination-common/std",
+	"pallet-almanac/std",
+	"pallet-divination-privacy/std",
+]
+runtime-benchmarks = [
+	"frame-benchmarking/runtime-benchmarks",
+	"frame-support/runtime-benchmarks",
+	"frame-system/runtime-benchmarks",
+	"sp-runtime/runtime-benchmarks",
+]
+try-runtime = [
+	"frame-support/try-runtime",
+	"frame-system/try-runtime",
+	"sp-runtime/try-runtime",
+]

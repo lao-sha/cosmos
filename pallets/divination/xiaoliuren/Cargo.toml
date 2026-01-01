@@ -1,0 +1,67 @@
+[package]
+name = "pallet-xiaoliuren"
+description = "小六壬排盘区块链模块 - 中国传统掐指速算占卜系统"
+version = "0.1.0"
+license = "MIT-0"
+authors = ["Stardust Team"]
+edition = "2021"
+repository = "https://github.com/stardust/pallets"
+
+[dependencies]
+# Substrate 核心
+codec = { features = ["derive"], workspace = true }
+scale-info = { features = ["derive"], workspace = true }
+frame-support.workspace = true
+frame-system.workspace = true
+sp-runtime.workspace = true
+sp-core.workspace = true
+sp-std.workspace = true
+sp-io.workspace = true
+sp-api.workspace = true
+
+# Substrate pallets
+pallet-balances.workspace = true
+pallet-timestamp.workspace = true
+
+# 本地依赖
+pallet-divination-common = { path = "../common", default-features = false }
+
+# 黄历模块 - 统一农历转换
+pallet-almanac = { path = "../almanac", default-features = false }
+
+# 隐私授权模块
+pallet-divination-privacy = { path = "../privacy", default-features = false }
+
+# 可选依赖
+serde = { workspace = true, optional = true, features = ["derive"] }
+
+[dev-dependencies]
+sp-io.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "codec/std",
+    "scale-info/std",
+    "frame-support/std",
+    "frame-system/std",
+    "sp-runtime/std",
+    "sp-core/std",
+    "sp-std/std",
+    "sp-io/std",
+    "sp-api/std",
+    "pallet-balances/std",
+    "pallet-timestamp/std",
+    "pallet-divination-common/std",
+    "pallet-almanac/std",
+    "pallet-divination-privacy/std",
+    "serde/std",
+]
+runtime-benchmarks = [
+    "frame-support/runtime-benchmarks",
+    "frame-system/runtime-benchmarks",
+]
+try-runtime = [
+    "frame-support/try-runtime",
+    "frame-system/try-runtime",
+]

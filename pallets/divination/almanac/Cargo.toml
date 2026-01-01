@@ -1,0 +1,59 @@
+[package]
+name = "pallet-almanac"
+version = "0.1.0"
+description = "黄历模块 - 通过 Off-chain Worker 获取和存储黄历数据"
+license = "Unlicense"
+edition = "2021"
+publish = false
+
+[dependencies]
+# 编解码依赖
+codec = { workspace = true, features = ["derive"] }
+scale-info = { workspace = true, features = ["derive"], default-features = false }
+
+# Substrate 核心框架依赖
+frame-support = { workspace = true, default-features = false }
+frame-system = { workspace = true, default-features = false }
+sp-runtime = { workspace = true, default-features = false }
+sp-std = { workspace = true, default-features = false }
+sp-core = { workspace = true, default-features = false }
+sp-io = { workspace = true, default-features = false }
+
+# 日志依赖
+log = { workspace = true, default-features = false }
+
+# 时间戳依赖 - 用于获取区块时间
+pallet-timestamp = { workspace = true, default-features = false }
+
+# JSON 解析 - OCW 用于解析 API 响应
+lite-json = { version = "0.2", default-features = false }
+
+[dev-dependencies]
+sp-io = { workspace = true, features = ["std"] }
+pallet-balances = { workspace = true, features = ["std"] }
+pallet-timestamp = { workspace = true, features = ["std"] }
+sp-core = { workspace = true, features = ["std"] }
+
+[features]
+default = ["std"]
+std = [
+  "codec/std",
+  "scale-info/std",
+  "frame-support/std",
+  "frame-system/std",
+  "sp-runtime/std",
+  "sp-std/std",
+  "sp-core/std",
+  "sp-io/std",
+  "log/std",
+  "pallet-timestamp/std",
+  "lite-json/std",
+]
+runtime-benchmarks = [
+  "frame-support/runtime-benchmarks",
+  "frame-system/runtime-benchmarks",
+]
+try-runtime = [
+  "frame-support/try-runtime",
+  "frame-system/try-runtime",
+]

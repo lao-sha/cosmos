@@ -14,41 +14,76 @@ targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
 codec = { features = ["derive"], workspace = true }
-frame-benchmarking = { optional = true, workspace = true }
-frame-executive.workspace = true
-frame-metadata-hash-extension.workspace = true
-frame-support = { features = ["experimental"], workspace = true }
-frame-system-benchmarking = { optional = true, workspace = true }
-frame-system-rpc-runtime-api.workspace = true
-frame-system.workspace = true
-frame-try-runtime = { optional = true, workspace = true }
-pallet-aura.workspace = true
-pallet-balances.workspace = true
-pallet-grandpa.workspace = true
-pallet-sudo.workspace = true
-pallet-template.workspace = true
-pallet-timestamp.workspace = true
-pallet-transaction-payment-rpc-runtime-api.workspace = true
-pallet-transaction-payment.workspace = true
+frame-benchmarking = { version = "45.0.0", optional = true, workspace = true }
+frame-executive = { version = "45.0.0", workspace = true }
+frame-metadata-hash-extension = { version = "0.13.0", workspace = true }
+frame-support = { version = "45.0.0", features = ["experimental"], workspace = true }
+frame-system-benchmarking = { version = "45.0.0", optional = true, workspace = true }
+frame-system-rpc-runtime-api = { version = "40.0.0", workspace = true }
+frame-system = { version = "45.0.0", workspace = true }
+frame-try-runtime = { version = "0.51.0", optional = true, workspace = true }
+pallet-aura = { version = "44.0.0", workspace = true }
+pallet-balances = { version = "46.0.0", workspace = true }
+pallet-grandpa = { version = "45.0.0", workspace = true }
+pallet-sudo = { version = "45.0.0", workspace = true }
+pallet-template = { version = "0.1.0", workspace = true }
+pallet-timestamp = { version = "44.0.0", workspace = true }
+pallet-transaction-payment-rpc-runtime-api = { version = "45.0.0", workspace = true }
+pallet-transaction-payment = { version = "45.0.0", workspace = true }
+# Divination pallets
+pallet-divination-common = { workspace = true }
+pallet-divination-privacy = { workspace = true }
+pallet-almanac = { workspace = true }
+pallet-divination-ai = { workspace = true }
+pallet-divination-market = { workspace = true }
+pallet-divination-nft = { workspace = true }
+pallet-meihua = { workspace = true }
+pallet-bazi-chart = { workspace = true }
+pallet-liuyao = { workspace = true }
+pallet-qimen = { workspace = true }
+pallet-ziwei = { workspace = true }
+pallet-xiaoliuren = { workspace = true }
+pallet-daliuren = { workspace = true }
+pallet-tarot = { workspace = true }
+# Chat pallets
+pallet-chat-common = { workspace = true }
+pallet-chat-permission = { workspace = true }
+pallet-chat-core = { workspace = true }
+pallet-chat-group = { workspace = true }
+# Trading pallets
+pallet-trading-common = { workspace = true }
+pallet-trading-pricing = { workspace = true }
+pallet-trading-credit = { workspace = true }
+pallet-trading-maker = { workspace = true }
+pallet-trading-bridge = { workspace = true }
+pallet-trading-otc = { workspace = true }
+# Escrow, Referral, IPFS pallets
+pallet-escrow = { workspace = true }
+pallet-referral = { workspace = true }
+pallet-stardust-ipfs = { workspace = true }
+# Evidence pallet
+pallet-evidence = { workspace = true }
+# Arbitration pallet
+pallet-arbitration = { workspace = true }
 scale-info = { features = ["derive", "serde"], workspace = true }
 serde_json = { workspace = true, default-features = false, features = ["alloc"] }
-sp-api.workspace = true
-sp-block-builder.workspace = true
-sp-consensus-aura = { features = ["serde"], workspace = true }
-sp-consensus-grandpa = { features = ["serde"], workspace = true }
-sp-core = { features = ["serde"], workspace = true }
-sp-genesis-builder.workspace = true
-sp-inherents.workspace = true
-sp-keyring.workspace = true
-sp-offchain.workspace = true
-sp-runtime = { features = ["serde"], workspace = true }
-sp-session.workspace = true
-sp-storage.workspace = true
-sp-transaction-pool.workspace = true
-sp-version = { features = ["serde"], workspace = true }
+sp-api = { version = "40.0.0", workspace = true }
+sp-block-builder = { version = "40.0.0", workspace = true }
+sp-consensus-aura = { version = "0.46.0", features = ["serde"], workspace = true }
+sp-consensus-grandpa = { version = "27.0.0", features = ["serde"], workspace = true }
+sp-core = { version = "39.0.0", features = ["serde"], workspace = true }
+sp-genesis-builder = { version = "0.21.0", workspace = true }
+sp-inherents = { version = "40.0.0", workspace = true }
+sp-keyring = { version = "45.0.0", workspace = true }
+sp-offchain = { version = "40.0.0", workspace = true }
+sp-runtime = { version = "45.0.0", features = ["serde"], workspace = true }
+sp-session = { version = "42.0.0", workspace = true }
+sp-storage = { version = "22.0.0", workspace = true }
+sp-transaction-pool = { version = "40.0.0", workspace = true }
+sp-version = { version = "43.0.0", features = ["serde"], workspace = true }
 
 [build-dependencies]
-substrate-wasm-builder = { optional = true, workspace = true, default-features = true }
+substrate-wasm-builder = { version = "31.0.0", optional = true, workspace = true, default-features = true }
 
 [features]
 default = ["std"]
@@ -70,6 +105,41 @@ std = [
 	"pallet-timestamp/std",
 	"pallet-transaction-payment-rpc-runtime-api/std",
 	"pallet-transaction-payment/std",
+	# Divination pallets std
+	"pallet-divination-common/std",
+	"pallet-divination-privacy/std",
+	"pallet-almanac/std",
+	"pallet-divination-ai/std",
+	"pallet-divination-market/std",
+	"pallet-divination-nft/std",
+	"pallet-meihua/std",
+	"pallet-bazi-chart/std",
+	"pallet-liuyao/std",
+	"pallet-qimen/std",
+	"pallet-ziwei/std",
+	"pallet-xiaoliuren/std",
+	"pallet-daliuren/std",
+	"pallet-tarot/std",
+	# Chat pallets std
+	"pallet-chat-common/std",
+	"pallet-chat-permission/std",
+	"pallet-chat-core/std",
+	"pallet-chat-group/std",
+	# Trading pallets std
+	"pallet-trading-common/std",
+	"pallet-trading-pricing/std",
+	"pallet-trading-credit/std",
+	"pallet-trading-maker/std",
+	"pallet-trading-bridge/std",
+	"pallet-trading-otc/std",
+	# Escrow, Referral, IPFS pallets std
+	"pallet-escrow/std",
+	"pallet-referral/std",
+	"pallet-stardust-ipfs/std",
+	# Evidence pallet std
+	"pallet-evidence/std",
+	# Arbitration pallet std
+	"pallet-arbitration/std",
 	"scale-info/std",
 	"serde_json/std",
 	"sp-api/std",
@@ -100,6 +170,36 @@ runtime-benchmarks = [
 	"pallet-template/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
 	"pallet-transaction-payment/runtime-benchmarks",
+	# Divination pallets benchmarks
+	"pallet-divination-privacy/runtime-benchmarks",
+	"pallet-almanac/runtime-benchmarks",
+	"pallet-divination-ai/runtime-benchmarks",
+	"pallet-divination-market/runtime-benchmarks",
+	"pallet-divination-nft/runtime-benchmarks",
+	"pallet-meihua/runtime-benchmarks",
+	"pallet-bazi-chart/runtime-benchmarks",
+	"pallet-liuyao/runtime-benchmarks",
+	"pallet-qimen/runtime-benchmarks",
+	"pallet-ziwei/runtime-benchmarks",
+	"pallet-xiaoliuren/runtime-benchmarks",
+	"pallet-daliuren/runtime-benchmarks",
+	"pallet-tarot/runtime-benchmarks",
+	# Chat pallets benchmarks
+	"pallet-chat-permission/runtime-benchmarks",
+	"pallet-chat-core/runtime-benchmarks",
+	"pallet-chat-group/runtime-benchmarks",
+	# Trading pallets benchmarks
+	"pallet-trading-pricing/runtime-benchmarks",
+	"pallet-trading-credit/runtime-benchmarks",
+	"pallet-trading-maker/runtime-benchmarks",
+	"pallet-trading-bridge/runtime-benchmarks",
+	"pallet-trading-otc/runtime-benchmarks",
+	# Escrow, Referral pallets benchmarks
+	"pallet-referral/runtime-benchmarks",
+	# Evidence pallet benchmarks
+	"pallet-evidence/runtime-benchmarks",
+	# Arbitration pallet benchmarks
+	"pallet-arbitration/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
 ]
 
@@ -115,6 +215,36 @@ try-runtime = [
 	"pallet-template/try-runtime",
 	"pallet-timestamp/try-runtime",
 	"pallet-transaction-payment/try-runtime",
+	# Divination pallets try-runtime
+	"pallet-divination-privacy/try-runtime",
+	"pallet-almanac/try-runtime",
+	"pallet-divination-ai/try-runtime",
+	"pallet-divination-market/try-runtime",
+	"pallet-divination-nft/try-runtime",
+	"pallet-meihua/try-runtime",
+	"pallet-bazi-chart/try-runtime",
+	"pallet-liuyao/try-runtime",
+	"pallet-qimen/try-runtime",
+	"pallet-ziwei/try-runtime",
+	"pallet-xiaoliuren/try-runtime",
+	"pallet-daliuren/try-runtime",
+	"pallet-tarot/try-runtime",
+	# Chat pallets try-runtime
+	"pallet-chat-permission/try-runtime",
+	"pallet-chat-core/try-runtime",
+	"pallet-chat-group/try-runtime",
+	# Trading pallets try-runtime
+	"pallet-trading-pricing/try-runtime",
+	"pallet-trading-credit/try-runtime",
+	"pallet-trading-maker/try-runtime",
+	"pallet-trading-bridge/try-runtime",
+	"pallet-trading-otc/try-runtime",
+	# Escrow, Referral pallets try-runtime
+	"pallet-referral/try-runtime",
+	# Evidence pallet try-runtime
+	"pallet-evidence/try-runtime",
+	# Arbitration pallet try-runtime
+	# Note: pallet-arbitration does not have try-runtime feature
 	"sp-runtime/try-runtime",
 ]
 

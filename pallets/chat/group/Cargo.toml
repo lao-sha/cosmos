@@ -1,0 +1,65 @@
+[package]
+name = "pallet-chat-group"
+version = "1.0.0"
+description = "智能群聊系统，支持四种加密模式和乐观UI更新"
+authors = ["Stardust Team"]
+homepage = "https://stardust.social"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+repository = "https://github.com/lao-sha/stardust"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+# Substrate框架
+codec = { features = ["derive", "max-encoded-len"], workspace = true }
+scale-info = { features = ["derive"], workspace = true }
+frame-benchmarking = { optional = true, workspace = true }
+frame-support = { workspace = true }
+frame-system = { workspace = true }
+sp-runtime = { workspace = true }
+sp-std = { workspace = true }
+sp-io = { workspace = true }
+sp-core = { workspace = true }
+
+# 本地依赖
+pallet-chat-common = { path = "../common", default-features = false }
+pallet-chat-permission = { path = "../permission", default-features = false }
+pallet-stardust-ipfs = { path = "../../stardust-ipfs", default-features = false }
+media-utils = { path = "../../../media-utils", default-features = false }
+
+[dev-dependencies]
+sp-core = { workspace = true }
+sp-io = { workspace = true }
+sp-runtime = { workspace = true }
+
+[features]
+default = ["std"]
+std = [
+    "codec/std",
+    "scale-info/std",
+    "frame-benchmarking?/std",
+    "frame-support/std",
+    "frame-system/std",
+    "sp-runtime/std",
+    "sp-std/std",
+    "sp-io/std",
+    "sp-core/std",
+    "pallet-chat-common/std",
+    "pallet-chat-permission/std",
+    "pallet-stardust-ipfs/std",
+    "media-utils/std",
+]
+runtime-benchmarks = [
+    "frame-benchmarking/runtime-benchmarks",
+    "frame-support/runtime-benchmarks",
+    "frame-system/runtime-benchmarks",
+    "sp-runtime/runtime-benchmarks",
+]
+try-runtime = [
+    "frame-support/try-runtime",
+    "frame-system/try-runtime",
+    "sp-runtime/try-runtime",
+]

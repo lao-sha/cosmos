@@ -1,4 +1,5 @@
 #![cfg_attr(not(feature = "std"), no_std)]
+#![recursion_limit = "512"]
 
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
@@ -61,8 +62,8 @@ impl_opaque_keys! {
 // https://docs.substrate.io/main-docs/build/upgrade#runtime-versioning
 #[sp_version::runtime_version]
 pub const VERSION: RuntimeVersion = RuntimeVersion {
-	spec_name: alloc::borrow::Cow::Borrowed("solochain-template-runtime"),
-	impl_name: alloc::borrow::Cow::Borrowed("solochain-template-runtime"),
+	spec_name: alloc::borrow::Cow::Borrowed("stardust"),
+	impl_name: alloc::borrow::Cow::Borrowed("stardust"),
 	authoring_version: 1,
 	// The version of the runtime specification. A full node will not attempt to use its native
 	//   runtime in substitute for the on-chain Wasm runtime unless all of `spec_name`,
@@ -225,4 +226,102 @@ mod runtime {
 	// Include the custom logic from the pallet-template in the runtime.
 	#[runtime::pallet_index(7)]
 	pub type Template = pallet_template;
+
+	// ============================================================================
+	// Divination Pallets
+	// ============================================================================
+
+	// 基础模块
+	#[runtime::pallet_index(10)]
+	pub type Almanac = pallet_almanac;
+
+	#[runtime::pallet_index(11)]
+	pub type Privacy = pallet_divination_privacy;
+
+	// 服务模块
+	#[runtime::pallet_index(12)]
+	pub type DivinationAi = pallet_divination_ai;
+
+	#[runtime::pallet_index(13)]
+	pub type DivinationMarket = pallet_divination_market;
+
+	#[runtime::pallet_index(14)]
+	pub type DivinationNft = pallet_divination_nft;
+
+	// 占卜模块 - 中华术数
+	#[runtime::pallet_index(20)]
+	pub type Meihua = pallet_meihua;
+
+	#[runtime::pallet_index(21)]
+	pub type Bazi = pallet_bazi_chart;
+
+	#[runtime::pallet_index(22)]
+	pub type Liuyao = pallet_liuyao;
+
+	#[runtime::pallet_index(23)]
+	pub type Qimen = pallet_qimen;
+
+	#[runtime::pallet_index(24)]
+	pub type Ziwei = pallet_ziwei;
+
+	#[runtime::pallet_index(25)]
+	pub type Xiaoliuren = pallet_xiaoliuren;
+
+	#[runtime::pallet_index(26)]
+	pub type Daliuren = pallet_daliuren;
+
+	// 占卜模块 - 西方占卜
+	#[runtime::pallet_index(30)]
+	pub type Tarot = pallet_tarot;
+
+	// ============================================================================
+	// Chat Pallets
+	// ============================================================================
+
+	#[runtime::pallet_index(40)]
+	pub type ChatPermission = pallet_chat_permission;
+
+	#[runtime::pallet_index(41)]
+	pub type ChatCore = pallet_chat_core;
+
+	#[runtime::pallet_index(42)]
+	pub type ChatGroup = pallet_chat_group;
+
+	// ============================================================================
+	// Trading Pallets
+	// ============================================================================
+
+	#[runtime::pallet_index(50)]
+	pub type TradingPricing = pallet_trading_pricing;
+
+	#[runtime::pallet_index(51)]
+	pub type TradingCredit = pallet_trading_credit;
+
+	#[runtime::pallet_index(52)]
+	pub type TradingMaker = pallet_trading_maker;
+
+	#[runtime::pallet_index(53)]
+	pub type TradingBridge = pallet_trading_bridge;
+
+	#[runtime::pallet_index(54)]
+	pub type TradingOtc = pallet_trading_otc;
+
+	// ============================================================================
+	// Escrow, Referral, IPFS Pallets
+	// ============================================================================
+
+	#[runtime::pallet_index(60)]
+	pub type Escrow = pallet_escrow;
+
+	#[runtime::pallet_index(61)]
+	pub type AffiliateReferral = pallet_referral;
+
+	#[runtime::pallet_index(62)]
+	pub type StardustIpfs = pallet_stardust_ipfs;
+
+	#[runtime::pallet_index(63)]
+	pub type Evidence = pallet_evidence;
+
+	#[runtime::pallet_index(64)]
+	pub type Arbitration = pallet_arbitration;
 }
