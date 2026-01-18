@@ -10,7 +10,22 @@ config.resolver.extraNodeModules = {
   buffer: require.resolve('buffer'),
 };
 
-// Fix for web: unstable_enablePackageExports
+// Enable package exports for proper ESM resolution
 config.resolver.unstable_enablePackageExports = true;
+
+// Transform @polkadot packages that use import.meta
+// These packages need to be transformed by Metro instead of being treated as external
+config.transformer = {
+  ...config.transformer,
+  getTransformOptions: async () => ({
+    transform: {
+      experimentalImportSupport: false,
+      inlineRequires: true,
+    },
+  }),
+};
+
+// Ensure @polkadot packages are transformed
+config.resolver.sourceExts = [...(config.resolver.sourceExts || []), 'cjs'];
 
 module.exports = config;

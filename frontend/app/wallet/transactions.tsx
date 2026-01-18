@@ -17,6 +17,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useWalletStore } from '@/stores';
+import { BottomNavBar } from '@/components/BottomNavBar';
 
 // 主题色
 const THEME_COLOR = '#B2955D';
@@ -125,6 +126,7 @@ export default function TransactionsPage() {
       ) : transactions.length === 0 ? (
         <ScrollView
           contentContainerStyle={styles.emptyContainer}
+          showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
@@ -152,6 +154,7 @@ export default function TransactionsPage() {
         <ScrollView
           style={styles.listContainer}
           contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
@@ -182,7 +185,7 @@ export default function TransactionsPage() {
                     { color: tx.type === 'send' ? '#E74C3C' : '#27AE60' },
                   ]}
                 >
-                  {tx.type === 'send' ? '-' : '+'}{tx.amount} STAR
+                  {tx.type === 'send' ? '-' : '+'}{tx.amount} DUST
                 </Text>
                 <View style={styles.txMeta}>
                   <View
@@ -199,25 +202,8 @@ export default function TransactionsPage() {
         </ScrollView>
       )}
 
-      {/* 底部导航 - 全局统一 */}
-      <View style={styles.bottomNav}>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/' as any)}>
-          <Text style={styles.bottomNavIcon}>🏠</Text>
-          <Text style={styles.bottomNavLabel}>首页</Text>
-        </Pressable>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/divination' as any)}>
-          <Text style={styles.bottomNavIcon}>🧭</Text>
-          <Text style={styles.bottomNavLabel}>占卜</Text>
-        </Pressable>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/chat' as any)}>
-          <Text style={styles.bottomNavIcon}>💬</Text>
-          <Text style={styles.bottomNavLabel}>消息</Text>
-        </Pressable>
-        <Pressable style={[styles.bottomNavItem, styles.bottomNavItemActive]} onPress={() => router.push('/profile' as any)}>
-          <Text style={styles.bottomNavIcon}>👤</Text>
-          <Text style={[styles.bottomNavLabel, styles.bottomNavLabelActive]}>我的</Text>
-        </Pressable>
-      </View>
+      {/* 底部导航栏 */}
+      <BottomNavBar activeTab="profile" />
     </View>
   );
 }

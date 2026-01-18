@@ -1,0 +1,269 @@
+# Implementation Plan: Bridge-OTC Module Merge
+
+## Overview
+
+本实现计划将 `pallet-bridge` 和 `pallet-otc-order` 合并为统一的 `pallet-exchange` 模块。采用增量开发方式，先创建新模块骨架，然后逐步迁移功能，最后进行存储迁移和清理。
+
+## Tasks
+
+- [ ] 1. 创建 pallet-exchange 模块骨架
+  - [ ] 1.1 创建模块目录结构和 Cargo.toml
+    - 创建 `pallets/trading/exchange/` 目录
+    - 配置依赖项 (frame-support, frame-system, pallet-escrow 等)
+    - _Requirements: 1.1, 1.2_
+  - [ ] 1.2 定义统一数据类型 (types.rs)
+    - 实现 `ExchangeType` 枚举
+    - 实现 `ExchangeStatus` 枚举
+    - 实现 `ExchangeRecord` 结构体
+    - 复用 `KycConfig` 和 `KycVerificationResult` 类型
+    - _Requirements: 1.1, 1.2_
+  - [ ]* 1.3 编写数据类型属性测试
+    - **Property 1: Data Structure Round-Trip Consistency**
+    - **Validates: Requirements 1.1, 1.2, 1.3**
+  - [ ] 1.4 定义 Config trait 和存储结构 (lib.rs)
+    - 定义完整的 `Config` trait
+    - 定义所有存储项 (Exchanges, UserExchanges, MakerExchanges 等)
+    - 定义事件和错误枚举
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
+
+- [ ] 2. Checkpoint - 验证模块骨架
+  - 确保模块可以编译
+  - 确保所有类型定义正确
+  - 如有问题请询问用户
+
+- [ ] 3. 实现官方桥接功能 (official.rs)
+  - [ ] 3.1 实现 official_swap 函数
+    - 验证最小金额
+    - 验证 TRON 地址格式
+    - 获取当前价格
+    - 锁定用户 DUST 到托管
+    - 创建 ExchangeRecord
+    - 发出 ExchangeCreated 事件
+    - _Requirements: 3.1, 3.4_
+  - [ ] 3.2 实现 complete_official_swap 函数
+    - 验证治理权限
+    - 验证交易状态
+    - 释放 DUST 到桥接账户
+    - 更新状态为 Completed
+    - 发出 ExchangeCompleted 事件
+    - _Requirements: 3.2, 3.4_
+  - [ ] 3.3 实现 set_bridge_account 函数
+    - 验证治理权限
+    - 设置桥接账户
+    - _Requirements: 3.2_
+  - [ ]* 3.4 编写官方桥接属性测试
+    - **Property 3: Official Bridge Lifecycle Invariants**
+    - **Validates: Requirements 3.1, 3.2, 3.3, 3.4**
+
+- [ ] 4. 实现做市商桥接功能 (maker_swap.rs)
+  - [ ] 4.1 实现 maker_swap 函数
+    - 验证最小金额
+    - 验证做市商存在且激活
+    - 验证 USDT 地址格式
+    - 获取当前价格并计算 USDT 金额
+    - 锁定用户 DUST 到托管
+    - 创建 ExchangeRecord
+    - 发出 ExchangeCreated 事件
+    - _Requirements: 4.1_
+  - [ ] 4.2 实现 mark_swap_complete 函数
+    - 验证调用者是做市商
+    - 验证交易状态为 Created
+    - 验证 TRC20 交易哈希唯一性
+    - 记录已使用的交易哈希
+    - 释放 DUST 到做市商
+    - 记录做市商信用分
+    - 更新状态为 Completed
+    - _Requirements: 4.2, 4.5_
+  - [ ] 4.3 实现 report_swap 函数
+    - 验证调用者是交易用户
+    - 验证交易状态允许举报
+    - 更新状态为 UserReported
+    - 发出事件
+    - _Requirements: 4.3, 4.4_
+  - [ ]* 4.4 编写做市商桥接属性测试
+    - **Property 4: Maker Bridge Lifecycle Invariants**
+    - **Property 5: TRC20 Transaction Hash Uniqueness**
+    - **Validates: Requirements 4.1, 4.2, 4.3, 4.4, 4.5**
+
+- [ ] 5. Checkpoint - 验证桥接功能
+  - 确保官方桥接和做市商桥接功能正常
+  - 运行所有测试
+  - 如有问题请询问用户
+
+- [ ] 6. 实现 KYC 验证功能 (kyc.rs)
+  - [ ] 6.1 实现 KYC 验证逻辑
+    - 实现 `enforce_kyc_requirement` 函数
+    - 检查 KYC 是否启用
+    - 检查豁免账户
+    - 验证身份认证等级
+    - _Requirements: 7.1, 7.2, 7.3_
+  - [ ] 6.2 实现 KYC 管理函数
+    - 实现 `enable_kyc_requirement`
+    - 实现 `disable_kyc_requirement`
+    - 实现 `update_min_judgment_level`
+    - 实现 `exempt_account_from_kyc`
+    - 实现 `remove_kyc_exemption`
+    - _Requirements: 7.1, 7.2, 7.3, 7.4_
+  - [ ]* 6.3 编写 KYC 属性测试
+    - **Property 11: KYC Enforcement**
+    - **Validates: Requirements 7.1, 7.2, 7.3, 7.4**
+
+- [ ] 7. 实现 OTC 订单功能 (otc.rs)
+  - [ ] 7.1 实现 create_order 函数
+    - 调用 KYC 验证
+    - 验证订单金额限制 (20-200 USD)
+    - 验证做市商存在且激活
+    - 检查并占用买家额度
+    - 锁定做市商 DUST 到托管
+    - 创建 ExchangeRecord
+    - 授予聊天权限
+    - 发出 ExchangeCreated 事件
+    - _Requirements: 5.1, 5.6, 9.1, 9.2, 9.3, 11.1_
+  - [ ] 7.2 实现 mark_paid 函数
+    - 验证调用者是买家
+    - 验证交易状态为 Created
+    - 可选记录 TRON 交易哈希
+    - 更新状态为 PaidOrCommitted
+    - _Requirements: 5.2_
+  - [ ] 7.3 实现 release_dust 函数
+    - 验证调用者是做市商
+    - 验证交易状态为 PaidOrCommitted
+    - 释放 DUST 到买家
+    - 释放买家额度
+    - 记录做市商和买家信用分
+    - 更新状态为 Released
+    - _Requirements: 5.3, 10.1, 10.4, 11.2_
+  - [ ] 7.4 实现 cancel_order 函数
+    - 验证调用者是买家或做市商
+    - 验证交易状态允许取消
+    - 退还 DUST 给做市商
+    - 释放买家额度
+    - 记录买家取消信用
+    - 更新状态为 Cancelled
+    - _Requirements: 5.4, 10.5, 11.2_
+  - [ ] 7.5 实现 dispute_order 函数
+    - 验证调用者是买家或做市商
+    - 验证交易状态允许争议
+    - 更新状态为 Disputed
+    - _Requirements: 5.5_
+  - [ ]* 7.6 编写 OTC 订单属性测试
+    - **Property 6: OTC Order Lifecycle Invariants**
+    - **Property 7: OTC Order Amount Limits**
+    - **Property 13: Buyer Quota Conservation**
+    - **Validates: Requirements 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 11.1, 11.2, 11.3**
+
+- [ ] 8. 实现首购订单功能 (first_purchase.rs)
+  - [ ] 8.1 实现 create_first_purchase 函数
+    - 调用 KYC 验证
+    - 验证用户未首购过
+    - 验证做市商首购配额
+    - 根据当前价格计算 DUST 数量
+    - 验证 DUST 数量在合理范围
+    - 锁定做市商 DUST 到托管
+    - 更新做市商首购计数
+    - 创建 ExchangeRecord
+    - 授予聊天权限
+    - _Requirements: 6.1, 6.2, 6.3_
+  - [ ] 8.2 更新 release_dust 支持首购
+    - 完成时标记用户为 HasFirstPurchased
+    - 减少做市商首购计数
+    - _Requirements: 6.4_
+  - [ ]* 8.3 编写首购订单属性测试
+    - **Property 8: First Purchase Uniqueness**
+    - **Property 9: First Purchase DUST Calculation**
+    - **Property 10: Maker First Purchase Quota**
+    - **Validates: Requirements 6.1, 6.2, 6.3, 6.4**
+
+- [ ] 9. Checkpoint - 验证 OTC 和首购功能
+  - 确保 OTC 订单和首购功能正常
+  - 运行所有测试
+  - 如有问题请询问用户
+
+- [ ] 10. 实现仲裁接口 (arbitration.rs)
+  - [ ] 10.1 实现 can_dispute_exchange 函数
+    - 检查交易是否存在
+    - 检查调用者是否为交易参与方
+    - _Requirements: 8.1_
+  - [ ] 10.2 实现 apply_arbitration_decision 函数
+    - 验证交易状态为 UserReported 或 Disputed
+    - 根据 Decision 类型执行资金分配
+    - 更新交易状态
+    - 记录做市商争议结果信用
+    - _Requirements: 8.2, 8.3, 8.4, 10.3_
+  - [ ]* 10.3 编写仲裁接口属性测试
+    - **Property 12: Arbitration Decision Application**
+    - **Validates: Requirements 8.1, 8.2, 8.3, 8.4**
+
+- [ ] 11. 实现存储迁移 (migration.rs)
+  - [ ] 11.1 实现 Bridge 存储迁移
+    - 迁移 SwapRequests 到 Exchanges
+    - 迁移 MakerSwaps 到 Exchanges
+    - 迁移 UserSwaps 到 UserExchanges
+    - 迁移 MakerSwapList 到 MakerExchanges
+    - 迁移 UsedTronTxHashes
+    - _Requirements: 14.1, 14.4_
+  - [ ] 11.2 实现 OTC 存储迁移
+    - 迁移 Orders 到 Exchanges
+    - 迁移 BuyerOrders 到 UserExchanges
+    - 迁移 MakerOrders 到 MakerExchanges
+    - 迁移 HasFirstPurchased
+    - 迁移 MakerFirstPurchaseCount
+    - 迁移 KycConfig 和 KycExemptAccounts
+    - _Requirements: 14.1, 14.4_
+  - [ ] 11.3 实现 ID 映射表
+    - 创建旧 ID 到新 ID 的映射
+    - 确保 NextExchangeId 正确设置
+    - _Requirements: 14.1_
+  - [ ]* 11.4 编写迁移属性测试
+    - **Property 14: Migration Data Preservation**
+    - **Validates: Requirements 14.1, 14.4**
+
+- [ ] 12. Checkpoint - 验证迁移功能
+  - 确保迁移逻辑正确
+  - 运行迁移测试
+  - 如有问题请询问用户
+
+- [ ] 13. 更新 Runtime 集成
+  - [ ] 13.1 更新 runtime/src/lib.rs
+    - 添加 pallet-exchange 配置
+    - 配置所有常量参数
+    - 添加到 construct_runtime!
+    - _Requirements: 12.1, 12.2, 12.3, 12.4_
+  - [ ] 13.2 更新 pallet-trading 统一接口
+    - 更新类型导出
+    - 更新聚合查询 API
+    - _Requirements: 14.2_
+  - [ ] 13.3 移除旧模块引用
+    - 从 runtime 移除 pallet-bridge
+    - 从 runtime 移除 pallet-otc-order
+    - 更新 Cargo.toml 依赖
+    - _Requirements: 14.3_
+
+- [ ] 14. 编写集成测试
+  - [ ]* 14.1 编写完整生命周期集成测试
+    - 测试官方桥接完整流程
+    - 测试做市商桥接完整流程
+    - 测试 OTC 订单完整流程
+    - 测试首购订单完整流程
+    - _Requirements: 3.1-3.4, 4.1-4.5, 5.1-5.6, 6.1-6.4_
+  - [ ]* 14.2 编写跨功能集成测试
+    - 测试 KYC + OTC 集成
+    - 测试仲裁 + 桥接集成
+    - 测试仲裁 + OTC 集成
+    - _Requirements: 7.1-7.4, 8.1-8.4_
+
+- [ ] 15. Final Checkpoint - 完成验收
+  - 确保所有测试通过
+  - 确保编译无警告
+  - 确保文档完整
+  - 如有问题请询问用户
+
+## Notes
+
+- Tasks marked with `*` are optional and can be skipped for faster MVP
+- Each task references specific requirements for traceability
+- Checkpoints ensure incremental validation
+- Property tests validate universal correctness properties
+- Unit tests validate specific examples and edge cases
+- 迁移任务 (Task 11) 是关键任务，需要特别注意数据完整性
+- Runtime 集成 (Task 13) 需要在迁移完成后进行

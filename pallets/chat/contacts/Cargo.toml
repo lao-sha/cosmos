@@ -1,0 +1,55 @@
+[package]
+name = "pallet-contacts"
+version = "0.1.0"
+license = "Unlicense"
+description = "Stardust 通讯录管理模块 - 联系人、分组、黑名单、好友申请"
+authors = ["Stardust Team"]
+edition = "2021"
+publish = false
+
+[dependencies]
+# 函数级中文注释：编解码支持
+codec = { workspace = true, features = ["derive"] }
+# 函数级中文注释：类型信息支持
+scale-info = { workspace = true, features = ["derive"], default-features = false }
+# 函数级中文注释：Substrate frame 支持库
+frame-support = { workspace = true, default-features = false }
+# 函数级中文注释：Substrate frame 系统库
+frame-system = { workspace = true, default-features = false }
+# 函数级中文注释：Substrate 运行时支持
+sp-runtime = { workspace = true, default-features = false }
+# 函数级中文注释：Substrate 标准库支持
+sp-std = { workspace = true, default-features = false }
+# 函数级中文注释：日志支持
+log = { workspace = true, default-features = false }
+
+# 基准测试依赖（可选）
+frame-benchmarking = { workspace = true, default-features = false, optional = true }
+
+[dev-dependencies]
+# 函数级中文注释：测试用 I/O 支持
+sp-io = { workspace = true }
+
+[features]
+default = ["std"]
+std = [
+  "codec/std",
+  "scale-info/std",
+  "frame-support/std",
+  "frame-system/std",
+  "sp-runtime/std",
+  "sp-std/std",
+  "log/std",
+  "frame-benchmarking?/std",
+]
+runtime-benchmarks = [
+  "frame-benchmarking/runtime-benchmarks",
+  "frame-support/runtime-benchmarks",
+  "frame-system/runtime-benchmarks",
+  "sp-runtime/runtime-benchmarks",
+]
+try-runtime = [
+  "frame-support/try-runtime",
+  "frame-system/try-runtime",
+  "sp-runtime/try-runtime",
+]

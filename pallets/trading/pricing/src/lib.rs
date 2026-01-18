@@ -464,28 +464,9 @@ pub mod pallet {
         /// - 价格偏离度计算
         /// - 简单的市场概览
         pub fn get_memo_reference_price() -> u64 {
-            // 冷启动检查
-            if !ColdStartExited::<T>::get() {
-                let threshold = ColdStartThreshold::<T>::get();
-                let otc_agg = OtcPriceAggregate::<T>::get();
-                let bridge_agg = BridgePriceAggregate::<T>::get();
-                
-                // 如果两个市场都未达阈值，使用默认价格
-                if otc_agg.total_dust < threshold && bridge_agg.total_dust < threshold {
-                    return DefaultPrice::<T>::get();
-                }
-                
-                // 达到阈值，退出冷启动
-                ColdStartExited::<T>::put(true);
-                
-                // 发出退出冷启动事件
-                let market_price = Self::calculate_weighted_average();
-                Self::deposit_event(Event::ColdStartExited {
-                    final_threshold: threshold,
-                    otc_volume: otc_agg.total_dust,
-                    bridge_volume: bridge_agg.total_dust,
-                    market_price,
-                });
+            // 🆕 2026-01-18: 使用统一的冷启动检查函数，避免重复触发事件
+            if Self::check_cold_start_and_maybe_exit() {
+                return DefaultPrice::<T>::get();
             }
             
             // 正常市场价格计算
@@ -520,32 +501,56 @@ pub mod pallet {
         /// - 清算价格参考
         /// - 市场指数计算
         pub fn get_dust_market_price_weighted() -> u64 {
-            // 冷启动检查
-            if !ColdStartExited::<T>::get() {
-                let threshold = ColdStartThreshold::<T>::get();
-                let otc_agg = OtcPriceAggregate::<T>::get();
-                let bridge_agg = BridgePriceAggregate::<T>::get();
-                
-                // 如果两个市场都未达阈值，使用默认价格
-                if otc_agg.total_dust < threshold && bridge_agg.total_dust < threshold {
-                    return DefaultPrice::<T>::get();
-                }
-                
-                // 达到阈值，退出冷启动
-                ColdStartExited::<T>::put(true);
-                
-                // 发出退出冷启动事件
-                let market_price = Self::calculate_weighted_average();
-                Self::deposit_event(Event::ColdStartExited {
-                    final_threshold: threshold,
-                    otc_volume: otc_agg.total_dust,
-                    bridge_volume: bridge_agg.total_dust,
-                    market_price,
-                });
+            // 🆕 2026-01-18: 使用统一的冷启动检查函数，避免重复触发事件
+            if Self::check_cold_start_and_maybe_exit() {
+                return DefaultPrice::<T>::get();
             }
             
             // 正常市场价格计算
             Self::calculate_weighted_average()
+        }
+        
+        // ===== 🆕 2026-01-18: 冷启动检查统一函数 =====
+        
+        /// 函数级详细中文注释：检查并处理冷启动退出
+        /// 
+        /// ## 功能说明
+        /// 统一的冷启动检查函数，避免在多个价格查询函数中重复触发事件。
+        /// 
+        /// ## 返回值
+        /// - `true`: 仍在冷启动阶段，应使用默认价格
+        /// - `false`: 已退出冷启动，可使用市场价格
+        /// 
+        /// ## 事件触发
+        /// 仅在首次达到阈值时触发 `ColdStartExited` 事件（由存储状态保证）
+        fn check_cold_start_and_maybe_exit() -> bool {
+            // 已退出冷启动，直接返回
+            if ColdStartExited::<T>::get() {
+                return false;
+            }
+            
+            let threshold = ColdStartThreshold::<T>::get();
+            let otc_agg = OtcPriceAggregate::<T>::get();
+            let bridge_agg = BridgePriceAggregate::<T>::get();
+            
+            // 未达阈值，仍在冷启动阶段
+            if otc_agg.total_dust < threshold && bridge_agg.total_dust < threshold {
+                return true;
+            }
+            
+            // 达到阈值，退出冷启动（仅执行一次，由 ColdStartExited 存储保证）
+            ColdStartExited::<T>::put(true);
+            
+            // 发出退出冷启动事件
+            let market_price = Self::calculate_weighted_average();
+            Self::deposit_event(Event::ColdStartExited {
+                final_threshold: threshold,
+                otc_volume: otc_agg.total_dust,
+                bridge_volume: bridge_agg.total_dust,
+                market_price,
+            });
+            
+            false
         }
         
         /// 函数级详细中文注释：内部辅助函数 - 计算加权平均价格

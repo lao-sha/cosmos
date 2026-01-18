@@ -25,6 +25,7 @@ log = { workspace = true }
 
 # 依赖其他pallet
 pallet-timestamp = { workspace = true }
+pallet-trading-common = { workspace = true }
 
 [dev-dependencies]
 pallet-balances = { workspace = true }
@@ -45,6 +46,7 @@ std = [
 	"sp-io/std",
 	"log/std",
 	"pallet-timestamp/std",
+	"pallet-trading-common/std",
 ]
 runtime-benchmarks = [
 	"frame-benchmarking/runtime-benchmarks",

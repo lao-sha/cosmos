@@ -60,39 +60,22 @@ pub mod pallet {
     use sp_core::H256;
     use pallet_escrow::Escrow as EscrowTrait;
     use pallet_chat_permission::SceneAuthorizationManager;
+    use pallet_trading_credit::quota::BuyerQuotaInterface;
+    
+    // 🆕 v0.4.0: 从 pallet-trading-common 导入公共类型和 Trait
+    use pallet_trading_common::{
+        TronAddress,
+        MomentOf,
+        PricingProvider,
+        MakerInterface,
+        MakerCreditInterface,
+    };
+    // MakerApplicationInfo 通过 MakerInterface::get_maker_application 返回
 
     /// 函数级详细中文注释：Balance 类型别名
     pub type BalanceOf<T> = <<T as Config>::Currency as Currency<
         <T as frame_system::Config>::AccountId,
     >>::Balance;
-    
-    /// 函数级详细中文注释：时间戳类型别名（毫秒）
-    pub type MomentOf = u64;
-    
-    /// 函数级详细中文注释：TRON 地址类型（固定 34 字节）
-    pub type TronAddress = BoundedVec<u8, ConstU32<34>>;
-    
-    /// 函数级详细中文注释：做市商信用接口
-    /// 用于记录做市商的订单完成、超时和争议结果
-    pub trait MakerCreditInterface {
-        /// 记录做市商订单完成（提升信用分）
-        fn record_maker_order_completed(
-            maker_id: u64,
-            order_id: u64,
-            response_time_seconds: u32,
-        ) -> DispatchResult;
-        /// 记录做市商订单超时（降低信用分）
-        fn record_maker_order_timeout(
-            maker_id: u64,
-            order_id: u64,
-        ) -> DispatchResult;
-        /// 记录做市商争议结果（根据结果调整信用分）
-        fn record_maker_dispute_result(
-            maker_id: u64,
-            order_id: u64,
-            maker_win: bool,
-        ) -> DispatchResult;
-    }
     
     // ===== 数据结构 =====
     
@@ -115,6 +98,95 @@ pub mod pallet {
         Closed,
         /// 已过期（1小时未支付，自动取消）
         Expired,
+    }
+    
+    // ===== 🆕 2026-01-18: 买家押金机制 =====
+    
+    /// 函数级详细中文注释：押金状态枚举
+    #[derive(Encode, Decode, Clone, Eq, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen, Default)]
+    pub enum DepositStatus {
+        /// 无押金（首购/信用免押）
+        #[default]
+        None,
+        /// 押金已锁定
+        Locked,
+        /// 押金已释放（订单完成）
+        Released,
+        /// 押金已没收（超时/取消/争议败诉）
+        Forfeited,
+        /// 押金部分没收（买家主动取消）
+        PartiallyForfeited,
+    }
+    
+    /// 函数级详细中文注释：争议状态枚举
+    #[derive(Encode, Decode, Clone, Eq, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+    pub enum DisputeStatus {
+        /// 等待做市商响应
+        WaitingMakerResponse,
+        /// 等待仲裁
+        WaitingArbitration,
+        /// 买家胜诉
+        BuyerWon,
+        /// 做市商胜诉
+        MakerWon,
+        /// 已取消
+        Cancelled,
+    }
+    
+    /// 函数级详细中文注释：争议记录结构
+    #[derive(Encode, Decode, Clone, Eq, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+    #[scale_info(skip_type_params(T))]
+    pub struct Dispute<T: Config> {
+        /// 订单ID
+        pub order_id: u64,
+        /// 发起方（买家）
+        pub initiator: T::AccountId,
+        /// 被告方（做市商）
+        pub respondent: T::AccountId,
+        /// 买家争议押金
+        pub buyer_dispute_deposit: BalanceOf<T>,
+        /// 做市商争议押金
+        pub maker_dispute_deposit: BalanceOf<T>,
+        /// 发起时间（Unix秒）
+        pub created_at: MomentOf,
+        /// 做市商响应截止时间
+        pub response_deadline: MomentOf,
+        /// 仲裁截止时间
+        pub arbitration_deadline: MomentOf,
+        /// 争议状态
+        pub status: DisputeStatus,
+        /// 买家证据 CID
+        pub buyer_evidence: Option<pallet_trading_common::Cid>,
+        /// 做市商证据 CID
+        pub maker_evidence: Option<pallet_trading_common::Cid>,
+    }
+    
+    /// 🆕 2026-01-18: 订单时间信息结构（供 RPC 查询使用）
+    #[derive(Encode, Decode, Clone, Eq, PartialEq, RuntimeDebug, TypeInfo)]
+    #[scale_info(skip_type_params(T))]
+    pub struct OrderTimeInfo<T: Config> {
+        /// 订单ID
+        pub order_id: u64,
+        /// 做市商ID
+        pub maker_id: u64,
+        /// 买家账户
+        pub buyer: T::AccountId,
+        /// DUST 数量
+        pub dust_amount: BalanceOf<T>,
+        /// USDT 金额
+        pub usdt_amount: BalanceOf<T>,
+        /// 创建时间（Unix秒）
+        pub created_at: u64,
+        /// 过期时间（Unix秒）
+        pub expire_at: u64,
+        /// 剩余秒数（0表示已过期）
+        pub remaining_seconds: u64,
+        /// 可读剩余时间（如 "45m", "1h 30m"）
+        pub remaining_readable: sp_std::vec::Vec<u8>,
+        /// 订单状态（0-7）
+        pub state: u8,
+        /// 是否已过期（仅 Created 状态）
+        pub is_expired: bool,
     }
     
     /// 函数级详细中文注释：OTC订单结构
@@ -153,10 +225,37 @@ pub mod pallet {
         pub completed_at: Option<MomentOf>,
         /// 是否为首购订单
         pub is_first_purchase: bool,
+        // ===== 🆕 2026-01-18: 买家押金字段 =====
+        /// 买家押金金额（0 表示免押金）
+        pub buyer_deposit: BalanceOf<T>,
+        /// 押金状态
+        pub deposit_status: DepositStatus,
     }
     
     #[pallet::pallet]
     pub struct Pallet<T>(_);
+    
+    // ===== 🆕 2026-01-18: 自动过期处理 Hooks =====
+    
+    #[pallet::hooks]
+    impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+        /// 函数级详细中文注释：区块初始化时检查过期订单
+        /// 
+        /// ## 功能说明
+        /// - 每 100 个区块检查一次（约 10 分钟）
+        /// - 仅处理 Created 状态的订单
+        /// - 每次最多处理 10 个过期订单，避免区块过重
+        fn on_initialize(now: BlockNumberFor<T>) -> Weight {
+            // 每100个区块检查一次
+            let check_interval: u32 = 100;
+            let now_u32: u32 = now.saturated_into();
+            if now_u32 % check_interval != 0 {
+                return Weight::zero();
+            }
+            
+            Self::process_expired_orders()
+        }
+    }
     
     /// 函数级详细中文注释：OTC订单模块配置 trait
     #[pallet::config]
@@ -180,7 +279,8 @@ pub mod pallet {
             + pallet_trading_credit::quota::BuyerQuotaInterface<Self::AccountId>;
 
         /// 做市商信用记录接口
-        type MakerCredit: MakerCreditInterface;
+        /// 🆕 2026-01-18: 统一使用 pallet_trading_common::MakerCreditInterface
+        type MakerCredit: pallet_trading_common::MakerCreditInterface;
 
         /// 定价服务接口
         type Pricing: PricingProvider<BalanceOf<Self>>;
@@ -241,33 +341,56 @@ pub mod pallet {
         #[pallet::constant]
         type MaxFirstPurchaseOrdersPerMaker: Get<u32>;
 
+        // ===== 🆕 2026-01-18: 买家押金配置 =====
+        
+        /// 最小押金金额
+        #[pallet::constant]
+        type MinDeposit: Get<BalanceOf<Self>>;
+        
+        /// 低风险押金比例（bps，300 = 3%，信用分 50-69）
+        #[pallet::constant]
+        type DepositRateLow: Get<u16>;
+        
+        /// 中风险押金比例（bps，500 = 5%，信用分 30-49）
+        #[pallet::constant]
+        type DepositRateMedium: Get<u16>;
+        
+        /// 高风险押金比例（bps，1000 = 10%，信用分 < 30）
+        #[pallet::constant]
+        type DepositRateHigh: Get<u16>;
+        
+        /// 免押金信用分阈值（默认 70）
+        #[pallet::constant]
+        type CreditScoreExempt: Get<u16>;
+        
+        /// 免押金最少完成订单数（默认 5）
+        #[pallet::constant]
+        type MinOrdersForExempt: Get<u32>;
+        
+        /// 取消订单押金扣除比例（bps，3000 = 30%）
+        #[pallet::constant]
+        type CancelPenaltyRate: Get<u16>;
+        
+        /// 争议押金金额（固定值，如 10 USDT 对应的 DUST）
+        #[pallet::constant]
+        type DisputeDeposit: Get<BalanceOf<Self>>;
+        
+        /// 争议响应超时时间（秒，默认 24 小时 = 86400）
+        #[pallet::constant]
+        type DisputeResponseTimeout: Get<u64>;
+        
+        /// 争议仲裁超时时间（秒，默认 48 小时 = 172800）
+        #[pallet::constant]
+        type DisputeArbitrationTimeout: Get<u64>;
+        
+        /// 仲裁员起源（用于争议判定）
+        type ArbitratorOrigin: EnsureOrigin<Self::RuntimeOrigin>;
+
         /// 权重信息
         type WeightInfo: WeightInfo;
     }
     
-    /// 函数级详细中文注释：定价服务 trait
-    pub trait PricingProvider<Balance> {
-        /// 获取 DUST/USD 汇率（精度 10^6）
-        fn get_dust_to_usd_rate() -> Option<Balance>;
-    }
-    
-    /// 函数级详细中文注释：Maker Pallet 接口
-    pub trait MakerInterface<AccountId, Balance> {
-        /// 查询做市商申请信息
-        fn get_maker_application(maker_id: u64) -> Option<MakerApplicationInfo<AccountId, Balance>>;
-        /// 检查做市商是否激活
-        fn is_maker_active(maker_id: u64) -> bool;
-    }
-    
-    /// 函数级详细中文注释：做市商申请信息（简化版）
-    #[derive(Clone, Encode, Decode, TypeInfo, MaxEncodedLen)]
-    #[scale_info(skip_type_params(AccountId, Balance))]
-    pub struct MakerApplicationInfo<AccountId, Balance> {
-        pub account: AccountId,
-        pub tron_address: BoundedVec<u8, ConstU32<34>>,
-        pub is_active: bool,
-        pub _phantom: sp_std::marker::PhantomData<Balance>,
-    }
+    // 🆕 v0.4.0: PricingProvider, MakerInterface, MakerApplicationInfo 已移至 common 模块
 
     /// 函数级详细中文注释：Identity 验证 Provider trait
     /// 用于查询账户的身份认证状态，避免直接依赖 pallet_identity::Config
@@ -292,12 +415,7 @@ pub mod pallet {
         }
     }
     
-    #[allow(dead_code)]
-    impl<Balance> PricingProvider<Balance> for () {
-        fn get_dust_to_usd_rate() -> Option<Balance> {
-            None
-        }
-    }
+    // 🆕 v0.4.0: PricingProvider 空实现已移至 common 模块
     
     // ===== 存储 =====
     
@@ -389,6 +507,35 @@ pub mod pallet {
         BoundedVec<(H256, BlockNumberFor<T>), ConstU32<10000>>,
         ValueQuery,
     >;
+
+    // ===== 🆕 2026-01-18: 买家押金存储 =====
+    
+    /// 函数级详细中文注释：争议记录
+    #[pallet::storage]
+    #[pallet::getter(fn disputes)]
+    pub type Disputes<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,  // order_id
+        Dispute<T>,
+        OptionQuery,
+    >;
+    
+    /// 函数级详细中文注释：买家已完成订单计数（用于判断信用免押）
+    #[pallet::storage]
+    #[pallet::getter(fn buyer_completed_order_count)]
+    pub type BuyerCompletedOrderCount<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        T::AccountId,
+        u32,
+        ValueQuery,
+    >;
+    
+    /// 函数级详细中文注释：押金池总余额（用于审计）
+    #[pallet::storage]
+    #[pallet::getter(fn total_deposit_pool_balance)]
+    pub type TotalDepositPoolBalance<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
     // ===== KYC存储 =====
 
@@ -507,6 +654,68 @@ pub mod pallet {
             account: T::AccountId,
             reason_code: u8,
         },
+        
+        // ===== 🆕 2026-01-18: 自动过期事件 =====
+        
+        /// 订单已自动过期
+        OrderAutoExpired {
+            order_id: u64,
+            buyer: T::AccountId,
+            maker_id: u64,
+            dust_amount: BalanceOf<T>,
+        },
+        /// 过期订单批量处理完成
+        ExpiredOrdersProcessed {
+            count: u32,
+            block_number: BlockNumberFor<T>,
+        },
+        
+        // ===== 🆕 2026-01-18: 买家押金事件 =====
+        
+        /// 买家押金已锁定
+        BuyerDepositLocked {
+            order_id: u64,
+            buyer: T::AccountId,
+            deposit_amount: BalanceOf<T>,
+        },
+        /// 买家押金已释放（订单完成）
+        BuyerDepositReleased {
+            order_id: u64,
+            buyer: T::AccountId,
+            refund_amount: BalanceOf<T>,
+        },
+        /// 买家押金已没收（超时）
+        BuyerDepositForfeited {
+            order_id: u64,
+            buyer: T::AccountId,
+            maker_id: u64,
+            forfeited_amount: BalanceOf<T>,
+        },
+        /// 买家押金部分没收（主动取消）
+        BuyerDepositPartiallyForfeited {
+            order_id: u64,
+            buyer: T::AccountId,
+            maker_id: u64,
+            forfeited_amount: BalanceOf<T>,
+            refund_amount: BalanceOf<T>,
+        },
+        /// 争议已发起
+        DisputeInitiated {
+            order_id: u64,
+            buyer: T::AccountId,
+            dispute_deposit: BalanceOf<T>,
+        },
+        /// 做市商已响应争议
+        DisputeResponded {
+            order_id: u64,
+            maker: T::AccountId,
+            dispute_deposit: BalanceOf<T>,
+        },
+        /// 争议已判定
+        DisputeResolved {
+            order_id: u64,
+            buyer_wins: bool,
+        },
     }
     
     // ===== 错误 =====
@@ -571,6 +780,23 @@ pub mod pallet {
         AccountAlreadyExempted,
         /// 账户不在豁免列表中
         AccountNotExempted,
+        
+        // ===== 🆕 2026-01-18: 买家押金相关错误 =====
+        
+        /// 买家押金余额不足
+        InsufficientDepositBalance,
+        /// 争议不存在
+        DisputeNotFound,
+        /// 争议状态不正确
+        InvalidDisputeStatus,
+        /// 非争议发起方
+        NotDisputeInitiator,
+        /// 非争议响应方
+        NotDisputeRespondent,
+        /// 争议响应已超时
+        DisputeResponseTimeout,
+        /// 不是订单买家
+        NotOrderBuyer,
     }
     
     // ===== Extrinsics =====
@@ -845,6 +1071,91 @@ pub mod pallet {
             Self::deposit_event(Event::AccountRemovedFromKycExemption { account });
             Ok(())
         }
+        
+        // ===== 🆕 2026-01-18: 争议相关 Extrinsics =====
+        
+        /// 函数级详细中文注释：买家发起争议
+        ///
+        /// ## 适用场景
+        /// 买家已付款但做市商未确认放款时，买家可发起争议
+        ///
+        /// ## 流程
+        /// 1. 验证订单状态为 PaidOrCommitted
+        /// 2. 验证调用者是订单买家
+        /// 3. 锁定买家争议押金
+        /// 4. 创建争议记录
+        /// 5. 更新订单状态为 Disputed
+        ///
+        /// # 参数
+        /// - `origin`: 调用者（买家）
+        /// - `order_id`: 订单ID
+        /// - `evidence_cid`: 付款凭证 CID（IPFS 哈希）
+        #[pallet::call_index(11)]
+        #[pallet::weight(<T as Config>::WeightInfo::create_order())]
+        pub fn initiate_dispute(
+            origin: OriginFor<T>,
+            order_id: u64,
+            evidence_cid: pallet_trading_common::Cid,
+        ) -> DispatchResult {
+            let buyer = ensure_signed(origin)?;
+            Self::do_initiate_dispute(&buyer, order_id, evidence_cid)
+        }
+        
+        /// 函数级详细中文注释：做市商响应争议
+        ///
+        /// ## 适用场景
+        /// 买家发起争议后，做市商需在24小时内响应并提交反驳证据
+        ///
+        /// ## 流程
+        /// 1. 验证争议存在且状态为 WaitingMakerResponse
+        /// 2. 验证调用者是订单做市商
+        /// 3. 验证响应未超时
+        /// 4. 锁定做市商争议押金
+        /// 5. 更新争议状态为 WaitingArbitration
+        ///
+        /// # 参数
+        /// - `origin`: 调用者（做市商）
+        /// - `order_id`: 订单ID
+        /// - `evidence_cid`: 反驳证据 CID
+        #[pallet::call_index(12)]
+        #[pallet::weight(<T as Config>::WeightInfo::create_order())]
+        pub fn respond_dispute(
+            origin: OriginFor<T>,
+            order_id: u64,
+            evidence_cid: pallet_trading_common::Cid,
+        ) -> DispatchResult {
+            let maker = ensure_signed(origin)?;
+            Self::do_respond_dispute(&maker, order_id, evidence_cid)
+        }
+        
+        /// 函数级详细中文注释：仲裁判定争议
+        ///
+        /// ## 权限
+        /// 仅限仲裁员或治理委员会调用
+        ///
+        /// ## 流程
+        /// 1. 验证争议存在且状态为 WaitingArbitration
+        /// 2. 根据判定结果分配押金
+        /// 3. 更新订单和争议状态
+        ///
+        /// ## 判定结果
+        /// - buyer_wins = true: 买家胜诉，退还买家所有押金 + 做市商争议押金
+        /// - buyer_wins = false: 做市商胜诉，没收买家所有押金
+        ///
+        /// # 参数
+        /// - `origin`: 仲裁员起源
+        /// - `order_id`: 订单ID
+        /// - `buyer_wins`: 买家是否胜诉
+        #[pallet::call_index(13)]
+        #[pallet::weight(<T as Config>::WeightInfo::create_order())]
+        pub fn resolve_dispute(
+            origin: OriginFor<T>,
+            order_id: u64,
+            buyer_wins: bool,
+        ) -> DispatchResult {
+            T::ArbitratorOrigin::ensure_origin(origin)?;
+            Self::do_resolve_dispute(order_id, buyer_wins)
+        }
     }
     
     // ===== 内部实现 =====
@@ -923,6 +1234,15 @@ pub mod pallet {
                 order_id,
                 dust_amount,
             )?;
+            
+            // 🆕 2026-01-18: 计算并锁定买家押金
+            let buyer_deposit = Self::calculate_buyer_deposit(buyer, dust_amount);
+            let deposit_status = if buyer_deposit.is_zero() {
+                DepositStatus::None
+            } else {
+                Self::lock_buyer_deposit(buyer, buyer_deposit)?;
+                DepositStatus::Locked
+            };
 
             // 10. 获取当前时间并计算超时时间
             let now = T::Timestamp::now().as_secs().saturated_into::<u64>();
@@ -951,6 +1271,8 @@ pub mod pallet {
                 epay_trade_no: None,
                 completed_at: None,
                 is_first_purchase: false,
+                buyer_deposit,
+                deposit_status,
             };
 
             // 12. 保存订单
@@ -977,6 +1299,15 @@ pub mod pallet {
                 dust_amount,
                 is_first_purchase: false,
             });
+            
+            // 🆕 2026-01-18: 发出押金锁定事件
+            if !buyer_deposit.is_zero() {
+                Self::deposit_event(Event::BuyerDepositLocked {
+                    order_id,
+                    buyer: buyer.clone(),
+                    deposit_amount: buyer_deposit,
+                });
+            }
 
             // 16. 🆕 2025-11-28: 授予买卖双方聊天权限
             // 订单创建后，买家和做市商之间自动获得基于订单场景的聊天权限
@@ -1116,6 +1447,11 @@ pub mod pallet {
                 .try_into()
                 .map_err(|_| Error::<T>::CalculationOverflow)?;
             
+            // 🆕 2026-01-18: 首购用户免押金
+            use sp_runtime::traits::Zero;
+            let buyer_deposit: BalanceOf<T> = Zero::zero();
+            let deposit_status = DepositStatus::None;
+            
             let order = Order {
                 maker_id,
                 maker: maker_app.account.clone(),
@@ -1133,6 +1469,8 @@ pub mod pallet {
                 epay_trade_no: None,
                 completed_at: None,
                 is_first_purchase: true,
+                buyer_deposit,
+                deposit_status,
             };
             
             // 14. 保存订单
@@ -1341,6 +1679,29 @@ pub mod pallet {
                     *count = count.saturating_sub(1);
                 });
             }
+            
+            // 🆕 2026-01-18: 退还买家押金
+            if !order.buyer_deposit.is_zero() {
+                let _ = Self::release_buyer_deposit(&order.taker, order.buyer_deposit);
+                
+                // 更新押金状态
+                Orders::<T>::mutate(order_id, |o| {
+                    if let Some(ord) = o {
+                        ord.deposit_status = DepositStatus::Released;
+                    }
+                });
+                
+                Self::deposit_event(Event::BuyerDepositReleased {
+                    order_id,
+                    buyer: order.taker.clone(),
+                    refund_amount: order.buyer_deposit,
+                });
+            }
+            
+            // 🆕 2026-01-18: 更新买家完成订单计数
+            BuyerCompletedOrderCount::<T>::mutate(&order.taker, |count| {
+                *count = count.saturating_add(1);
+            });
 
             // 10. 发出事件
             Self::deposit_event(Event::OrderStateChanged {
@@ -1416,6 +1777,66 @@ pub mod pallet {
                     *count = count.saturating_sub(1);
                 });
             }
+            
+            // 🆕 2026-01-18: 处理买家押金
+            if !order.buyer_deposit.is_zero() {
+                let is_buyer_cancel = order.taker == *who;
+                
+                if is_buyer_cancel {
+                    // 买家主动取消：30% 没收给做市商，70% 退还
+                    let penalty_rate = T::CancelPenaltyRate::get(); // bps, 3000 = 30%
+                    // penalty = deposit * rate / 10000
+                    let penalty_rate_balance: BalanceOf<T> = penalty_rate.into();
+                    let divisor: BalanceOf<T> = 10000u32.into();
+                    let penalty = order.buyer_deposit * penalty_rate_balance / divisor;
+                    let refund = if order.buyer_deposit > penalty {
+                        order.buyer_deposit - penalty
+                    } else {
+                        Zero::zero()
+                    };
+                    
+                    // 没收部分给做市商
+                    if !penalty.is_zero() {
+                        let _ = Self::forfeit_buyer_deposit(&order.maker, penalty);
+                    }
+                    
+                    // 退还剩余给买家
+                    if !refund.is_zero() {
+                        let _ = Self::release_buyer_deposit(&order.taker, refund);
+                    }
+                    
+                    // 更新押金状态
+                    Orders::<T>::mutate(order_id, |o| {
+                        if let Some(ord) = o {
+                            ord.deposit_status = DepositStatus::PartiallyForfeited;
+                        }
+                    });
+                    
+                    Self::deposit_event(Event::BuyerDepositPartiallyForfeited {
+                        order_id,
+                        buyer: order.taker.clone(),
+                        maker_id: order.maker_id,
+                        forfeited_amount: penalty,
+                        refund_amount: refund,
+                    });
+                } else {
+                    // 做市商取消：100% 退还买家
+                    let _ = Self::release_buyer_deposit(&order.taker, order.buyer_deposit);
+                    
+                    // 更新押金状态
+                    Orders::<T>::mutate(order_id, |o| {
+                        if let Some(ord) = o {
+                            ord.deposit_status = DepositStatus::Released;
+                        }
+                    });
+                    
+                    Self::deposit_event(Event::BuyerDepositReleased {
+                        order_id,
+                        buyer: order.taker.clone(),
+                        refund_amount: order.buyer_deposit,
+                    });
+                }
+            }
 
             // 9. 发出事件
             Self::deposit_event(Event::OrderStateChanged {
@@ -1479,6 +1900,270 @@ pub mod pallet {
             
             Ok(())
         }
+        
+        // ===== 🆕 2026-01-18: 争议处理内部函数 =====
+        
+        /// 函数级详细中文注释：买家发起争议（内部实现）
+        /// 
+        /// ## 处理步骤
+        /// 1. 验证订单状态为 PaidOrCommitted
+        /// 2. 验证调用者是订单买家
+        /// 3. 验证订单尚未存在争议
+        /// 4. 锁定买家争议押金
+        /// 5. 创建争议记录
+        /// 6. 更新订单状态为 Disputed
+        pub fn do_initiate_dispute(
+            buyer: &T::AccountId,
+            order_id: u64,
+            evidence_cid: pallet_trading_common::Cid,
+        ) -> DispatchResult {
+            use sp_runtime::traits::Zero;
+            use frame_support::traits::ExistenceRequirement;
+            
+            // 1. 获取订单
+            let mut order = Orders::<T>::get(order_id)
+                .ok_or(Error::<T>::OrderNotFound)?;
+            
+            // 2. 验证订单状态（只有 PaidOrCommitted 状态可以发起争议）
+            ensure!(
+                matches!(order.state, OrderState::PaidOrCommitted),
+                Error::<T>::InvalidOrderStatus
+            );
+            
+            // 3. 验证调用者是买家
+            ensure!(order.taker == *buyer, Error::<T>::NotOrderBuyer);
+            
+            // 4. 验证订单尚未存在争议
+            ensure!(
+                !Disputes::<T>::contains_key(order_id),
+                Error::<T>::InvalidDisputeStatus
+            );
+            
+            // 5. 锁定买家争议押金
+            let dispute_deposit = T::DisputeDeposit::get();
+            T::Currency::transfer(
+                buyer,
+                &Self::deposit_pool_account(),
+                dispute_deposit,
+                ExistenceRequirement::KeepAlive,
+            ).map_err(|_| Error::<T>::InsufficientDepositBalance)?;
+            
+            // 更新押金池余额
+            TotalDepositPoolBalance::<T>::mutate(|balance| {
+                *balance = *balance + dispute_deposit;
+            });
+            
+            // 6. 计算截止时间
+            let now = T::Timestamp::now().as_secs().saturated_into::<u64>();
+            let response_deadline = now + T::DisputeResponseTimeout::get();
+            let arbitration_deadline = now + T::DisputeArbitrationTimeout::get();
+            
+            // 7. 创建争议记录
+            let dispute = Dispute {
+                order_id,
+                initiator: buyer.clone(),
+                respondent: order.maker.clone(),
+                buyer_dispute_deposit: dispute_deposit,
+                maker_dispute_deposit: Zero::zero(),
+                created_at: now,
+                response_deadline,
+                arbitration_deadline,
+                status: DisputeStatus::WaitingMakerResponse,
+                buyer_evidence: Some(evidence_cid),
+                maker_evidence: None,
+            };
+            
+            Disputes::<T>::insert(order_id, dispute);
+            
+            // 8. 更新订单状态
+            let old_state = order.state.clone();
+            order.state = OrderState::Disputed;
+            Orders::<T>::insert(order_id, order);
+            
+            // 9. 发出事件
+            Self::deposit_event(Event::OrderStateChanged {
+                order_id,
+                old_state: Self::state_to_u8(&old_state),
+                new_state: Self::state_to_u8(&OrderState::Disputed),
+                actor: Some(buyer.clone()),
+            });
+            
+            Self::deposit_event(Event::DisputeInitiated {
+                order_id,
+                buyer: buyer.clone(),
+                dispute_deposit,
+            });
+            
+            Ok(())
+        }
+        
+        /// 函数级详细中文注释：做市商响应争议（内部实现）
+        /// 
+        /// ## 处理步骤
+        /// 1. 验证争议存在且状态为 WaitingMakerResponse
+        /// 2. 验证调用者是订单做市商
+        /// 3. 验证响应未超时
+        /// 4. 锁定做市商争议押金
+        /// 5. 更新争议状态为 WaitingArbitration
+        pub fn do_respond_dispute(
+            maker: &T::AccountId,
+            order_id: u64,
+            evidence_cid: pallet_trading_common::Cid,
+        ) -> DispatchResult {
+            use frame_support::traits::ExistenceRequirement;
+            
+            // 1. 获取争议记录
+            let mut dispute = Disputes::<T>::get(order_id)
+                .ok_or(Error::<T>::DisputeNotFound)?;
+            
+            // 2. 验证争议状态
+            ensure!(
+                dispute.status == DisputeStatus::WaitingMakerResponse,
+                Error::<T>::InvalidDisputeStatus
+            );
+            
+            // 3. 验证调用者是做市商
+            ensure!(dispute.respondent == *maker, Error::<T>::NotDisputeRespondent);
+            
+            // 4. 验证响应未超时
+            let now = T::Timestamp::now().as_secs().saturated_into::<u64>();
+            ensure!(now <= dispute.response_deadline, Error::<T>::DisputeResponseTimeout);
+            
+            // 5. 锁定做市商争议押金
+            let dispute_deposit = T::DisputeDeposit::get();
+            T::Currency::transfer(
+                maker,
+                &Self::deposit_pool_account(),
+                dispute_deposit,
+                ExistenceRequirement::KeepAlive,
+            ).map_err(|_| Error::<T>::InsufficientDepositBalance)?;
+            
+            // 更新押金池余额
+            TotalDepositPoolBalance::<T>::mutate(|balance| {
+                *balance = *balance + dispute_deposit;
+            });
+            
+            // 6. 更新争议记录
+            dispute.maker_dispute_deposit = dispute_deposit;
+            dispute.maker_evidence = Some(evidence_cid);
+            dispute.status = DisputeStatus::WaitingArbitration;
+            Disputes::<T>::insert(order_id, dispute);
+            
+            // 7. 发出事件
+            Self::deposit_event(Event::DisputeResponded {
+                order_id,
+                maker: maker.clone(),
+                dispute_deposit,
+            });
+            
+            Ok(())
+        }
+        
+        /// 函数级详细中文注释：仲裁判定争议（内部实现）
+        /// 
+        /// ## 判定结果处理
+        /// - 买家胜诉：退还买家订单押金 + 买家争议押金 + 做市商争议押金
+        /// - 做市商胜诉：没收买家订单押金 + 买家争议押金给做市商
+        /// - 做市商未响应：自动判买家胜诉
+        pub fn do_resolve_dispute(
+            order_id: u64,
+            buyer_wins: bool,
+        ) -> DispatchResult {
+            use sp_runtime::traits::Zero;
+            
+            // 1. 获取争议和订单记录
+            let mut dispute = Disputes::<T>::get(order_id)
+                .ok_or(Error::<T>::DisputeNotFound)?;
+            let order = Orders::<T>::get(order_id)
+                .ok_or(Error::<T>::OrderNotFound)?;
+            
+            // 2. 验证争议状态（WaitingArbitration 或 WaitingMakerResponse 超时）
+            let now = T::Timestamp::now().as_secs().saturated_into::<u64>();
+            let can_resolve = match dispute.status {
+                DisputeStatus::WaitingArbitration => true,
+                DisputeStatus::WaitingMakerResponse => now > dispute.response_deadline,
+                _ => false,
+            };
+            ensure!(can_resolve, Error::<T>::InvalidDisputeStatus);
+            
+            if buyer_wins {
+                // === 买家胜诉 ===
+                
+                // 1. 退还买家订单押金
+                if !order.buyer_deposit.is_zero() {
+                    let _ = Self::release_buyer_deposit(&order.taker, order.buyer_deposit);
+                }
+                
+                // 2. 退还买家争议押金
+                if !dispute.buyer_dispute_deposit.is_zero() {
+                    let _ = Self::release_buyer_deposit(&dispute.initiator, dispute.buyer_dispute_deposit);
+                }
+                
+                // 3. 将做市商争议押金赔付给买家
+                if !dispute.maker_dispute_deposit.is_zero() {
+                    let _ = Self::release_buyer_deposit(&dispute.initiator, dispute.maker_dispute_deposit);
+                }
+                
+                // 4. 释放托管的 DUST 给买家（订单完成）
+                let _ = T::Escrow::release_all(order_id, &order.taker);
+                
+                // 5. 更新订单状态
+                Orders::<T>::mutate(order_id, |o| {
+                    if let Some(ord) = o {
+                        ord.state = OrderState::Released;
+                        ord.deposit_status = DepositStatus::Released;
+                        ord.completed_at = Some(now);
+                    }
+                });
+                
+                // 6. 更新争议状态
+                dispute.status = DisputeStatus::BuyerWon;
+                
+            } else {
+                // === 做市商胜诉 ===
+                
+                // 1. 没收买家订单押金给做市商
+                if !order.buyer_deposit.is_zero() {
+                    let _ = Self::forfeit_buyer_deposit(&order.maker, order.buyer_deposit);
+                }
+                
+                // 2. 没收买家争议押金给做市商
+                if !dispute.buyer_dispute_deposit.is_zero() {
+                    let _ = Self::forfeit_buyer_deposit(&dispute.respondent, dispute.buyer_dispute_deposit);
+                }
+                
+                // 3. 退还做市商争议押金
+                if !dispute.maker_dispute_deposit.is_zero() {
+                    let _ = Self::release_buyer_deposit(&dispute.respondent, dispute.maker_dispute_deposit);
+                }
+                
+                // 4. 退还托管的 DUST 给做市商（订单取消）
+                let _ = T::Escrow::refund_all(order_id, &order.maker);
+                
+                // 5. 更新订单状态
+                Orders::<T>::mutate(order_id, |o| {
+                    if let Some(ord) = o {
+                        ord.state = OrderState::Canceled;
+                        ord.deposit_status = DepositStatus::Forfeited;
+                        ord.completed_at = Some(now);
+                    }
+                });
+                
+                // 6. 更新争议状态
+                dispute.status = DisputeStatus::MakerWon;
+            }
+            
+            // 7. 保存争议记录
+            Disputes::<T>::insert(order_id, dispute);
+            
+            // 8. 发出事件
+            Self::deposit_event(Event::DisputeResolved {
+                order_id,
+                buyer_wins,
+            });
+            
+            Ok(())
+        }
     }
     
     // ===== 公共查询接口 =====
@@ -1494,6 +2179,53 @@ pub mod pallet {
             MakerFirstPurchaseCount::<T>::get(maker_id)
         }
         
+        // ===== 🆕 2026-01-18: 可读时间查询接口 =====
+        
+        /// 函数级详细中文注释：获取订单详情（含可读时间）
+        /// 
+        /// ## 功能说明
+        /// 为前端提供人可读的时间信息，无需前端自行计算
+        /// 
+        /// ## 返回字段
+        /// - `order_id`: 订单ID
+        /// - `created_at`: 创建时间（Unix秒）
+        /// - `expire_at`: 过期时间（Unix秒）
+        /// - `remaining_seconds`: 剩余秒数（0表示已过期）
+        /// - `remaining_readable`: 可读剩余时间（如 "45m", "1h 30m"）
+        /// - `state`: 订单状态
+        pub fn get_order_with_time(order_id: u64) -> Option<OrderTimeInfo<T>> {
+            let order = Orders::<T>::get(order_id)?;
+            let now = T::Timestamp::now().as_secs().saturated_into::<u64>();
+            
+            let remaining_seconds = if order.expire_at > now {
+                order.expire_at.saturating_sub(now)
+            } else {
+                0
+            };
+            
+            Some(OrderTimeInfo {
+                order_id,
+                maker_id: order.maker_id,
+                buyer: order.taker.clone(),
+                dust_amount: order.qty,
+                usdt_amount: order.amount,
+                created_at: order.created_at,
+                expire_at: order.expire_at,
+                remaining_seconds,
+                remaining_readable: pallet_trading_common::format_duration(remaining_seconds),
+                state: Self::state_to_u8(&order.state),
+                is_expired: remaining_seconds == 0 && order.state == OrderState::Created,
+            })
+        }
+        
+        /// 函数级详细中文注释：批量获取用户订单（含可读时间）
+        pub fn get_buyer_orders_with_time(who: &T::AccountId) -> sp_std::vec::Vec<OrderTimeInfo<T>> {
+            BuyerOrders::<T>::get(who)
+                .iter()
+                .filter_map(|&order_id| Self::get_order_with_time(order_id))
+                .collect()
+        }
+        
         /// 函数级详细中文注释：将订单状态转换为 u8（用于事件）
         fn state_to_u8(state: &OrderState) -> u8 {
             match state {
@@ -1506,6 +2238,304 @@ pub mod pallet {
                 OrderState::Closed => 6,
                 OrderState::Expired => 7,
             }
+        }
+        
+        // ===== 🆕 2026-01-18: 买家押金计算 =====
+        
+        /// 函数级详细中文注释：计算买家应缴押金
+        /// 
+        /// ## 押金规则
+        /// - 首购用户：免押金
+        /// - 信用用户（≥70分，≥5单）：免押金
+        /// - 普通用户（50-69分）：3%
+        /// - 低信用用户（30-49分）：5%
+        /// - 高风险用户（<30分）：10%
+        /// 
+        /// ## 参数
+        /// - `buyer`: 买家账户
+        /// - `order_amount`: 订单 DUST 金额
+        /// 
+        /// ## 返回
+        /// - 应缴押金金额（0 表示免押金）
+        pub fn calculate_buyer_deposit(
+            buyer: &T::AccountId,
+            order_amount: BalanceOf<T>,
+        ) -> BalanceOf<T> {
+            use sp_runtime::traits::Zero;
+            
+            // 1. 首购用户免押金
+            if !HasFirstPurchased::<T>::get(buyer) {
+                return Zero::zero();
+            }
+            
+            // 2. 获取买家完成订单数（作为信用评估依据）
+            let completed_orders = BuyerCompletedOrderCount::<T>::get(buyer);
+            
+            // 简化信用分计算：基于完成订单数
+            // 0单 = 30分, 1-2单 = 40分, 3-4单 = 50分, 5-9单 = 60分, 10+单 = 80分
+            let credit_score: u16 = if completed_orders >= 10 {
+                80
+            } else if completed_orders >= 5 {
+                60
+            } else if completed_orders >= 3 {
+                50
+            } else if completed_orders >= 1 {
+                40
+            } else {
+                30
+            };
+            
+            // 3. 信用用户免押金（≥70分 且 ≥5单）
+            if credit_score >= T::CreditScoreExempt::get() 
+                && completed_orders >= T::MinOrdersForExempt::get() 
+            {
+                return Zero::zero();
+            }
+            
+            // 4. 根据信用分计算押金比例（bps）
+            let deposit_rate_bps: u16 = if credit_score >= 50 {
+                T::DepositRateLow::get()      // 3% = 300 bps
+            } else if credit_score >= 30 {
+                T::DepositRateMedium::get()   // 5% = 500 bps
+            } else {
+                T::DepositRateHigh::get()     // 10% = 1000 bps
+            };
+            
+            // 5. 计算押金金额 = order_amount * rate / 10000
+            let deposit_rate_balance: BalanceOf<T> = deposit_rate_bps.into();
+            let divisor: BalanceOf<T> = 10000u32.into();
+            let deposit = order_amount * deposit_rate_balance / divisor;
+            
+            // 6. 确保不低于最小押金
+            let min_deposit = T::MinDeposit::get();
+            if deposit < min_deposit {
+                min_deposit
+            } else {
+                deposit
+            }
+        }
+        
+        /// 函数级详细中文注释：锁定买家押金到押金池
+        /// 
+        /// ## 功能说明
+        /// 从买家账户扣除押金，转入押金池账户
+        /// 
+        /// ## 参数
+        /// - `buyer`: 买家账户
+        /// - `amount`: 押金金额
+        /// 
+        /// ## 返回
+        /// - `Ok(())`: 成功
+        /// - `Err(InsufficientDepositBalance)`: 余额不足
+        fn lock_buyer_deposit(
+            buyer: &T::AccountId,
+            amount: BalanceOf<T>,
+        ) -> DispatchResult {
+            use sp_runtime::traits::Zero;
+            use frame_support::traits::ExistenceRequirement;
+            
+            if amount.is_zero() {
+                return Ok(());
+            }
+            
+            // 从买家账户转账到押金池
+            T::Currency::transfer(
+                buyer,
+                &Self::deposit_pool_account(),
+                amount,
+                ExistenceRequirement::KeepAlive,
+            ).map_err(|_| Error::<T>::InsufficientDepositBalance)?;
+            
+            // 更新押金池总余额
+            TotalDepositPoolBalance::<T>::mutate(|balance| {
+                *balance = *balance + amount;
+            });
+            
+            Ok(())
+        }
+        
+        /// 函数级详细中文注释：释放买家押金（退还给买家）
+        fn release_buyer_deposit(
+            buyer: &T::AccountId,
+            amount: BalanceOf<T>,
+        ) -> DispatchResult {
+            use sp_runtime::traits::Zero;
+            use frame_support::traits::ExistenceRequirement;
+            
+            if amount.is_zero() {
+                return Ok(());
+            }
+            
+            // 从押金池转账到买家
+            T::Currency::transfer(
+                &Self::deposit_pool_account(),
+                buyer,
+                amount,
+                ExistenceRequirement::AllowDeath,
+            )?;
+            
+            // 更新押金池总余额
+            TotalDepositPoolBalance::<T>::mutate(|balance| {
+                if *balance >= amount {
+                    *balance = *balance - amount;
+                } else {
+                    *balance = Zero::zero();
+                }
+            });
+            
+            Ok(())
+        }
+        
+        /// 函数级详细中文注释：没收买家押金（转给做市商）
+        fn forfeit_buyer_deposit(
+            maker: &T::AccountId,
+            amount: BalanceOf<T>,
+        ) -> DispatchResult {
+            use sp_runtime::traits::Zero;
+            use frame_support::traits::ExistenceRequirement;
+            
+            if amount.is_zero() {
+                return Ok(());
+            }
+            
+            // 从押金池转账到做市商
+            T::Currency::transfer(
+                &Self::deposit_pool_account(),
+                maker,
+                amount,
+                ExistenceRequirement::AllowDeath,
+            )?;
+            
+            // 更新押金池总余额
+            TotalDepositPoolBalance::<T>::mutate(|balance| {
+                if *balance >= amount {
+                    *balance = *balance - amount;
+                } else {
+                    *balance = Zero::zero();
+                }
+            });
+            
+            Ok(())
+        }
+        
+        /// 函数级详细中文注释：获取押金池账户（PDA，无私钥）
+        fn deposit_pool_account() -> T::AccountId {
+            // 使用 pallet 模块名作为种子生成 PDA
+            let entropy = (b"otc/deposit", ).using_encoded(sp_core::hashing::blake2_256);
+            T::AccountId::decode(&mut &entropy[..]).expect("valid account id")
+        }
+        
+        // ===== 🆕 2026-01-18: 自动过期处理 =====
+        
+        /// 函数级详细中文注释：处理过期订单
+        /// 
+        /// ## 功能说明
+        /// 1. 遍历最近的订单（最多检查100个）
+        /// 2. 找出 Created 状态且已超时的订单
+        /// 3. 执行过期处理（退款、释放额度）
+        /// 4. 每次最多处理10个订单，避免区块过重
+        /// 
+        /// ## 返回
+        /// - `Weight`: 消耗的权重
+        pub fn process_expired_orders() -> Weight {
+            let mut processed = 0u32;
+            let max_per_block = 10u32; // 每次最多处理10个
+            let max_check = 100u64;    // 每次最多检查100个订单
+            
+            let next_id = NextOrderId::<T>::get();
+            let start_id = next_id.saturating_sub(max_check);
+            let now_secs = T::Timestamp::now().as_secs().saturated_into::<u64>();
+            
+            for order_id in start_id..next_id {
+                if processed >= max_per_block {
+                    break;
+                }
+                
+                if let Some(order) = Orders::<T>::get(order_id) {
+                    // 仅处理 Created 状态的订单
+                    if order.state != OrderState::Created {
+                        continue;
+                    }
+                    
+                    // 检查是否已过期
+                    if now_secs > order.expire_at {
+                        // 执行过期处理
+                        if Self::do_expire_order(order_id, &order).is_ok() {
+                            processed += 1;
+                        }
+                    }
+                }
+            }
+            
+            // 发出批量处理事件
+            if processed > 0 {
+                Self::deposit_event(Event::ExpiredOrdersProcessed {
+                    count: processed,
+                    block_number: <frame_system::Pallet<T>>::block_number(),
+                });
+            }
+            
+            // 返回消耗的权重
+            Weight::from_parts((processed as u64) * 100_000 + 10_000, 0)
+        }
+        
+        /// 函数级详细中文注释：执行单个订单的过期处理
+        /// 
+        /// ## 处理步骤
+        /// 1. 更新订单状态为 Expired
+        /// 2. 退还托管资金给买家
+        /// 3. 释放买家占用的额度
+        /// 4. 如是首购订单，减少做市商首购计数
+        fn do_expire_order(order_id: u64, order: &Order<T>) -> DispatchResult {
+            // 1. 更新订单状态
+            Orders::<T>::mutate(order_id, |maybe_order| {
+                if let Some(o) = maybe_order {
+                    o.state = OrderState::Expired;
+                }
+            });
+            
+            // 2. 退还托管资金给买家
+            let _ = T::Escrow::refund_all(order_id, &order.taker);
+            
+            // 3. 释放买家占用的额度（amount 是 USDT 金额）
+            let usd_amount: u64 = order.amount.saturated_into();
+            let _ = T::Credit::release_quota(&order.taker, usd_amount);
+            
+            // 4. 如是首购订单，减少做市商首购计数
+            if order.is_first_purchase {
+                MakerFirstPurchaseCount::<T>::mutate(order.maker_id, |count| {
+                    *count = count.saturating_sub(1);
+                });
+            }
+            
+            // 🆕 2026-01-18: 超时没收买家押金给做市商（100%）
+            if !order.buyer_deposit.is_zero() {
+                let _ = Self::forfeit_buyer_deposit(&order.maker, order.buyer_deposit);
+                
+                // 更新押金状态
+                Orders::<T>::mutate(order_id, |o| {
+                    if let Some(ord) = o {
+                        ord.deposit_status = DepositStatus::Forfeited;
+                    }
+                });
+                
+                Self::deposit_event(Event::BuyerDepositForfeited {
+                    order_id,
+                    buyer: order.taker.clone(),
+                    maker_id: order.maker_id,
+                    forfeited_amount: order.buyer_deposit,
+                });
+            }
+            
+            // 5. 发出事件
+            Self::deposit_event(Event::OrderAutoExpired {
+                order_id,
+                buyer: order.taker.clone(),
+                maker_id: order.maker_id,
+                dust_amount: order.qty,  // qty 是 DUST 数量
+            });
+            
+            Ok(())
         }
         
         // ===== 仲裁支持接口 =====

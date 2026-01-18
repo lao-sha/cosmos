@@ -45,17 +45,21 @@ pallet-ziwei = { workspace = true }
 pallet-xiaoliuren = { workspace = true }
 pallet-daliuren = { workspace = true }
 pallet-tarot = { workspace = true }
+# TEE Privacy pallet
+pallet-tee-privacy = { workspace = true }
 # Chat pallets
 pallet-chat-common = { workspace = true }
 pallet-chat-permission = { workspace = true }
 pallet-chat-core = { workspace = true }
 pallet-chat-group = { workspace = true }
+# Livestream pallet
+pallet-livestream = { workspace = true }
 # Trading pallets
 pallet-trading-common = { workspace = true }
 pallet-trading-pricing = { workspace = true }
 pallet-trading-credit = { workspace = true }
 pallet-trading-maker = { workspace = true }
-pallet-trading-bridge = { workspace = true }
+pallet-trading-swap = { workspace = true }
 pallet-trading-otc = { workspace = true }
 # Escrow, Referral, IPFS pallets
 pallet-escrow = { workspace = true }
@@ -120,17 +124,21 @@ std = [
 	"pallet-xiaoliuren/std",
 	"pallet-daliuren/std",
 	"pallet-tarot/std",
+	# TEE Privacy pallet std
+	"pallet-tee-privacy/std",
 	# Chat pallets std
 	"pallet-chat-common/std",
 	"pallet-chat-permission/std",
 	"pallet-chat-core/std",
 	"pallet-chat-group/std",
+	# Livestream pallet std
+	"pallet-livestream/std",
 	# Trading pallets std
 	"pallet-trading-common/std",
 	"pallet-trading-pricing/std",
 	"pallet-trading-credit/std",
 	"pallet-trading-maker/std",
-	"pallet-trading-bridge/std",
+	"pallet-trading-swap/std",
 	"pallet-trading-otc/std",
 	# Escrow, Referral, IPFS pallets std
 	"pallet-escrow/std",
@@ -184,15 +192,19 @@ runtime-benchmarks = [
 	"pallet-xiaoliuren/runtime-benchmarks",
 	"pallet-daliuren/runtime-benchmarks",
 	"pallet-tarot/runtime-benchmarks",
+	# TEE Privacy pallet benchmarks
+	"pallet-tee-privacy/runtime-benchmarks",
 	# Chat pallets benchmarks
 	"pallet-chat-permission/runtime-benchmarks",
 	"pallet-chat-core/runtime-benchmarks",
 	"pallet-chat-group/runtime-benchmarks",
+	# Livestream pallet benchmarks
+	"pallet-livestream/runtime-benchmarks",
 	# Trading pallets benchmarks
 	"pallet-trading-pricing/runtime-benchmarks",
 	"pallet-trading-credit/runtime-benchmarks",
 	"pallet-trading-maker/runtime-benchmarks",
-	"pallet-trading-bridge/runtime-benchmarks",
+	"pallet-trading-swap/runtime-benchmarks",
 	"pallet-trading-otc/runtime-benchmarks",
 	# Escrow, Referral pallets benchmarks
 	"pallet-referral/runtime-benchmarks",
@@ -229,15 +241,19 @@ try-runtime = [
 	"pallet-xiaoliuren/try-runtime",
 	"pallet-daliuren/try-runtime",
 	"pallet-tarot/try-runtime",
+	# TEE Privacy pallet try-runtime
+	"pallet-tee-privacy/try-runtime",
 	# Chat pallets try-runtime
 	"pallet-chat-permission/try-runtime",
 	"pallet-chat-core/try-runtime",
 	"pallet-chat-group/try-runtime",
+	# Livestream pallet try-runtime
+	"pallet-livestream/try-runtime",
 	# Trading pallets try-runtime
 	"pallet-trading-pricing/try-runtime",
 	"pallet-trading-credit/try-runtime",
 	"pallet-trading-maker/try-runtime",
-	"pallet-trading-bridge/try-runtime",
+	"pallet-trading-swap/try-runtime",
 	"pallet-trading-otc/try-runtime",
 	# Escrow, Referral pallets try-runtime
 	"pallet-referral/try-runtime",

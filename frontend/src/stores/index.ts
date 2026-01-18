@@ -3,3 +3,4 @@
  */
 
 export * from './wallet.store';
+export * from './trading.store';

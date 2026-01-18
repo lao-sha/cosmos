@@ -118,7 +118,69 @@ export default function HomePage() {
         <Text style={styles.subtitle}>传统术数 · 链上存证</Text>
       </View>
 
-      <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* 快捷入口：签到 & 日历 */}
+        <View style={styles.quickEntryRow}>
+          <Pressable
+            style={styles.quickEntryCard}
+            onPress={() => router.push('/checkin')}
+          >
+            <View style={[styles.quickEntryIcon, { backgroundColor: '#FF6B6B20' }]}>
+              <Ionicons name="gift-outline" size={24} color="#FF6B6B" />
+            </View>
+            <View style={styles.quickEntryInfo}>
+              <Text style={styles.quickEntryTitle}>每日签到</Text>
+              <Text style={styles.quickEntryDesc}>领取DUST奖励</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#CCC" />
+          </Pressable>
+
+          <Pressable
+            style={styles.quickEntryCard}
+            onPress={() => router.push('/calendar')}
+          >
+            <View style={[styles.quickEntryIcon, { backgroundColor: '#4ECDC420' }]}>
+              <Ionicons name="calendar-outline" size={24} color="#4ECDC4" />
+            </View>
+            <View style={styles.quickEntryInfo}>
+              <Text style={styles.quickEntryTitle}>万年历</Text>
+              <Text style={styles.quickEntryDesc}>农历节气黄历</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#CCC" />
+          </Pressable>
+        </View>
+
+        {/* 快捷入口：市场 & 记录 */}
+        <View style={styles.quickEntryRow}>
+          <Pressable
+            style={styles.quickEntryCard}
+            onPress={() => router.push('/market')}
+          >
+            <View style={[styles.quickEntryIcon, { backgroundColor: '#9B59B620' }]}>
+              <Ionicons name="storefront-outline" size={24} color="#9B59B6" />
+            </View>
+            <View style={styles.quickEntryInfo}>
+              <Text style={styles.quickEntryTitle}>占卜市场</Text>
+              <Text style={styles.quickEntryDesc}>找解卦师咨询</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#CCC" />
+          </Pressable>
+
+          <Pressable
+            style={styles.quickEntryCard}
+            onPress={() => router.push('/divination/history')}
+          >
+            <View style={[styles.quickEntryIcon, { backgroundColor: '#F39C1220' }]}>
+              <Ionicons name="book-outline" size={24} color="#F39C12" />
+            </View>
+            <View style={styles.quickEntryInfo}>
+              <Text style={styles.quickEntryTitle}>占卜记录</Text>
+              <Text style={styles.quickEntryDesc}>查看历史记录</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#CCC" />
+          </Pressable>
+        </View>
+
         {/* Banner 区域 */}
         <View style={styles.bannerCard}>
           <Text style={styles.bannerTitle}>探索命运奥秘</Text>
@@ -294,6 +356,45 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 12,
     paddingBottom: 100,
+  },
+  quickEntryRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 12,
+  },
+  quickEntryCard: {
+    flex: 1,
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  quickEntryIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  quickEntryInfo: {
+    flex: 1,
+  },
+  quickEntryTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+  },
+  quickEntryDesc: {
+    fontSize: 11,
+    color: '#999',
+    marginTop: 2,
   },
   bannerCard: {
     backgroundColor: '#FFF',

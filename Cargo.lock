@@ -6617,6 +6617,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-contacts"
+version = "0.1.0"
+dependencies = [
+ "frame-benchmarking 45.0.0",
+ "frame-support 45.0.0",
+ "frame-system 45.0.0",
+ "log",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+ "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "pallet-daliuren"
 version = "0.1.0"
 dependencies = [
@@ -6800,6 +6815,24 @@ dependencies = [
  "pallet-divination-common",
  "pallet-divination-privacy",
  "pallet-timestamp",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-api 40.0.0",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+ "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "pallet-livestream"
+version = "0.1.0"
+dependencies = [
+ "frame-benchmarking 45.0.0",
+ "frame-support 45.0.0",
+ "frame-system 45.0.0",
+ "log",
+ "pallet-balances",
  "parity-scale-codec",
  "scale-info",
  "sp-api 40.0.0",
@@ -7020,6 +7053,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-tee-privacy"
+version = "0.1.0"
+dependencies = [
+ "frame-benchmarking 45.0.0",
+ "frame-support 45.0.0",
+ "frame-system 45.0.0",
+ "log",
+ "pallet-balances",
+ "pallet-divination-common",
+ "pallet-timestamp",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-api 40.0.0",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+ "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "pallet-template"
 version = "0.1.0"
 dependencies = [
@@ -7053,31 +7106,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallet-trading-bridge"
-version = "0.1.0"
-dependencies = [
- "frame-benchmarking 45.0.0",
- "frame-support 45.0.0",
- "frame-system 45.0.0",
- "pallet-arbitration",
- "pallet-escrow",
- "pallet-timestamp",
- "pallet-trading-common",
- "parity-scale-codec",
- "scale-info",
- "sp-core 39.0.0",
- "sp-io 44.0.0",
- "sp-runtime 45.0.0",
- "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
 name = "pallet-trading-common"
 version = "0.1.0"
 dependencies = [
+ "frame-support 45.0.0",
  "parity-scale-codec",
  "scale-info",
  "sp-core 39.0.0",
+ "sp-runtime 45.0.0",
  "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -7091,6 +7127,7 @@ dependencies = [
  "log",
  "pallet-balances",
  "pallet-timestamp",
+ "pallet-trading-common",
  "parity-scale-codec",
  "scale-info",
  "sp-core 39.0.0",
@@ -7150,6 +7187,25 @@ dependencies = [
  "parity-scale-codec",
  "scale-info",
  "sp-arithmetic 28.0.0",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+ "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "pallet-trading-swap"
+version = "0.1.0"
+dependencies = [
+ "frame-benchmarking 45.0.0",
+ "frame-support 45.0.0",
+ "frame-system 45.0.0",
+ "pallet-arbitration",
+ "pallet-escrow",
+ "pallet-timestamp",
+ "pallet-trading-common",
+ "parity-scale-codec",
+ "scale-info",
  "sp-core 39.0.0",
  "sp-io 44.0.0",
  "sp-runtime 45.0.0",
@@ -11008,20 +11064,22 @@ dependencies = [
  "pallet-evidence",
  "pallet-grandpa",
  "pallet-liuyao",
+ "pallet-livestream",
  "pallet-meihua",
  "pallet-qimen",
  "pallet-referral",
  "pallet-stardust-ipfs",
  "pallet-sudo",
  "pallet-tarot",
+ "pallet-tee-privacy",
  "pallet-template",
  "pallet-timestamp",
- "pallet-trading-bridge",
  "pallet-trading-common",
  "pallet-trading-credit",
  "pallet-trading-maker",
  "pallet-trading-otc",
  "pallet-trading-pricing",
+ "pallet-trading-swap",
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",
  "pallet-xiaoliuren",

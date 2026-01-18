@@ -114,7 +114,7 @@ export default function VerifyMnemonicPage({
 
   return (
     <View style={styles.wrapper}>
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       {/* 返回按钮 */}
       <Pressable style={styles.backButton} onPress={onBack}>
         <Ionicons name="chevron-back" size={24} color="#333" />

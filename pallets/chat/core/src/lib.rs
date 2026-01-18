@@ -485,14 +485,14 @@ pub mod pallet {
 
 	/// 函数级详细中文注释：消息发送频率限制
 	/// - Key: 用户账户
-	/// - Value: (最后发送时间, 时间窗口内发送次数)
-	/// - 用于防止垃圾消息
+	/// - Value: (最后发送时间, 时间窗口内发送次数, 同一区块内发送次数)
+	/// - 用于防止垃圾消息，包括同一区块内的批量攻击
 	#[pallet::storage]
 	pub type MessageRateLimit<T: Config> = StorageMap<
 		_,
 		Blake2_128Concat,
 		T::AccountId,
-		(BlockNumberFor<T>, u32),  // (last_time, count)
+		(BlockNumberFor<T>, u32, u32),  // (last_time, count, same_block_count)
 		ValueQuery,
 	>;
 
@@ -1440,23 +1440,36 @@ pub mod pallet {
 		/// 
 		/// # 说明
 		/// 防止用户在短时间内发送大量消息（防垃圾消息）
-		/// 限制：在RateLimitWindow个区块内最多发送MaxMessagesPerWindow条消息
+		/// 限制：
+		/// - 在RateLimitWindow个区块内最多发送MaxMessagesPerWindow条消息
+		/// - 同一区块内最多发送5条消息，防止批量交易绕过限制
 		fn check_rate_limit(sender: &T::AccountId) -> DispatchResult {
 			let now = <frame_system::Pallet<T>>::block_number();
 			let window = T::RateLimitWindow::get();
 			let max_messages = T::MaxMessagesPerWindow::get();
+			const MAX_PER_BLOCK: u32 = 5; // 每个区块最多5条消息
 
-			MessageRateLimit::<T>::try_mutate(sender, |(last_time, count)| -> DispatchResult {
+			MessageRateLimit::<T>::try_mutate(sender, |(last_time, count, same_block_count)| -> DispatchResult {
 				// 检查是否在同一个时间窗口内
 				let elapsed = now.saturating_sub(*last_time);
-				if elapsed <= window {
-					// 在窗口内，检查计数
+				
+				if elapsed.is_zero() {
+					// 同一区块内，检查区块内计数
+					ensure!(*same_block_count < MAX_PER_BLOCK, Error::<T>::RateLimitExceeded);
 					ensure!(*count < max_messages, Error::<T>::RateLimitExceeded);
+					*same_block_count = same_block_count.saturating_add(1);
 					*count = count.saturating_add(1);
+				} else if elapsed <= window {
+					// 在窗口内但不同区块，检查窗口内计数
+					ensure!(*count < max_messages, Error::<T>::RateLimitExceeded);
+					*last_time = now;
+					*count = count.saturating_add(1);
+					*same_block_count = 1;
 				} else {
 					// 超出窗口，重置计数
 					*last_time = now;
 					*count = 1;
+					*same_block_count = 1;
 				}
 				Ok(())
 			})
@@ -1750,7 +1763,10 @@ pub mod pallet {
 			let mut seed = [0u8; 32];
 
 			// 1. 系统随机数（主要随机源）
-			let random = T::Randomness::random(&b"chat_user_id"[..]).0;
+			// 包含attempt在subject中，确保每次重试获得不同的随机值
+			let mut subject = b"chat_user_id_".to_vec();
+			subject.push(attempt);
+			let random = T::Randomness::random(&subject).0;
 			seed[0..32].copy_from_slice(&random.as_ref()[0..32]);
 
 			// 2. 混合当前时间戳（增加时间随机性）

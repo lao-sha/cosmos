@@ -18,6 +18,12 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
+import { BottomNavBar } from '@/components/BottomNavBar';
+import { UnlockWalletDialog } from '@/components/UnlockWalletDialog';
+import { TransactionStatusDialog } from '@/components/TransactionStatusDialog';
+import { divinationService, DivinationType } from '@/services/divination.service';
+import { isSignerUnlocked, unlockWalletForSigning } from '@/lib/signer';
+import { getCurrentSignerAddress } from '@/lib/signer';
 
 // 主题色
 const THEME_COLOR = '#B2955D';
@@ -110,58 +116,282 @@ export default function BaziPage() {
   const [birthDay, setBirthDay] = useState(15);
   const [birthHour, setBirthHour] = useState(12);
 
-  // 计算八字
-  const calculateBazi = async () => {
+  // 上链相关状态
+  const [showUnlockDialog, setShowUnlockDialog] = useState(false);
+  const [showTxStatus, setShowTxStatus] = useState(false);
+  const [txStatus, setTxStatus] = useState('准备中...');
+  const [saving, setSaving] = useState(false);
+
+  // 免费试算（调用 Runtime API，不保存到链上）
+  const calculateBaziTemp = async () => {
     setLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 800));
+    try {
+      // 调用链端 Runtime API 进行免费计算
+      const chartData = await divinationService.calculateBaziTemp(
+        birthYear,
+        birthMonth,
+        birthDay,
+        birthHour,
+        0, // minute，暂时设为 0
+        gender,
+        calendarType
+      );
 
-    // 简化计算
-    const yearGanIndex = (birthYear - 4) % 10;
-    const yearZhiIndex = (birthYear - 4) % 12;
-    const monthGanIndex = (yearGanIndex * 2 + birthMonth) % 10;
-    const monthZhiIndex = (birthMonth + 1) % 12;
-    const dayNum = Math.floor(new Date(birthYear, birthMonth - 1, birthDay).getTime() / (24 * 60 * 60 * 1000));
-    const dayGanIndex = (dayNum + 9) % 10;
-    const dayZhiIndex = (dayNum + 1) % 12;
-    const hourZhiIndex = Math.floor((birthHour + 1) / 2) % 12;
-    const hourGanIndex = (dayGanIndex * 2 + hourZhiIndex) % 10;
+      console.log('八字计算结果:', chartData);
 
-    const siZhu = {
-      year: { gan: yearGanIndex, zhi: yearZhiIndex },
-      month: { gan: monthGanIndex, zhi: monthZhiIndex },
-      day: { gan: dayGanIndex, zhi: dayZhiIndex },
-      hour: { gan: hourGanIndex, zhi: hourZhiIndex },
-    };
+      // 从链端返回的数据中提取四柱信息
+      const siZhu = {
+        year: {
+          gan: chartData.sizhu.yearZhu.tianganIndex,
+          zhi: chartData.sizhu.yearZhu.dizhiIndex
+        },
+        month: {
+          gan: chartData.sizhu.monthZhu.tianganIndex,
+          zhi: chartData.sizhu.monthZhu.dizhiIndex
+        },
+        day: {
+          gan: chartData.sizhu.dayZhu.tianganIndex,
+          zhi: chartData.sizhu.dayZhu.dizhiIndex
+        },
+        hour: {
+          gan: chartData.sizhu.hourZhu.tianganIndex,
+          zhi: chartData.sizhu.hourZhu.dizhiIndex
+        },
+      };
 
-    // 五行统计
-    const wuxingCount: Record<string, number> = { '木': 0, '火': 0, '土': 0, '金': 0, '水': 0 };
-    Object.values(siZhu).forEach(zhu => {
-      wuxingCount[TIAN_GAN_WUXING[zhu.gan]]++;
-      wuxingCount[DI_ZHI_WUXING[zhu.zhi]]++;
-    });
+      // 五行统计
+      const wuxingCount: Record<string, number> = { '木': 0, '火': 0, '土': 0, '金': 0, '水': 0 };
+      Object.values(siZhu).forEach(zhu => {
+        const ganWuxing = TIAN_GAN_WUXING[zhu.gan];
+        const zhiWuxing = DI_ZHI_WUXING[zhu.zhi];
+        if (ganWuxing) {
+          wuxingCount[ganWuxing] = (wuxingCount[ganWuxing] || 0) + 1;
+        }
+        if (zhiWuxing) {
+          wuxingCount[zhiWuxing] = (wuxingCount[zhiWuxing] || 0) + 1;
+        }
+      });
 
-    const baziResult: BaziResult = {
-      id: Date.now(),
-      name: name || '求测者',
-      birthYear,
-      birthMonth,
-      birthDay,
-      birthHour,
-      gender,
-      siZhu,
-      wuxingCount,
-      dayMaster: dayGanIndex,
-      shengxiao: SHENG_XIAO[yearZhiIndex],
-      createdAt: new Date(),
-    };
+      const baziResult: BaziResult = {
+        id: Date.now(),
+        name: name || '求测者',
+        birthYear,
+        birthMonth,
+        birthDay,
+        birthHour,
+        gender,
+        siZhu,
+        wuxingCount,
+        dayMaster: siZhu.day.gan,
+        shengxiao: SHENG_XIAO[siZhu.year.zhi] || '未知',
+        createdAt: new Date(),
+      };
 
-    setResult(baziResult);
-    setHistory(prev => [baziResult, ...prev]);
-    setLoading(false);
+      setResult(baziResult);
+      setHistory(prev => [baziResult, ...prev]);
+    } catch (error: any) {
+      console.error('免费试算失败:', error);
+      Alert.alert('计算失败', error.message || '未知错误');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 开始排盘（调用 Extrinsic，保存到链上）
+  const createBaziChart = async () => {
+    // 检查钱包是否解锁
+    if (!isSignerUnlocked()) {
+      setShowUnlockDialog(true);
+      return;
+    }
+
+    setLoading(true);
+    setShowTxStatus(true);
+    setTxStatus('准备上链...');
+
+    try {
+      // 调用服务创建八字命盘
+      const chartId = await divinationService.createBaziChart(
+        name || null,
+        birthYear,
+        birthMonth,
+        birthDay,
+        birthHour,
+        0, // minute，暂时设为 0
+        gender,
+        calendarType,
+        (status) => {
+          setTxStatus(status);
+        }
+      );
+
+      setTxStatus('创建成功！');
+
+      // 创建成功后，调用免费试算获取结果显示
+      setTimeout(async () => {
+        setShowTxStatus(false);
+
+        // 获取八字数据用于显示
+        try {
+          const chartData = await divinationService.calculateBaziTemp(
+            birthYear,
+            birthMonth,
+            birthDay,
+            birthHour,
+            0,
+            gender,
+            calendarType
+          );
+
+          // 从链端返回的数据中提取四柱信息
+          const siZhu = {
+            year: {
+              gan: chartData.sizhu.yearZhu.tianganIndex,
+              zhi: chartData.sizhu.yearZhu.dizhiIndex
+            },
+            month: {
+              gan: chartData.sizhu.monthZhu.tianganIndex,
+              zhi: chartData.sizhu.monthZhu.dizhiIndex
+            },
+            day: {
+              gan: chartData.sizhu.dayZhu.tianganIndex,
+              zhi: chartData.sizhu.dayZhu.dizhiIndex
+            },
+            hour: {
+              gan: chartData.sizhu.hourZhu.tianganIndex,
+              zhi: chartData.sizhu.hourZhu.dizhiIndex
+            },
+          };
+
+          // 五行统计
+          const wuxingCount: Record<string, number> = { '木': 0, '火': 0, '土': 0, '金': 0, '水': 0 };
+          Object.values(siZhu).forEach(zhu => {
+            const ganWuxing = TIAN_GAN_WUXING[zhu.gan];
+            const zhiWuxing = DI_ZHI_WUXING[zhu.zhi];
+            if (ganWuxing) {
+              wuxingCount[ganWuxing] = (wuxingCount[ganWuxing] || 0) + 1;
+            }
+            if (zhiWuxing) {
+              wuxingCount[zhiWuxing] = (wuxingCount[zhiWuxing] || 0) + 1;
+            }
+          });
+
+          const baziResult: BaziResult = {
+            id: chartId,
+            name: name || '求测者',
+            birthYear,
+            birthMonth,
+            birthDay,
+            birthHour,
+            gender,
+            siZhu,
+            wuxingCount,
+            dayMaster: siZhu.day.gan,
+            shengxiao: SHENG_XIAO[siZhu.year.zhi] || '未知',
+            createdAt: new Date(),
+          };
+
+          setResult(baziResult);
+          setHistory(prev => [baziResult, ...prev]);
+
+          Alert.alert(
+            '创建成功',
+            `八字已保存到链上\\n命盘ID: ${chartId}`,
+            [
+              {
+                text: '查看历史',
+                onPress: () => router.push('/divination/bazi-list' as any),
+              },
+              { text: '确定' },
+            ]
+          );
+        } catch (error) {
+          console.error('获取八字数据失败:', error);
+        }
+      }, 1500);
+    } catch (error: any) {
+      console.error('创建八字失败:', error);
+      setTxStatus('创建失败');
+      setTimeout(() => {
+        setShowTxStatus(false);
+        Alert.alert('创建失败', error.message || '未知错误');
+      }, 1500);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleReset = () => {
     setResult(null);
+  };
+
+  // 保存到链上
+  const handleSaveToChain = async () => {
+    if (!result) {
+      Alert.alert('提示', '请先进行八字排盘');
+      return;
+    }
+
+    try {
+      // 检查钱包是否解锁
+      if (!isSignerUnlocked()) {
+        setShowUnlockDialog(true);
+        return;
+      }
+
+      setSaving(true);
+      setShowTxStatus(true);
+      setTxStatus('准备上链...');
+
+      // 调用服务保存到链上
+      const recordId = await divinationService.storeDivinationResult(
+        DivinationType.Bazi,
+        result,
+        (status) => {
+          setTxStatus(status);
+        }
+      );
+
+      setTxStatus('保存成功！');
+
+      setTimeout(() => {
+        setShowTxStatus(false);
+        Alert.alert(
+          '保存成功',
+          `八字已保存到链上\n记录ID: ${recordId}`,
+          [
+            {
+              text: '查看历史',
+              onPress: () => router.push('/divination/bazi-list' as any),
+            },
+            { text: '确定' },
+          ]
+        );
+      }, 1500);
+    } catch (error: any) {
+      console.error('保存到链上失败:', error);
+      setTxStatus('保存失败');
+      setTimeout(() => {
+        setShowTxStatus(false);
+        Alert.alert('保存失败', error.message || '未知错误');
+      }, 1500);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // 处理钱包解锁
+  const handleUnlockSuccess = async (password: string) => {
+    try {
+      await unlockWalletForSigning(password);
+      setShowUnlockDialog(false);
+      // 解锁成功后继续创建八字
+      setTimeout(() => {
+        createBaziChart();
+      }, 300);
+    } catch (error: any) {
+      Alert.alert('解锁失败', error.message || '密码错误');
+    }
   };
 
   // 渲染四柱
@@ -184,27 +414,27 @@ export default function BaziPage() {
               <Text style={styles.zhuLabel}>{pillar.label}</Text>
               <View style={[
                 styles.ganBox,
-                { borderColor: WU_XING_COLORS[TIAN_GAN_WUXING[pillar.data.gan]] }
+                { borderColor: WU_XING_COLORS[TIAN_GAN_WUXING[pillar.data.gan] || '木'] || '#999' }
               ]}>
                 <Text style={[
                   styles.ganText,
-                  { color: WU_XING_COLORS[TIAN_GAN_WUXING[pillar.data.gan]] }
+                  { color: WU_XING_COLORS[TIAN_GAN_WUXING[pillar.data.gan] || '木'] || '#999' }
                 ]}>
-                  {TIAN_GAN[pillar.data.gan]}
+                  {TIAN_GAN[pillar.data.gan] || '?'}
                 </Text>
-                <Text style={styles.wuxingLabel}>{TIAN_GAN_WUXING[pillar.data.gan]}</Text>
+                <Text style={styles.wuxingLabel}>{TIAN_GAN_WUXING[pillar.data.gan] || '?'}</Text>
               </View>
               <View style={[
                 styles.zhiBox,
-                { borderColor: WU_XING_COLORS[DI_ZHI_WUXING[pillar.data.zhi]] }
+                { borderColor: WU_XING_COLORS[DI_ZHI_WUXING[pillar.data.zhi] || '水'] || '#999' }
               ]}>
                 <Text style={[
                   styles.zhiText,
-                  { color: WU_XING_COLORS[DI_ZHI_WUXING[pillar.data.zhi]] }
+                  { color: WU_XING_COLORS[DI_ZHI_WUXING[pillar.data.zhi] || '水'] || '#999' }
                 ]}>
-                  {DI_ZHI[pillar.data.zhi]}
+                  {DI_ZHI[pillar.data.zhi] || '?'}
                 </Text>
-                <Text style={styles.wuxingLabel}>{DI_ZHI_WUXING[pillar.data.zhi]}</Text>
+                <Text style={styles.wuxingLabel}>{DI_ZHI_WUXING[pillar.data.zhi] || '?'}</Text>
               </View>
               {pillar.isDay && (
                 <View style={styles.dayMasterTag}>
@@ -230,7 +460,7 @@ export default function BaziPage() {
         <Text style={styles.cardTitle}>五行分布</Text>
         <View style={styles.wuxingBars}>
           {wuXingList.map(wx => {
-            const count = result.wuxingCount[wx];
+            const count = result.wuxingCount[wx] || 0;
             const percent = total > 0 ? Math.round((count / total) * 100) : 0;
             return (
               <View key={wx} style={styles.wuxingBarItem}>
@@ -383,7 +613,7 @@ export default function BaziPage() {
         {/* 免费试算按钮 */}
         <Pressable
           style={styles.secondaryButton}
-          onPress={calculateBazi}
+          onPress={calculateBaziTemp}
           disabled={loading}
         >
           <Text style={styles.secondaryButtonText}>
@@ -394,7 +624,7 @@ export default function BaziPage() {
         {/* 开始排盘按钮 */}
         <Pressable
           style={[styles.primaryButton, loading && styles.buttonDisabled]}
-          onPress={calculateBazi}
+          onPress={createBaziChart}
           disabled={loading}
         >
           {loading ? (
@@ -451,6 +681,20 @@ export default function BaziPage() {
         {/* 操作按钮 */}
         <View style={styles.actionButtons}>
           <Pressable
+            style={styles.saveButton}
+            onPress={handleSaveToChain}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator color="#FFF" />
+            ) : (
+              <>
+                <Ionicons name="cloud-upload-outline" size={18} color="#FFF" />
+                <Text style={styles.saveButtonText}>保存到链上</Text>
+              </>
+            )}
+          </Pressable>
+          <Pressable
             style={styles.aiButton}
             onPress={() => Alert.alert('提示', 'AI解读功能即将上线')}
           >
@@ -458,7 +702,10 @@ export default function BaziPage() {
           </Pressable>
           <Pressable
             style={styles.detailButton}
-            onPress={() => Alert.alert('提示', '详情页面即将上线')}
+            onPress={() => router.push({
+              pathname: '/divination/bazi-detail',
+              params: { data: JSON.stringify(result) }
+            } as any)}
           >
             <Text style={styles.detailButtonText}>查看命盘详情 →</Text>
           </Pressable>
@@ -475,9 +722,9 @@ export default function BaziPage() {
     <View style={styles.container}>
       {/* 顶部导航 */}
       <View style={styles.navBar}>
-        <Pressable style={styles.navItem} onPress={() => router.push('/divination/bazi-list' as any)}>
+        <Pressable style={styles.navItem} onPress={() => router.push('/divination/history' as any)}>
           <Ionicons name="albums-outline" size={20} color="#999" />
-          <Text style={styles.navItemText}>我的命盘</Text>
+          <Text style={styles.navItemText}>我的记录</Text>
         </Pressable>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={24} color="#333" />
@@ -489,29 +736,26 @@ export default function BaziPage() {
       </View>
 
       {/* 内容区 */}
-      <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {result ? renderResult() : renderInputForm()}
       </ScrollView>
 
-      {/* 底部导航 - 全局统一 */}
-      <View style={styles.bottomNav}>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/' as any)}>
-          <Text style={styles.bottomNavIcon}>🏠</Text>
-          <Text style={styles.bottomNavLabel}>首页</Text>
-        </Pressable>
-        <Pressable style={[styles.bottomNavItem, styles.bottomNavItemActive]} onPress={() => router.push('/divination' as any)}>
-          <Text style={styles.bottomNavIcon}>🧭</Text>
-          <Text style={[styles.bottomNavLabel, styles.bottomNavLabelActive]}>占卜</Text>
-        </Pressable>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/chat' as any)}>
-          <Text style={styles.bottomNavIcon}>💬</Text>
-          <Text style={styles.bottomNavLabel}>消息</Text>
-        </Pressable>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/profile' as any)}>
-          <Text style={styles.bottomNavIcon}>👤</Text>
-          <Text style={styles.bottomNavLabel}>我的</Text>
-        </Pressable>
-      </View>
+      {/* 解锁钱包对话框 */}
+      <UnlockWalletDialog
+        visible={showUnlockDialog}
+        onClose={() => setShowUnlockDialog(false)}
+        onSuccess={handleUnlockSuccess}
+      />
+
+      {/* 交易状态对话框 */}
+      <TransactionStatusDialog
+        visible={showTxStatus}
+        status={txStatus}
+        onClose={() => setShowTxStatus(false)}
+      />
+
+      {/* 底部导航栏 */}
+      <BottomNavBar activeTab="divination" />
     </View>
   );
 }
@@ -867,6 +1111,20 @@ const styles = StyleSheet.create({
   },
   actionButtons: {
     gap: 8,
+  },
+  saveButton: {
+    height: 48,
+    backgroundColor: '#4CAF50',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 4,
+    gap: 8,
+  },
+  saveButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#FFF',
   },
   aiButton: {
     height: 48,

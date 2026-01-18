@@ -18,6 +18,11 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
+import { BottomNavBar } from '@/components/BottomNavBar';
+import { useDivinationSave } from '@/hooks/useDivinationSave';
+import { DivinationType } from '@/services/divination.service';
+import { UnlockWalletDialog } from '@/components/UnlockWalletDialog';
+import { TransactionStatusDialog } from '@/components/TransactionStatusDialog';
 
 // 主题色
 const THEME_COLOR = '#B2955D';
@@ -158,6 +163,21 @@ export default function XiaoliurenPage() {
   const [num1, setNum1] = useState('');
   const [num2, setNum2] = useState('');
   const [num3, setNum3] = useState('');
+
+  // 上链保存功能
+  const {
+    showUnlockDialog,
+    showTxStatus,
+    txStatus,
+    saving,
+    saveToChain,
+    handleUnlockSuccess,
+    setShowUnlockDialog,
+    setShowTxStatus,
+  } = useDivinationSave({
+    divinationType: DivinationType.Xiaoliuren,
+    historyRoute: '/divination/xiaoliuren-list',
+  });
 
   // 掐算
   const calculate = async () => {
@@ -431,10 +451,10 @@ export default function XiaoliurenPage() {
         {/* 开始掐算按钮 */}
         <Pressable
           style={[styles.primaryButton, loading && styles.buttonDisabled]}
-          onPress={calculate}
-          disabled={loading}
+          onPress={() => saveToChain(result)}
+          disabled={loading || saving}
         >
-          {loading ? (
+          {loading || saving ? (
             <ActivityIndicator color={THEME_COLOR_LIGHT} />
           ) : (
             <Text style={styles.primaryButtonText}>开始掐算（上链存储）</Text>
@@ -617,25 +637,22 @@ export default function XiaoliurenPage() {
         {result ? renderResult() : renderInputForm()}
       </ScrollView>
 
-      {/* 底部导航 - 全局统一 */}
-      <View style={styles.bottomNav}>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/' as any)}>
-          <Text style={styles.bottomNavIcon}>🏠</Text>
-          <Text style={styles.bottomNavLabel}>首页</Text>
-        </Pressable>
-        <Pressable style={[styles.bottomNavItem, styles.bottomNavItemActive]} onPress={() => router.push('/divination' as any)}>
-          <Text style={styles.bottomNavIcon}>🧭</Text>
-          <Text style={[styles.bottomNavLabel, styles.bottomNavLabelActive]}>占卜</Text>
-        </Pressable>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/chat' as any)}>
-          <Text style={styles.bottomNavIcon}>💬</Text>
-          <Text style={styles.bottomNavLabel}>消息</Text>
-        </Pressable>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/profile' as any)}>
-          <Text style={styles.bottomNavIcon}>👤</Text>
-          <Text style={styles.bottomNavLabel}>我的</Text>
-        </Pressable>
-      </View>
+      {/* 解锁钱包对话框 */}
+      <UnlockWalletDialog
+        visible={showUnlockDialog}
+        onClose={() => setShowUnlockDialog(false)}
+        onSuccess={(password) => handleUnlockSuccess(password, result)}
+      />
+
+      {/* 交易状态对话框 */}
+      <TransactionStatusDialog
+        visible={showTxStatus}
+        status={txStatus}
+        onClose={() => setShowTxStatus(false)}
+      />
+
+      {/* 底部导航栏 */}
+      <BottomNavBar activeTab="divination" />
     </View>
   );
 }

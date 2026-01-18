@@ -40,22 +40,17 @@ pub mod pallet {
     };
     use sp_runtime::traits::{Saturating, SaturatedConversion};
     
+    // 🆕 v0.4.0: 从 pallet-trading-common 导入公共类型和 Trait
+    use pallet_trading_common::{
+        TronAddress,
+        Cid,
+        PricingProvider,
+    };
+    
     /// 函数级详细中文注释：Balance 类型别名
     pub type BalanceOf<T> = <<T as Config>::Currency as Currency<
         <T as frame_system::Config>::AccountId,
     >>::Balance;
-    
-    /// 函数级详细中文注释：TRON 地址类型（固定 34 字节）
-    pub type TronAddress = BoundedVec<u8, ConstU32<34>>;
-    
-    /// 函数级详细中文注释：IPFS CID 类型（最大 64 字节）
-    pub type Cid = BoundedVec<u8, ConstU32<64>>;
-
-    /// 函数级详细中文注释：定价服务 trait
-    pub trait PricingProvider<Balance> {
-        /// 获取 DUST/USD 汇率（精度 10^6）
-        fn get_dust_to_usd_rate() -> Option<Balance>;
-    }
 
     // ===== 押金扣除相关数据结构 =====
 
@@ -252,7 +247,8 @@ pub mod pallet {
         type Currency: Currency<Self::AccountId> + ReservableCurrency<Self::AccountId>;
         
         /// 信用记录接口
-        type MakerCredit: pallet_trading_credit::MakerCreditInterface<Self::AccountId>;
+        /// 🆕 2026-01-18: 统一使用 pallet_trading_common::MakerCreditInterface
+        type MakerCredit: pallet_trading_common::MakerCreditInterface;
         
         /// 治理权限（用于审批做市商）
         /// 注意：移除 Success = AccountId 约束，以兼容委员会集体 Origin

@@ -1,11 +1,11 @@
 use sc_service::ChainType;
-use serde_json::json;
+use sc_telemetry::serde_json::json;
 use solochain_template_runtime::WASM_BINARY;
 
 /// Specialized `ChainSpec`. This is a specialization of the general Substrate ChainSpec type.
 pub type ChainSpec = sc_service::GenericChainSpec;
 
-fn chain_properties() -> sc_chain_spec::Properties {
+fn chain_properties() -> sc_service::Properties {
 	json!({
 		"tokenSymbol": "DUST",
 		"tokenDecimals": 12,

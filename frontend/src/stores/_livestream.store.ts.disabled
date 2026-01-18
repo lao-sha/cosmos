@@ -1,0 +1,143 @@
+// frontend/src/stores/livestream.store.ts
+
+import { create } from 'zustand';
+import type {
+  LiveRoom,
+  Gift,
+  GiftRecord,
+  CoHost,
+  CoHostRequest,
+  LiveChatMessage,
+  CreateRoomParams,
+  RoomFilter,
+} from '@/features/livestream/types';
+import { LiveRoomType } from '@/features/livestream/types';
+
+interface LivestreamState {
+  // 直播列表
+  rooms: LiveRoom[];
+  isLoadingRooms: boolean;
+  roomFilter: RoomFilter;
+
+  // 当前直播间
+  currentRoom: LiveRoom | null;
+  isInRoom: boolean;
+
+  // 礼物
+  gifts: Gift[];
+  giftRecords: GiftRecord[];
+
+  // 连麦
+  coHosts: CoHost[];
+  coHostRequests: CoHostRequest[];
+
+  // 聊天
+  messages: LiveChatMessage[];
+
+  // 主播状态
+  isHost: boolean;
+  isLive: boolean;
+  earnings: string;
+
+  // LiveKit 状态
+  isConnecting: boolean;
+  isConnected: boolean;
+
+  // 操作
+  setRoomFilter: (filter: RoomFilter) => void;
+  setRooms: (rooms: LiveRoom[]) => void;
+  setIsLoadingRooms: (loading: boolean) => void;
+  setCurrentRoom: (room: LiveRoom | null) => void;
+  setIsInRoom: (inRoom: boolean) => void;
+  setGifts: (gifts: Gift[]) => void;
+  addGiftRecord: (record: GiftRecord) => void;
+  setCoHosts: (coHosts: CoHost[]) => void;
+  addCoHostRequest: (request: CoHostRequest) => void;
+  removeCoHostRequest: (address: string) => void;
+  addMessage: (message: LiveChatMessage) => void;
+  clearMessages: () => void;
+  setIsHost: (isHost: boolean) => void;
+  setIsLive: (isLive: boolean) => void;
+  setEarnings: (earnings: string) => void;
+  setIsConnecting: (connecting: boolean) => void;
+  setIsConnected: (connected: boolean) => void;
+  updateRoomViewers: (count: number) => void;
+  reset: () => void;
+}
+
+const initialState = {
+  rooms: [],
+  isLoadingRooms: false,
+  roomFilter: 'all' as RoomFilter,
+  currentRoom: null,
+  isInRoom: false,
+  gifts: [],
+  giftRecords: [],
+  coHosts: [],
+  coHostRequests: [],
+  messages: [],
+  isHost: false,
+  isLive: false,
+  earnings: '0',
+  isConnecting: false,
+  isConnected: false,
+};
+
+export const useLivestreamStore = create<LivestreamState>()((set, get) => ({
+  ...initialState,
+
+  setRoomFilter: (filter) => set({ roomFilter: filter }),
+
+  setRooms: (rooms) => set({ rooms }),
+
+  setIsLoadingRooms: (loading) => set({ isLoadingRooms: loading }),
+
+  setCurrentRoom: (room) => set({ currentRoom: room }),
+
+  setIsInRoom: (inRoom) => set({ isInRoom: inRoom }),
+
+  setGifts: (gifts) => set({ gifts }),
+
+  addGiftRecord: (record) =>
+    set((state) => ({
+      giftRecords: [...state.giftRecords.slice(-99), record],
+    })),
+
+  setCoHosts: (coHosts) => set({ coHosts }),
+
+  addCoHostRequest: (request) =>
+    set((state) => ({
+      coHostRequests: [...state.coHostRequests, request],
+    })),
+
+  removeCoHostRequest: (address) =>
+    set((state) => ({
+      coHostRequests: state.coHostRequests.filter((r) => r.address !== address),
+    })),
+
+  addMessage: (message) =>
+    set((state) => ({
+      messages: [...state.messages.slice(-199), message],
+    })),
+
+  clearMessages: () => set({ messages: [] }),
+
+  setIsHost: (isHost) => set({ isHost }),
+
+  setIsLive: (isLive) => set({ isLive }),
+
+  setEarnings: (earnings) => set({ earnings }),
+
+  setIsConnecting: (connecting) => set({ isConnecting: connecting }),
+
+  setIsConnected: (connected) => set({ isConnected: connected }),
+
+  updateRoomViewers: (count) =>
+    set((state) => ({
+      currentRoom: state.currentRoom
+        ? { ...state.currentRoom, currentViewers: count }
+        : null,
+    })),
+
+  reset: () => set(initialState),
+}));

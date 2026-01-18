@@ -90,12 +90,12 @@
 //! impl pallet_bridge::Config for Runtime {
 //!     type RuntimeEvent = RuntimeEvent;
 //!     type Currency = Balances;
-//!     type Timestamp = Timestamp;
 //!     type Escrow = Escrow;
-//!     type MakerCredit = Credit;
+//!     type MakerPallet = Maker;
+//!     type Credit = Credit;
 //!     type Pricing = Pricing;
-//!     type GovernanceOrigin = EnsureTreasury;
-//!     // ... 其他配置
+//!     type OcwSwapTimeoutBlocks = OcwSwapTimeout;
+//!     type MinSwapAmount = MinSwapAmount;
 //!     type WeightInfo = ();
 //! }
 //! 

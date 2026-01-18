@@ -110,7 +110,7 @@ export default function DivinationPage() {
       </View>
 
       {/* 内容区 */}
-      <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* 功能说明 */}
         <View style={styles.introCard}>
           <View style={styles.introRow}>

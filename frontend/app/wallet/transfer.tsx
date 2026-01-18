@@ -20,6 +20,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useWalletStore } from '@/stores';
+import { BottomNavBar } from '@/components/BottomNavBar';
 
 // 主题色
 const THEME_COLOR = '#B2955D';
@@ -72,7 +73,7 @@ export default function TransferPage() {
     // 确认转账
     Alert.alert(
       '确认转账',
-      `确定要向 ${recipient.slice(0, 8)}...${recipient.slice(-8)} 转账 ${amount} STAR 吗？`,
+      `确定要向 ${recipient.slice(0, 8)}...${recipient.slice(-8)} 转账 ${amount} DUST 吗？`,
       [
         { text: '取消', style: 'cancel' },
         {
@@ -116,11 +117,11 @@ export default function TransferPage() {
         <View style={styles.placeholder} />
       </View>
 
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* 余额显示 */}
         <View style={styles.balanceCard}>
           <Text style={styles.balanceLabel}>可用余额</Text>
-          <Text style={styles.balanceAmount}>{balance} STAR</Text>
+          <Text style={styles.balanceAmount}>{balance} DUST</Text>
         </View>
 
         {/* 表单卡片 */}
@@ -159,7 +160,7 @@ export default function TransferPage() {
               <Pressable onPress={handleMaxAmount} style={styles.maxButton}>
                 <Text style={styles.maxButtonText}>MAX</Text>
               </Pressable>
-              <Text style={styles.currencyLabel}>STAR</Text>
+              <Text style={styles.currencyLabel}>DUST</Text>
             </View>
           </View>
 
@@ -181,7 +182,7 @@ export default function TransferPage() {
           {/* 手续费提示 */}
           <View style={styles.feeInfo}>
             <Ionicons name="information-circle-outline" size={16} color="#999" />
-            <Text style={styles.feeText}>预估手续费: 0.001 STAR</Text>
+            <Text style={styles.feeText}>预估手续费: 0.001 DUST</Text>
           </View>
         </View>
 
@@ -214,25 +215,8 @@ export default function TransferPage() {
         </View>
       </ScrollView>
 
-      {/* 底部导航 - 全局统一 */}
-      <View style={styles.bottomNav}>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/' as any)}>
-          <Text style={styles.bottomNavIcon}>🏠</Text>
-          <Text style={styles.bottomNavLabel}>首页</Text>
-        </Pressable>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/divination' as any)}>
-          <Text style={styles.bottomNavIcon}>🧭</Text>
-          <Text style={styles.bottomNavLabel}>占卜</Text>
-        </Pressable>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/chat' as any)}>
-          <Text style={styles.bottomNavIcon}>💬</Text>
-          <Text style={styles.bottomNavLabel}>消息</Text>
-        </Pressable>
-        <Pressable style={[styles.bottomNavItem, styles.bottomNavItemActive]} onPress={() => router.push('/profile' as any)}>
-          <Text style={styles.bottomNavIcon}>👤</Text>
-          <Text style={[styles.bottomNavLabel, styles.bottomNavLabelActive]}>我的</Text>
-        </Pressable>
-      </View>
+      {/* 底部导航栏 */}
+      <BottomNavBar activeTab="profile" />
     </KeyboardAvoidingView>
   );
 }

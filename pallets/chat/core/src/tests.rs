@@ -47,8 +47,8 @@ fn test_send_message_works() {
 		let unread = Chat::get_unread_count(BOB, None);
 		assert_eq!(unread, 1);
 
-		// 验证：事件已触发
-		System::assert_last_event(
+		// 验证：事件已触发（现在最后一个事件是MessageSentWithChatId）
+		System::assert_has_event(
 			Event::MessageSent {
 				msg_id: 0,
 				session_id: msg.session_id,
@@ -510,8 +510,18 @@ fn test_list_messages_by_session_works() {
 #[test]
 fn test_list_messages_pagination() {
 	new_test_ext().execute_with(|| {
-		// 发送10条消息
-		for i in 1..=10 {
+		// 发送10条消息（每区块5条）
+		for i in 1..=5 {
+			assert_ok!(Chat::send_message(
+				RuntimeOrigin::signed(ALICE),
+				BOB,
+				encrypted_cid(i),
+				0,
+				None
+			));
+		}
+		System::set_block_number(2);
+		for i in 6..=10 {
 			assert_ok!(Chat::send_message(
 				RuntimeOrigin::signed(ALICE),
 				BOB,
@@ -662,6 +672,9 @@ fn test_different_message_types() {
 			None
 		));
 		assert_eq!(Chat::get_message(4).unwrap().msg_type, MessageType::System);
+
+		// 推进到下一个区块以继续发送
+		System::set_block_number(2);
 
 		// 未知类型默认为Text
 		assert_ok!(Chat::send_message(
@@ -848,7 +861,19 @@ fn test_list_blocked_users() {
 fn test_rate_limit_works() {
 	new_test_ext().execute_with(|| {
 		// 发送10条消息（达到上限）
-		for i in 1..=10 {
+		// 注意：每个区块最多5条，所以需要分两个区块发送
+		for i in 1..=5 {
+			assert_ok!(Chat::send_message(
+				RuntimeOrigin::signed(ALICE),
+				BOB,
+				encrypted_cid(i),
+				0,
+				None
+			));
+		}
+		// 推进到下一个区块（仍在窗口内）
+		System::set_block_number(2);
+		for i in 6..=10 {
 			assert_ok!(Chat::send_message(
 				RuntimeOrigin::signed(ALICE),
 				BOB,
@@ -858,7 +883,7 @@ fn test_rate_limit_works() {
 			));
 		}
 
-		// 尝试发送第11条消息（超过限制）
+		// 尝试发送第11条消息（超过窗口限制）
 		assert_noop!(
 			Chat::send_message(
 				RuntimeOrigin::signed(ALICE),
@@ -876,7 +901,18 @@ fn test_rate_limit_works() {
 fn test_rate_limit_resets_after_window() {
 	new_test_ext().execute_with(|| {
 		// 发送10条消息（达到上限）
-		for i in 1..=10 {
+		// 注意：每个区块最多5条，所以需要分两个区块发送
+		for i in 1..=5 {
+			assert_ok!(Chat::send_message(
+				RuntimeOrigin::signed(ALICE),
+				BOB,
+				encrypted_cid(i),
+				0,
+				None
+			));
+		}
+		System::set_block_number(2);
+		for i in 6..=10 {
 			assert_ok!(Chat::send_message(
 				RuntimeOrigin::signed(ALICE),
 				BOB,
@@ -886,7 +922,7 @@ fn test_rate_limit_resets_after_window() {
 			));
 		}
 
-		// 超过限制
+		// 超过窗口限制
 		assert_noop!(
 			Chat::send_message(
 				RuntimeOrigin::signed(ALICE),
@@ -952,16 +988,38 @@ fn test_delete_message_sender_and_receiver_separate() {
 fn test_unlimited_messages_in_session() {
 	new_test_ext().execute_with(|| {
 		// 发送超过1000条消息（旧的BoundedVec限制）
-		// 使用频率限制窗口，每100个区块发送10条
+		// 使用频率限制窗口，每个窗口期发送10条（分两个区块，每区块5条）
+		// 窗口期为100个区块，所以需要间隔101个区块以重置
 		let mut total_sent = 0;
+		let mut block_num = 1u64;
 		for batch in 0..105 {
-			// 推进区块（超过窗口期以重置频率限制）
-			System::set_block_number(batch * 101 + 1);
+			// 推进区块（超过窗口期以重置频率限制，间隔102确保>100）
+			block_num = batch * 102 + 1;
+			System::set_block_number(block_num);
 			
-			// 发送10条消息
-			for _ in 0..10 {
+			// 发送5条消息（第一个区块）
+			for _ in 0..5 {
 				if total_sent >= 1050 {
-					break; // 发送1050条即可证明突破限制
+					break;
+				}
+				assert_ok!(Chat::send_message(
+					RuntimeOrigin::signed(ALICE),
+					BOB,
+					encrypted_cid((total_sent % 256) as u8),
+					0,
+					None
+				));
+				total_sent += 1;
+			}
+			if total_sent >= 1050 {
+				break;
+			}
+			// 推进到下一个区块（仍在窗口内）
+			System::set_block_number(block_num + 1);
+			// 发送5条消息（第二个区块）
+			for _ in 0..5 {
+				if total_sent >= 1050 {
+					break;
 				}
 				assert_ok!(Chat::send_message(
 					RuntimeOrigin::signed(ALICE),

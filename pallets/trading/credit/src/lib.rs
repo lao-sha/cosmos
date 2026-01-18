@@ -34,25 +34,9 @@
 
 pub use pallet::*;
 
-// ===== 🆕 2025-10-29: Trading Pallet 集成接口 =====
-
-/// 函数级详细中文注释：做市商信用接口（供Trading Pallet调用）
-/// 
-/// 此trait提供了Trading Pallet所需的做市商信用管理功能，
-/// 用于记录订单完成、超时和争议结果。
-pub trait MakerCreditInterface<AccountId> {
-    /// 记录做市商订单完成（提升信用分）
-    fn record_maker_order_completed(maker: &AccountId) -> sp_runtime::DispatchResult;
-    
-    /// 记录做市商订单超时（降低信用分）
-    fn record_maker_order_timeout(maker: &AccountId) -> sp_runtime::DispatchResult;
-    
-    /// 记录做市商争议结果（根据结果调整信用分）
-    fn record_maker_dispute_result(
-        maker: &AccountId,
-        buyer_win: bool,
-    ) -> sp_runtime::DispatchResult;
-}
+// 🆕 2026-01-18: 统一使用 pallet-trading-common 中的 MakerCreditInterface
+// 旧的 MakerCreditInterface<AccountId> 定义已移除，统一到 common 模块
+pub use pallet_trading_common::MakerCreditInterface;
 
 #[cfg(test)]
 mod mock;
@@ -1783,33 +1767,37 @@ impl<T: pallet::Config> MakerCreditInterfaceLegacy for pallet::Pallet<T> {
     }
 }
 
-// ===== 🆕 2025-10-29: Trading Pallet 集成 - MakerCreditInterface 实现 =====
+// ===== 🆕 2026-01-18: 统一 MakerCreditInterface 实现 =====
 
-/// 函数级详细中文注释：为Trading Pallet实现MakerCreditInterface
+/// 函数级详细中文注释：为 Trading 模块实现统一的 MakerCreditInterface
 /// 
-/// 这个实现提供了Trading Pallet所需的做市商信用管理功能。
-/// 由于Trading使用AccountId而非maker_id，这里提供了适配层。
-impl<T: pallet::Config> crate::MakerCreditInterface<T::AccountId> for pallet::Pallet<T> {
-    fn record_maker_order_completed(_maker: &T::AccountId) -> sp_runtime::DispatchResult {
-        // TODO: 实现从AccountId到maker_id的映射
-        // 当前简化实现：直接返回Ok
-        // 后续需要在Trading pallet中维护AccountId -> maker_id映射
-        Ok(())
+/// 此实现提供了 OTC 和 Bridge 模块所需的做市商信用管理功能。
+/// 使用 maker_id 直接标识做市商，无需 AccountId 映射。
+impl<T: pallet::Config> pallet_trading_common::MakerCreditInterface for pallet::Pallet<T> {
+    fn record_maker_order_completed(
+        maker_id: u64,
+        order_id: u64,
+        response_time_seconds: u32,
+    ) -> sp_runtime::DispatchResult {
+        // 调用已有的做市商信用更新逻辑
+        Self::record_maker_order_completed(maker_id, order_id, response_time_seconds)
     }
     
-    fn record_maker_order_timeout(_maker: &T::AccountId) -> sp_runtime::DispatchResult {
-        // TODO: 实现从AccountId到maker_id的映射
-        // 当前简化实现：直接返回Ok
-        Ok(())
+    fn record_maker_order_timeout(
+        maker_id: u64,
+        order_id: u64,
+    ) -> sp_runtime::DispatchResult {
+        // 调用已有的做市商信用更新逻辑
+        Self::record_maker_order_timeout(maker_id, order_id)
     }
     
     fn record_maker_dispute_result(
-        _maker: &T::AccountId,
-        _buyer_win: bool,
+        maker_id: u64,
+        order_id: u64,
+        maker_win: bool,
     ) -> sp_runtime::DispatchResult {
-        // TODO: 实现从AccountId到maker_id的映射
-        // 当前简化实现：直接返回Ok
-        Ok(())
+        // 调用已有的做市商信用更新逻辑
+        Self::record_maker_dispute_result(maker_id, order_id, maker_win)
     }
 }
 

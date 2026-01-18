@@ -24,15 +24,18 @@ members = [
     "pallets/divination/daliuren",
     "pallets/divination/tarot",
     "pallets/divination/membership",
+    "pallets/divination/tee-privacy",
     "pallets/chat/common",
     "pallets/chat/permission",
     "pallets/chat/core",
     "pallets/chat/group",
+    "pallets/chat/contacts",
+    "pallets/chat/livestream",
     "pallets/trading/common",
     "pallets/trading/pricing",
     "pallets/trading/credit",
     "pallets/trading/maker",
-    "pallets/trading/bridge",
+    "pallets/trading/swap",
     "pallets/trading/otc",
     "pallets/escrow",
     "pallets/referral",
@@ -63,17 +66,20 @@ pallet-xiaoliuren = { path = "./pallets/divination/xiaoliuren", default-features
 pallet-daliuren = { path = "./pallets/divination/daliuren", default-features = false }
 pallet-tarot = { path = "./pallets/divination/tarot", default-features = false }
 pallet-membership = { path = "./pallets/divination/membership", default-features = false }
+pallet-tee-privacy = { path = "./pallets/divination/tee-privacy", default-features = false }
 # Chat pallets
 pallet-chat-common = { path = "./pallets/chat/common", default-features = false }
 pallet-chat-permission = { path = "./pallets/chat/permission", default-features = false }
 pallet-chat-core = { path = "./pallets/chat/core", default-features = false }
 pallet-chat-group = { path = "./pallets/chat/group", default-features = false }
+pallet-contacts = { path = "./pallets/chat/contacts", default-features = false }
+pallet-livestream = { path = "./pallets/chat/livestream", default-features = false }
 # Trading pallets
 pallet-trading-common = { path = "./pallets/trading/common", default-features = false }
 pallet-trading-pricing = { path = "./pallets/trading/pricing", default-features = false }
 pallet-trading-credit = { path = "./pallets/trading/credit", default-features = false }
 pallet-trading-maker = { path = "./pallets/trading/maker", default-features = false }
-pallet-trading-bridge = { path = "./pallets/trading/bridge", default-features = false }
+pallet-trading-swap = { path = "./pallets/trading/swap", default-features = false }
 pallet-trading-otc = { path = "./pallets/trading/otc", default-features = false }
 # Escrow, Referral, IPFS pallets
 pallet-escrow = { path = "./pallets/escrow", default-features = false }

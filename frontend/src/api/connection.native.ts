@@ -5,8 +5,8 @@
 
 import { ApiPromise, WsProvider } from '@polkadot/api';
 
-// 默认节点地址
-const DEFAULT_ENDPOINT = 'ws://127.0.0.1:9944';
+// 默认节点地址 - 优先使用环境变量
+const DEFAULT_ENDPOINT = process.env.EXPO_PUBLIC_WS_ENDPOINT || process.env.EXPO_PUBLIC_WS_PROVIDER || 'ws://127.0.0.1:9944';
 
 // 全局 API 实例
 let api: ApiPromise | null = null;

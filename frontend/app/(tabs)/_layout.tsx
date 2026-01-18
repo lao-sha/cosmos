@@ -5,6 +5,7 @@
 
 import { Tabs } from 'expo-router';
 import { Platform, View, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { HomeOutline, CompassOutline, MessageOutline, UserOutline } from '@/components/TabIcons';
 
 const THEME_COLOR = '#B2955D';
@@ -21,19 +22,12 @@ export default function TabsLayout() {
             backgroundColor: '#FFF',
             borderTopColor: '#F0F0F0',
             borderTopWidth: 1,
-            height: Platform.select({ ios: 88, android: 64, default: 64 }),
+            height: Platform.select({ ios: 88, android: 60, default: 60 }),
             paddingBottom: Platform.select({ ios: 24, android: 8, default: 8 }),
             paddingTop: 8,
-            maxWidth: 414,
-            width: '100%',
-            alignSelf: 'center',
-            position: 'absolute',
-            bottom: 0,
-            left: '50%',
-            transform: [{ translateX: -207 }],
           },
           tabBarLabelStyle: {
-            fontSize: 12,
+            fontSize: 11,
             fontWeight: '500',
           },
         }}
@@ -53,6 +47,15 @@ export default function TabsLayout() {
             title: '占卜',
             tabBarIcon: ({ color, size }) => (
               <CompassOutline color={color} size={size} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="market"
+          options={{
+            title: '市场',
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="storefront-outline" size={size} color={color} />
             ),
           }}
         />

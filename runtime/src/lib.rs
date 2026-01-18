@@ -238,6 +238,9 @@ mod runtime {
 	#[runtime::pallet_index(11)]
 	pub type Privacy = pallet_divination_privacy;
 
+	#[runtime::pallet_index(15)]
+	pub type TeePrivacy = pallet_tee_privacy;
+
 	// 服务模块
 	#[runtime::pallet_index(12)]
 	pub type DivinationAi = pallet_divination_ai;
@@ -287,6 +290,9 @@ mod runtime {
 	#[runtime::pallet_index(42)]
 	pub type ChatGroup = pallet_chat_group;
 
+	#[runtime::pallet_index(43)]
+	pub type Livestream = pallet_livestream;
+
 	// ============================================================================
 	// Trading Pallets
 	// ============================================================================
@@ -301,7 +307,7 @@ mod runtime {
 	pub type TradingMaker = pallet_trading_maker;
 
 	#[runtime::pallet_index(53)]
-	pub type TradingBridge = pallet_trading_bridge;
+	pub type TradingSwap = pallet_trading_swap;
 
 	#[runtime::pallet_index(54)]
 	pub type TradingOtc = pallet_trading_otc;

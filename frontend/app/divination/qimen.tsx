@@ -18,6 +18,11 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
+import { BottomNavBar } from '@/components/BottomNavBar';
+import { useDivinationSave } from '@/hooks/useDivinationSave';
+import { DivinationType } from '@/services/divination.service';
+import { UnlockWalletDialog } from '@/components/UnlockWalletDialog';
+import { TransactionStatusDialog } from '@/components/TransactionStatusDialog';
 
 // 主题色
 const THEME_COLOR = '#B2955D';
@@ -195,6 +200,21 @@ export default function QimenPage() {
   const [numberYangDun, setNumberYangDun] = useState(true);
   const [manualJu, setManualJu] = useState('yang1');
   const [paiMethod, setPaiMethod] = useState<PaiMethod>('zhuanpan');
+
+  // 上链保存功能
+  const {
+    showUnlockDialog,
+    showTxStatus,
+    txStatus,
+    saving,
+    saveToChain,
+    handleUnlockSuccess,
+    setShowUnlockDialog,
+    setShowTxStatus,
+  } = useDivinationSave({
+    divinationType: DivinationType.Qimen,
+    historyRoute: '/divination/qimen-list',
+  });
 
   // 节气列表
   const JIE_QI = ['小寒', '大寒', '立春', '雨水', '惊蛰', '春分', '清明', '谷雨',
@@ -589,10 +609,10 @@ export default function QimenPage() {
         {/* 开始排盘按钮 */}
         <Pressable
           style={[styles.primaryButton, loading && styles.buttonDisabled]}
-          onPress={calculateQimen}
-          disabled={loading}
+          onPress={() => saveToChain(result)}
+          disabled={loading || saving}
         >
-          {loading ? (
+          {loading || saving ? (
             <ActivityIndicator color={THEME_COLOR_LIGHT} />
           ) : (
             <Text style={styles.primaryButtonText}>开始排盘（上链存储）</Text>
@@ -733,9 +753,9 @@ export default function QimenPage() {
     <View style={styles.container}>
       {/* 顶部导航 */}
       <View style={styles.navBar}>
-        <Pressable style={styles.navItem} onPress={() => router.push('/divination/qimen-list' as any)}>
+        <Pressable style={styles.navItem} onPress={() => router.push('/divination/history' as any)}>
           <Ionicons name="albums-outline" size={20} color="#999" />
-          <Text style={styles.navItemText}>我的排盘</Text>
+          <Text style={styles.navItemText}>我的记录</Text>
         </Pressable>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={24} color="#333" />
@@ -747,29 +767,26 @@ export default function QimenPage() {
       </View>
 
       {/* 内容区 */}
-      <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {result ? renderResult() : renderInputForm()}
       </ScrollView>
 
-      {/* 底部导航 - 全局统一 */}
-      <View style={styles.bottomNav}>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/' as any)}>
-          <Text style={styles.bottomNavIcon}>🏠</Text>
-          <Text style={styles.bottomNavLabel}>首页</Text>
-        </Pressable>
-        <Pressable style={[styles.bottomNavItem, styles.bottomNavItemActive]} onPress={() => router.push('/divination' as any)}>
-          <Text style={styles.bottomNavIcon}>🧭</Text>
-          <Text style={[styles.bottomNavLabel, styles.bottomNavLabelActive]}>占卜</Text>
-        </Pressable>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/chat' as any)}>
-          <Text style={styles.bottomNavIcon}>💬</Text>
-          <Text style={styles.bottomNavLabel}>消息</Text>
-        </Pressable>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/profile' as any)}>
-          <Text style={styles.bottomNavIcon}>👤</Text>
-          <Text style={styles.bottomNavLabel}>我的</Text>
-        </Pressable>
-      </View>
+      {/* 解锁钱包对话框 */}
+      <UnlockWalletDialog
+        visible={showUnlockDialog}
+        onClose={() => setShowUnlockDialog(false)}
+        onSuccess={(password) => handleUnlockSuccess(password, result)}
+      />
+
+      {/* 交易状态对话框 */}
+      <TransactionStatusDialog
+        visible={showTxStatus}
+        status={txStatus}
+        onClose={() => setShowTxStatus(false)}
+      />
+
+      {/* 底部导航栏 */}
+      <BottomNavBar activeTab="divination" />
     </View>
   );
 }

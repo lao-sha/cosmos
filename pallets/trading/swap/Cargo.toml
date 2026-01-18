@@ -1,0 +1,58 @@
+[package]
+name = "pallet-trading-swap"
+version = "0.1.0"
+description = "DUST → USDT 做市商兑换模块 - Swap Pallet (原 pallet-trading-bridge)"
+authors = ["StarDust Team"]
+edition = "2021"
+license = "Unlicense"
+publish = false
+repository = "https://github.com/memoio/stardust"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+codec = { features = ["derive"], workspace = true }
+scale-info = { features = ["derive"], workspace = true }
+
+# Substrate 核心依赖
+frame-benchmarking = { optional = true, workspace = true }
+frame-support = { workspace = true }
+frame-system = { workspace = true }
+sp-runtime = { workspace = true }
+sp-std = { workspace = true }
+
+# 项目内部依赖
+pallet-escrow = { workspace = true }
+pallet-arbitration = { workspace = true }
+pallet-trading-common = { workspace = true }
+pallet-timestamp = { workspace = true }
+
+[dev-dependencies]
+sp-core = { workspace = true }
+sp-io = { workspace = true }
+
+[features]
+default = ["std"]
+std = [
+    "codec/std",
+    "scale-info/std",
+    "frame-benchmarking?/std",
+    "frame-support/std",
+    "frame-system/std",
+    "sp-runtime/std",
+    "sp-std/std",
+    "pallet-escrow/std",
+    "pallet-arbitration/std",
+    "pallet-trading-common/std",
+    "pallet-timestamp/std",
+]
+runtime-benchmarks = [
+    "frame-benchmarking/runtime-benchmarks",
+    "frame-support/runtime-benchmarks",
+    "frame-system/runtime-benchmarks",
+]
+try-runtime = [
+    "frame-support/try-runtime",
+    "frame-system/try-runtime",
+]

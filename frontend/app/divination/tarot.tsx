@@ -18,6 +18,11 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
+import { BottomNavBar } from '@/components/BottomNavBar';
+import { useDivinationSave } from '@/hooks/useDivinationSave';
+import { DivinationType } from '@/services/divination.service';
+import { UnlockWalletDialog } from '@/components/UnlockWalletDialog';
+import { TransactionStatusDialog } from '@/components/TransactionStatusDialog';
 
 // 主题色
 const THEME_COLOR = '#B2955D';
@@ -100,6 +105,21 @@ export default function TarotPage() {
   const [question, setQuestion] = useState('');
   const [questionType, setQuestionType] = useState(0);
   const [spreadType, setSpreadType] = useState<SpreadType>('single');
+
+  // 上链保存功能
+  const {
+    showUnlockDialog,
+    showTxStatus,
+    txStatus,
+    saving,
+    saveToChain,
+    handleUnlockSuccess,
+    setShowUnlockDialog,
+    setShowTxStatus,
+  } = useDivinationSave({
+    divinationType: DivinationType.Tarot,
+    historyRoute: '/divination/tarot-list',
+  });
 
   // 抽牌
   const drawCards = async () => {
@@ -251,10 +271,10 @@ export default function TarotPage() {
         {/* 开始抽牌按钮 */}
         <Pressable
           style={[styles.primaryButton, loading && styles.buttonDisabled]}
-          onPress={drawCards}
-          disabled={loading}
+          onPress={() => saveToChain(result)}
+          disabled={loading || saving}
         >
-          {loading ? (
+          {loading || saving ? (
             <ActivityIndicator color={THEME_COLOR_LIGHT} />
           ) : (
             <Text style={styles.primaryButtonText}>开始抽牌（上链存储）</Text>
@@ -410,9 +430,9 @@ export default function TarotPage() {
     <View style={styles.container}>
       {/* 顶部导航 */}
       <View style={styles.navBar}>
-        <Pressable style={styles.navItem} onPress={() => router.push('/divination/tarot-list' as any)}>
+        <Pressable style={styles.navItem} onPress={() => router.push('/divination/history' as any)}>
           <Ionicons name="albums-outline" size={20} color="#999" />
-          <Text style={styles.navItemText}>我的占卜</Text>
+          <Text style={styles.navItemText}>我的记录</Text>
         </Pressable>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={24} color="#333" />
@@ -424,29 +444,26 @@ export default function TarotPage() {
       </View>
 
       {/* 内容区 */}
-      <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {result ? renderResult() : renderInputForm()}
       </ScrollView>
 
-      {/* 底部导航 - 全局统一 */}
-      <View style={styles.bottomNav}>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/' as any)}>
-          <Text style={styles.bottomNavIcon}>🏠</Text>
-          <Text style={styles.bottomNavLabel}>首页</Text>
-        </Pressable>
-        <Pressable style={[styles.bottomNavItem, styles.bottomNavItemActive]} onPress={() => router.push('/divination' as any)}>
-          <Text style={styles.bottomNavIcon}>🧭</Text>
-          <Text style={[styles.bottomNavLabel, styles.bottomNavLabelActive]}>占卜</Text>
-        </Pressable>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/chat' as any)}>
-          <Text style={styles.bottomNavIcon}>💬</Text>
-          <Text style={styles.bottomNavLabel}>消息</Text>
-        </Pressable>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/profile' as any)}>
-          <Text style={styles.bottomNavIcon}>👤</Text>
-          <Text style={styles.bottomNavLabel}>我的</Text>
-        </Pressable>
-      </View>
+      {/* 解锁钱包对话框 */}
+      <UnlockWalletDialog
+        visible={showUnlockDialog}
+        onClose={() => setShowUnlockDialog(false)}
+        onSuccess={(password) => handleUnlockSuccess(password, result)}
+      />
+
+      {/* 交易状态对话框 */}
+      <TransactionStatusDialog
+        visible={showTxStatus}
+        status={txStatus}
+        onClose={() => setShowTxStatus(false)}
+      />
+
+      {/* 底部导航栏 */}
+      <BottomNavBar activeTab="divination" />
     </View>
   );
 }

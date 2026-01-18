@@ -610,11 +610,11 @@ pub mod pallet {
         /// # 实现细节
         /// - 使用链上随机数生成器获取高质量随机源
         /// - 最多重试100次防止无限循环
-        /// - 在群组数量达到10亿之前,碰撞概率极低
+        /// - 使用11位数ID范围(约900亿),在群组数量达到数十亿之前碰撞概率极低
         fn generate_unique_group_id() -> Result<u64, Error<T>> {
             const MAX_RETRIES: u32 = 100;
-            const MIN_ID: u64 = 1_000_000_000;  // 10位数最小值
-            const MAX_ID: u64 = 9_999_999_999;  // 10位数最大值
+            const MIN_ID: u64 = 10_000_000_000;  // 11位数最小值
+            const MAX_ID: u64 = 99_999_999_999;  // 11位数最大值
             const ID_RANGE: u64 = MAX_ID - MIN_ID + 1;
 
             for attempt in 0..MAX_RETRIES {
@@ -648,20 +648,28 @@ pub mod pallet {
 
         /// 解散群组的内部实现
         fn do_disband_group(group_id: u64) -> DispatchResult {
-            // 移除所有成员
+            // 1. 收集所有成员账户
+            let members: Vec<T::AccountId> = GroupMembers::<T>::iter_prefix(&group_id)
+                .map(|(account, _)| account)
+                .collect();
+
+            // 2. 从每个成员的群组列表中移除该群组
+            for member in members.iter() {
+                UserGroups::<T>::mutate(member, |groups| {
+                    groups.retain(|&g| g != group_id);
+                });
+            }
+
+            // 3. 移除所有成员记录
             let _result = GroupMembers::<T>::clear_prefix(&group_id, u32::MAX, None);
 
-            // 移除群组信息
+            // 4. 移除群组信息
             Groups::<T>::remove(&group_id);
 
-            // 移除群组消息
+            // 5. 移除群组消息
             let _result = GroupMessages::<T>::clear_prefix(&group_id, u32::MAX, None);
 
-            // 从所有用户的群组列表中移除
-            // 注意：这里为了简化实现，没有遍历所有用户
-            // 在实际应用中应该通过事件让前端处理
-
-            // 发出事件
+            // 6. 发出事件
             Self::deposit_event(Event::GroupDisbanded { group_id });
 
             Ok(())

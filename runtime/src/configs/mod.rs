@@ -204,6 +204,32 @@ impl pallet_divination_privacy::Config for Runtime {
 	type WeightInfo = ();
 }
 
+// -------------------- TEE Privacy (TEE 隐私计算) --------------------
+
+parameter_types! {
+	/// TEE 节点认证有效期 (约 24 小时)
+	pub const AttestationValidity: u32 = 14400;
+	/// 计算请求超时区块数 (约 10 分钟)
+	pub const TeeRequestTimeout: u32 = 100;
+	/// TEE 节点惩罚比例 (10%)
+	pub const TeeSlashRatio: u32 = 100;
+}
+
+impl pallet_tee_privacy::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type MaxNodes = ConstU32<100>;
+	type MaxPendingRequests = ConstU32<10000>;
+	type AttestationValidity = AttestationValidity;
+	type MaxAllowedMrEnclaves = ConstU32<50>;
+	type RequestTimeout = TeeRequestTimeout;
+	type MinimumStake = ConstU128<{ 100 * UNIT }>;
+	type BaseComputeFee = ConstU128<{ UNIT / 10 }>;
+	type SlashRatio = TeeSlashRatio;
+	type MaxBatchSize = ConstU32<100>;
+	type WeightInfo = pallet_tee_privacy::weights::SubstrateWeight<Runtime>;
+}
+
 // -------------------- AI 解读模块 --------------------
 
 parameter_types! {
@@ -493,6 +519,28 @@ impl pallet_chat_group::Config for Runtime {
 	type WeightInfo = ();
 }
 
+// -------------------- Livestream (直播间) --------------------
+
+parameter_types! {
+	pub const LivestreamPalletId: frame_support::PalletId = frame_support::PalletId(*b"py/lives");
+}
+
+impl pallet_livestream::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type MaxTitleLen = ConstU32<100>;
+	type MaxDescriptionLen = ConstU32<500>;
+	type MaxCidLen = ConstU32<64>;
+	type MaxGiftNameLen = ConstU32<32>;
+	type MaxCoHostsPerRoom = ConstU32<4>;
+	type PlatformFeePercent = ConstU8<20>; // 20% 平台抽成
+	type MinWithdrawAmount = ConstU128<{ 1 * UNIT }>; // 最小提现 1 DUST
+	type RoomDeposit = ConstU128<{ 10 * UNIT }>; // 创建直播间押金 10 DUST
+	type PalletId = LivestreamPalletId;
+	type GovernanceOrigin = frame_system::EnsureRoot<AccountId>;
+	type WeightInfo = ();
+}
+
 // ============================================================================
 // Trading Pallets Configuration
 // ============================================================================
@@ -561,7 +609,7 @@ impl pallet_trading_maker::Config for Runtime {
 // -------------------- Bridge (桥接服务) --------------------
 
 /// Bridge Pricing Provider 实现
-impl pallet_trading_bridge::pallet::PricingProvider<Balance> for TradingPricingProvider {
+impl pallet_trading_swap::pallet::PricingProvider<Balance> for TradingPricingProvider {
 	fn get_dust_to_usd_rate() -> Option<Balance> {
 		let price = pallet_trading_pricing::Pallet::<Runtime>::get_dust_market_price_weighted();
 		if price > 0 {
@@ -575,10 +623,10 @@ impl pallet_trading_bridge::pallet::PricingProvider<Balance> for TradingPricingP
 /// Bridge Maker 接口适配器
 pub struct BridgeMakerAdapter;
 
-impl pallet_trading_bridge::pallet::MakerInterface<AccountId, Balance> for BridgeMakerAdapter {
-	fn get_maker_application(maker_id: u64) -> Option<pallet_trading_bridge::pallet::MakerApplicationInfo<AccountId, Balance>> {
+impl pallet_trading_swap::pallet::MakerInterface<AccountId, Balance> for BridgeMakerAdapter {
+	fn get_maker_application(maker_id: u64) -> Option<pallet_trading_swap::pallet::MakerApplicationInfo<AccountId, Balance>> {
 		pallet_trading_maker::Pallet::<Runtime>::maker_applications(maker_id).map(|app| {
-			pallet_trading_bridge::pallet::MakerApplicationInfo {
+			pallet_trading_swap::pallet::MakerApplicationInfo {
 				account: app.owner,
 				tron_address: app.tron_address,
 				is_active: app.status == pallet_trading_maker::pallet::ApplicationStatus::Active,
@@ -599,7 +647,7 @@ impl pallet_trading_bridge::pallet::MakerInterface<AccountId, Balance> for Bridg
 /// Bridge Credit 接口适配器
 pub struct BridgeCreditAdapter;
 
-impl pallet_trading_bridge::pallet::CreditInterface for BridgeCreditAdapter {
+impl pallet_trading_swap::pallet::CreditInterface for BridgeCreditAdapter {
 	fn record_maker_order_completed(maker_id: u64, order_id: u64, response_time_seconds: u32) -> sp_runtime::DispatchResult {
 		pallet_trading_credit::Pallet::<Runtime>::record_maker_order_completed(maker_id, order_id, response_time_seconds)
 	}
@@ -613,7 +661,7 @@ impl pallet_trading_bridge::pallet::CreditInterface for BridgeCreditAdapter {
 	}
 }
 
-impl pallet_trading_bridge::Config for Runtime {
+impl pallet_trading_swap::Config for Runtime {
 	type Currency = Balances;
 	type Escrow = pallet_escrow::Pallet<Runtime>;
 	type Pricing = TradingPricingProvider;
@@ -704,9 +752,9 @@ impl pallet_trading_otc::Config for Runtime {
 	type ChatPermission = pallet_chat_permission::Pallet<Runtime>;
 	type OrderTimeout = ConstU64<3600000>; // 1小时（毫秒）
 	type EvidenceWindow = ConstU64<86400000>; // 24小时（毫秒）
-	type FirstPurchaseUsdValue = ConstU128<10_000_000>; // 10 USD
-	type MinFirstPurchaseDustAmount = ConstU128<{ 1 * UNIT }>; // 最小1 DUST
-	type MaxFirstPurchaseDustAmount = ConstU128<{ 1000 * UNIT }>; // 最大1000 DUST
+	type FirstPurchaseUsdValue = ConstU128<10_000_000>; // 10 USD (精度 10^6)
+	type MinFirstPurchaseDustAmount = ConstU128<{ 1 * UNIT }>; // 最小1 DUST (防止汇率过高)
+	type MaxFirstPurchaseDustAmount = ConstU128<{ 100_000_000 * UNIT }>; // 最大1亿DUST (防止汇率异常低)
 	type MaxOrderUsdAmount = ConstU64<200_000_000>; // 200 USD
 	type MinOrderUsdAmount = ConstU64<20_000_000>; // 20 USD
 	type FirstPurchaseUsdAmount = ConstU64<10_000_000>; // 10 USD

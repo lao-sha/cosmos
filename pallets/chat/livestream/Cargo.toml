@@ -1,0 +1,51 @@
+[package]
+name = "pallet-livestream"
+version = "0.1.0"
+authors = ["Stardust Team"]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/lao-sha/stardust"
+description = "去中心化直播间模块 - 支持主播开播、观众互动、礼物打赏等功能"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+codec = { features = ["derive"], workspace = true }
+scale-info = { features = ["derive"], workspace = true }
+log = { workspace = true }
+
+# Substrate
+frame-support = { workspace = true }
+frame-system = { workspace = true }
+sp-runtime = { workspace = true }
+sp-std = { workspace = true }
+sp-core = { workspace = true }
+sp-api = { workspace = true }
+frame-benchmarking = { workspace = true, optional = true }
+
+[dev-dependencies]
+sp-io = { workspace = true, features = ["std"] }
+pallet-balances = { workspace = true, features = ["std"] }
+
+[features]
+default = ["std"]
+std = [
+	"codec/std",
+	"scale-info/std",
+	"log/std",
+	"frame-support/std",
+	"frame-system/std",
+	"sp-runtime/std",
+	"sp-std/std",
+	"sp-core/std",
+	"sp-api/std",
+	"frame-benchmarking?/std",
+]
+try-runtime = ["frame-support/try-runtime"]
+runtime-benchmarks = [
+	"frame-benchmarking/runtime-benchmarks",
+	"frame-support/runtime-benchmarks",
+	"frame-system/runtime-benchmarks",
+	"sp-runtime/runtime-benchmarks",
+]

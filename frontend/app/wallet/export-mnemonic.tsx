@@ -20,6 +20,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { retrieveEncryptedMnemonic } from '@/lib/keystore';
+import { BottomNavBar } from '@/components/BottomNavBar';
 
 // 主题色
 const THEME_COLOR = '#B2955D';
@@ -72,7 +73,7 @@ export default function ExportMnemonicPage() {
         <View style={styles.placeholder} />
       </View>
 
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {!isVerified ? (
           <>
             {/* 警告提示 */}
@@ -166,25 +167,8 @@ export default function ExportMnemonicPage() {
         )}
       </ScrollView>
 
-      {/* 底部导航 - 全局统一 */}
-      <View style={styles.bottomNav}>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/' as any)}>
-          <Text style={styles.bottomNavIcon}>🏠</Text>
-          <Text style={styles.bottomNavLabel}>首页</Text>
-        </Pressable>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/divination' as any)}>
-          <Text style={styles.bottomNavIcon}>🧭</Text>
-          <Text style={styles.bottomNavLabel}>占卜</Text>
-        </Pressable>
-        <Pressable style={styles.bottomNavItem} onPress={() => router.push('/chat' as any)}>
-          <Text style={styles.bottomNavIcon}>💬</Text>
-          <Text style={styles.bottomNavLabel}>消息</Text>
-        </Pressable>
-        <Pressable style={[styles.bottomNavItem, styles.bottomNavItemActive]} onPress={() => router.push('/profile' as any)}>
-          <Text style={styles.bottomNavIcon}>👤</Text>
-          <Text style={[styles.bottomNavLabel, styles.bottomNavLabelActive]}>我的</Text>
-        </Pressable>
-      </View>
+      {/* 底部导航栏 */}
+      <BottomNavBar activeTab="profile" />
     </View>
   );
 }

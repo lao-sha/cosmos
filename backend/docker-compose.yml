@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  livestream-backend:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - LIVEKIT_URL=${LIVEKIT_URL}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+      - CHAIN_WS_ENDPOINT=${CHAIN_WS_ENDPOINT:-ws://host.docker.internal:9944}
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  # LiveKit 服务器 (开发环境)
+  livekit:
+    image: livekit/livekit-server:latest
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    environment:
+      - LIVEKIT_KEYS=devkey: secret
+    command: --dev --bind 0.0.0.0
+    restart: unless-stopped
+
+volumes:
+  redis-data:

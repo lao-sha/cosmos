@@ -25,6 +25,7 @@
 
 // External crates imports
 use alloc::vec::Vec;
+use codec::Encode;
 use frame_support::{
 	genesis_builder_helper::{build_state, get_preset},
 	weights::Weight,
@@ -42,8 +43,8 @@ use sp_version::RuntimeVersion;
 
 // Local module imports
 use super::{
-	AccountId, Aura, Balance, Block, Executive, Grandpa, InherentDataExt, Nonce, Runtime,
-	RuntimeCall, RuntimeGenesisConfig, SessionKeys, System, TransactionPayment, VERSION,
+	AccountId, Aura, Balance, Block, BlockNumber, Executive, Grandpa, InherentDataExt, Livestream, Nonce, Runtime,
+	RuntimeCall, RuntimeGenesisConfig, SessionKeys, System, TransactionPayment, TeePrivacy, VERSION,
 };
 
 impl_runtime_apis! {
@@ -299,6 +300,223 @@ impl_runtime_apis! {
 
 		fn preset_names() -> Vec<sp_genesis_builder::PresetId> {
 			crate::genesis_config_presets::preset_names()
+		}
+	}
+
+	// ============================================================================
+	// TEE Privacy Runtime API
+	// ============================================================================
+
+	impl pallet_tee_privacy::runtime_api::TeePrivacyApi<Block, AccountId, BlockNumber> for Runtime {
+		fn get_active_nodes() -> Vec<pallet_tee_privacy::types::TeeNodeInfo> {
+			TeePrivacy::active_nodes()
+				.iter()
+				.filter_map(|account| TeePrivacy::tee_nodes(account).map(|node| {
+					pallet_tee_privacy::types::TeeNodeInfo {
+						account: node.account.encode(),
+						enclave_pubkey: node.enclave_pubkey,
+						tee_type: node.attestation.tee_type.clone(),
+						status: node.status.clone(),
+						registered_at: node.registered_at,
+						mr_enclave: node.attestation.mr_enclave,
+						attestation_timestamp: node.attestation.timestamp,
+					}
+				}))
+				.collect()
+		}
+
+		fn get_node_info(account: AccountId) -> Option<pallet_tee_privacy::types::TeeNodeInfo> {
+			TeePrivacy::tee_nodes(&account).map(|node| {
+				pallet_tee_privacy::types::TeeNodeInfo {
+					account: node.account.encode(),
+					enclave_pubkey: node.enclave_pubkey,
+					tee_type: node.attestation.tee_type.clone(),
+					status: node.status.clone(),
+					registered_at: node.registered_at,
+					mr_enclave: node.attestation.mr_enclave,
+					attestation_timestamp: node.attestation.timestamp,
+				}
+			})
+		}
+
+		fn get_enclave_pubkey(account: AccountId) -> Option<[u8; 32]> {
+			TeePrivacy::get_enclave_pubkey(&account)
+		}
+
+		fn is_node_active(account: AccountId) -> bool {
+			TeePrivacy::is_node_active(&account)
+		}
+
+		fn get_active_node_count() -> u32 {
+			TeePrivacy::active_node_count()
+		}
+
+		fn get_node_count() -> u32 {
+			TeePrivacy::node_count()
+		}
+
+		fn get_request_status(request_id: u64) -> Option<pallet_tee_privacy::types::RequestStatusInfo> {
+			TeePrivacy::compute_requests(request_id).map(|req| {
+				pallet_tee_privacy::types::RequestStatusInfo {
+					request_id: req.id,
+					requester: req.requester.encode(),
+					compute_type_id: req.compute_type_id,
+					input_hash: req.input_hash,
+					assigned_node: req.assigned_node.map(|n| n.encode()),
+					created_at: req.created_at,
+					timeout_at: req.timeout_at,
+					status: req.status.clone(),
+					failover_count: req.failover_count,
+					failure_reason: req.failure_reason.clone(),
+				}
+			})
+		}
+
+		fn get_user_pending_requests(account: AccountId) -> Vec<u64> {
+			TeePrivacy::pending_requests()
+				.iter()
+				.filter(|&id| {
+					TeePrivacy::compute_requests(id)
+						.map(|req| req.requester == account)
+						.unwrap_or(false)
+				})
+				.copied()
+				.collect()
+		}
+
+		fn get_node_current_request(node: AccountId) -> Option<u64> {
+			TeePrivacy::node_current_request(&node)
+		}
+
+		fn get_next_request_id() -> u64 {
+			TeePrivacy::next_request_id()
+		}
+
+		fn get_pending_request_count() -> u32 {
+			TeePrivacy::pending_requests().len() as u32
+		}
+
+		fn verify_attestation(
+			mr_enclave: [u8; 32],
+			mr_signer: [u8; 32],
+			timestamp: u64,
+		) -> pallet_tee_privacy::types::AttestationVerifyResult {
+			let allowed_enclaves = TeePrivacy::allowed_mr_enclaves();
+			let allowed_signers = TeePrivacy::allowed_mr_signers();
+
+			let mr_enclave_match = allowed_enclaves.is_empty() || allowed_enclaves.contains(&mr_enclave);
+			let mr_signer_match = allowed_signers.is_empty() || allowed_signers.contains(&mr_signer);
+
+			// Check if attestation is expired (24 hours = 86400 seconds)
+			let now = pallet_timestamp::Pallet::<Runtime>::get();
+			let current_timestamp: u64 = now.try_into().ok().unwrap_or(0);
+			let is_expired = timestamp < current_timestamp.saturating_sub(86400);
+
+			let is_valid = mr_enclave_match && mr_signer_match && !is_expired;
+
+			let error_message = if !mr_enclave_match {
+				Some(b"MRENCLAVE not in allowed list".to_vec())
+			} else if !mr_signer_match {
+				Some(b"MRSIGNER not in allowed list".to_vec())
+			} else if is_expired {
+				Some(b"Attestation expired".to_vec())
+			} else {
+				None
+			};
+
+			pallet_tee_privacy::types::AttestationVerifyResult {
+				is_valid,
+				mr_enclave_match,
+				is_expired,
+				error_message,
+			}
+		}
+
+		fn get_allowed_mr_enclaves() -> Vec<[u8; 32]> {
+			TeePrivacy::allowed_mr_enclaves().to_vec()
+		}
+
+		fn get_allowed_mr_signers() -> Vec<[u8; 32]> {
+			TeePrivacy::allowed_mr_signers().to_vec()
+		}
+
+		fn get_node_stake(account: AccountId) -> Option<(u128, Option<BlockNumber>, bool)> {
+			TeePrivacy::node_stakes(&account).map(|stake| {
+				let amount: u128 = stake.amount.try_into().ok().unwrap_or(0);
+				(amount, stake.unlock_at, stake.is_unbonding)
+			})
+		}
+
+		fn get_minimum_stake() -> u128 {
+			use frame_support::traits::Get;
+			let stake: Balance = <Runtime as pallet_tee_privacy::Config>::MinimumStake::get();
+			stake.try_into().ok().unwrap_or(0)
+		}
+
+		fn get_total_slashed() -> u128 {
+			TeePrivacy::total_slashed().try_into().ok().unwrap_or(0)
+		}
+
+		fn get_reward_pool() -> u128 {
+			TeePrivacy::reward_pool().try_into().ok().unwrap_or(0)
+		}
+
+		fn is_audit_enabled() -> bool {
+			TeePrivacy::audit_enabled()
+		}
+
+		fn get_account_audit_log_count(account: AccountId) -> u32 {
+			TeePrivacy::account_audit_logs(&account).len() as u32
+		}
+
+		fn get_next_audit_log_id() -> u64 {
+			TeePrivacy::next_audit_log_id()
+		}
+	}
+
+	// ============================================================================
+	// Livestream Runtime API
+	// ============================================================================
+
+	impl pallet_livestream::runtime_api::LivestreamApi<Block, AccountId, Balance> for Runtime {
+		fn get_room(room_id: u64) -> Option<pallet_livestream::runtime_api::LiveRoomInfo<AccountId, Balance>> {
+			Livestream::get_room_info(room_id)
+		}
+
+		fn get_host_room(host: AccountId) -> Option<u64> {
+			Livestream::host_room(&host)
+		}
+
+		fn get_live_rooms() -> Vec<u64> {
+			Livestream::get_live_room_ids()
+		}
+
+		fn get_gift(gift_id: u32) -> Option<pallet_livestream::runtime_api::GiftInfo<Balance>> {
+			Livestream::get_gift_info(gift_id)
+		}
+
+		fn get_enabled_gifts() -> Vec<pallet_livestream::runtime_api::GiftInfo<Balance>> {
+			Livestream::get_enabled_gifts()
+		}
+
+		fn has_ticket(room_id: u64, user: AccountId) -> bool {
+			Livestream::has_ticket(room_id, &user)
+		}
+
+		fn is_blacklisted(room_id: u64, user: AccountId) -> bool {
+			Livestream::is_blacklisted(room_id, &user)
+		}
+
+		fn get_host_earnings(host: AccountId) -> Balance {
+			Livestream::host_earnings(&host)
+		}
+
+		fn get_user_room_gifts(room_id: u64, user: AccountId) -> Balance {
+			Livestream::user_room_gifts(room_id, &user)
+		}
+
+		fn get_co_hosts(room_id: u64) -> Vec<AccountId> {
+			Livestream::get_co_host_list(room_id)
 		}
 	}
 }
