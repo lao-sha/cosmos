@@ -877,7 +877,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "regex",
@@ -6372,6 +6372,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 
 [[package]]
+name = "pallet-affiliate"
+version = "1.0.0"
+dependencies = [
+ "frame-benchmarking 45.0.0",
+ "frame-support 45.0.0",
+ "frame-system 45.0.0",
+ "pallet-balances",
+ "pallet-referral",
+ "pallet-timestamp",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+ "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "pallet-almanac"
 version = "0.1.0"
 dependencies = [
@@ -6396,6 +6414,9 @@ dependencies = [
  "frame-support 45.0.0",
  "frame-system 45.0.0",
  "pallet-escrow",
+ "pallet-stardust-ipfs",
+ "pallet-storage-lifecycle",
+ "pallet-trading-common",
  "parity-scale-codec",
  "scale-info",
  "sp-arithmetic 28.0.0",
@@ -6591,6 +6612,8 @@ dependencies = [
  "pallet-chat-common",
  "pallet-chat-permission",
  "pallet-stardust-ipfs",
+ "pallet-timestamp",
+ "pallet-trading-common",
  "parity-scale-codec",
  "scale-info",
  "sp-core 39.0.0",
@@ -6614,6 +6637,24 @@ dependencies = [
  "sp-io 44.0.0",
  "sp-runtime 45.0.0",
  "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "pallet-collective"
+version = "45.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a6ab7b91882b9cceeda0efd67259ff18cac710272b21df801e014d15bbe0fe3"
+dependencies = [
+ "docify",
+ "frame-benchmarking 45.0.0",
+ "frame-support 45.0.0",
+ "frame-system 45.0.0",
+ "log",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
 ]
 
 [[package]]
@@ -6658,6 +6699,7 @@ dependencies = [
  "frame-system 45.0.0",
  "pallet-balances",
  "pallet-divination-common",
+ "pallet-stardust-ipfs",
  "pallet-timestamp",
  "parity-scale-codec",
  "scale-info",
@@ -6689,9 +6731,13 @@ dependencies = [
  "frame-benchmarking 45.0.0",
  "frame-support 45.0.0",
  "frame-system 45.0.0",
+ "pallet-affiliate",
  "pallet-balances",
  "pallet-divination-common",
+ "pallet-stardust-ipfs",
+ "pallet-storage-lifecycle",
  "pallet-timestamp",
+ "pallet-trading-common",
  "parity-scale-codec",
  "scale-info",
  "sp-core 39.0.0",
@@ -6709,6 +6755,7 @@ dependencies = [
  "frame-system 45.0.0",
  "pallet-balances",
  "pallet-divination-common",
+ "pallet-stardust-ipfs",
  "pallet-timestamp",
  "parity-scale-codec",
  "scale-info",
@@ -6744,12 +6791,8 @@ version = "0.1.0"
 dependencies = [
  "frame-support 45.0.0",
  "frame-system 45.0.0",
- "pallet-balances",
- "pallet-timestamp",
  "parity-scale-codec",
  "scale-info",
- "sp-core 39.0.0",
- "sp-io 44.0.0",
  "sp-runtime 45.0.0",
 ]
 
@@ -6833,6 +6876,7 @@ dependencies = [
  "frame-system 45.0.0",
  "log",
  "pallet-balances",
+ "pallet-trading-common",
  "parity-scale-codec",
  "scale-info",
  "sp-api 40.0.0",
@@ -6878,6 +6922,23 @@ dependencies = [
  "sp-io 44.0.0",
  "sp-runtime 45.0.0",
  "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "pallet-membership"
+version = "45.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "914e1b70cc37a302601d6157e75567b33ec917646e2ae5ed7d3bbe3403138aca"
+dependencies = [
+ "frame-benchmarking 45.0.0",
+ "frame-support 45.0.0",
+ "frame-system 45.0.0",
+ "log",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
 ]
 
 [[package]]
@@ -6938,6 +6999,7 @@ dependencies = [
 name = "pallet-referral"
 version = "1.0.0"
 dependencies = [
+ "frame-benchmarking 45.0.0",
  "frame-support 45.0.0",
  "frame-system 45.0.0",
  "pallet-balances",
@@ -7016,6 +7078,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-storage-lifecycle"
+version = "0.1.0"
+dependencies = [
+ "frame-benchmarking 45.0.0",
+ "frame-support 45.0.0",
+ "frame-system 45.0.0",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+ "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "pallet-sudo"
 version = "45.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7070,20 +7147,6 @@ dependencies = [
  "sp-io 44.0.0",
  "sp-runtime 45.0.0",
  "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "pallet-template"
-version = "0.1.0"
-dependencies = [
- "frame-benchmarking 45.0.0",
- "frame-support 45.0.0",
- "frame-system 45.0.0",
- "parity-scale-codec",
- "scale-info",
- "sp-core 39.0.0",
- "sp-io 44.0.0",
- "sp-runtime 45.0.0",
 ]
 
 [[package]]
@@ -7143,6 +7206,7 @@ dependencies = [
  "frame-benchmarking 45.0.0",
  "frame-support 45.0.0",
  "frame-system 45.0.0",
+ "pallet-stardust-ipfs",
  "pallet-timestamp",
  "pallet-trading-common",
  "pallet-trading-credit",
@@ -7164,6 +7228,8 @@ dependencies = [
  "pallet-arbitration",
  "pallet-chat-permission",
  "pallet-escrow",
+ "pallet-stardust-ipfs",
+ "pallet-storage-lifecycle",
  "pallet-timestamp",
  "pallet-trading-common",
  "pallet-trading-credit",
@@ -7202,6 +7268,8 @@ dependencies = [
  "frame-system 45.0.0",
  "pallet-arbitration",
  "pallet-escrow",
+ "pallet-stardust-ipfs",
+ "pallet-storage-lifecycle",
  "pallet-timestamp",
  "pallet-trading-common",
  "parity-scale-codec",
@@ -8373,7 +8441,7 @@ version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "itertools 0.14.0",
  "log",
  "multimap",
@@ -8393,7 +8461,7 @@ version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac6c3320f9abac597dcbc668774ef006702672474aad53c6d596b62e487b40b1"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "itertools 0.14.0",
  "log",
  "multimap",
@@ -11045,6 +11113,8 @@ dependencies = [
  "frame-system-benchmarking 45.0.0",
  "frame-system-rpc-runtime-api 40.0.0",
  "frame-try-runtime 0.51.0",
+ "hex",
+ "pallet-affiliate",
  "pallet-almanac",
  "pallet-arbitration",
  "pallet-aura",
@@ -11054,6 +11124,7 @@ dependencies = [
  "pallet-chat-core",
  "pallet-chat-group",
  "pallet-chat-permission",
+ "pallet-collective",
  "pallet-daliuren",
  "pallet-divination-ai",
  "pallet-divination-common",
@@ -11066,13 +11137,14 @@ dependencies = [
  "pallet-liuyao",
  "pallet-livestream",
  "pallet-meihua",
+ "pallet-membership 45.0.0",
  "pallet-qimen",
  "pallet-referral",
  "pallet-stardust-ipfs",
+ "pallet-storage-lifecycle",
  "pallet-sudo",
  "pallet-tarot",
  "pallet-tee-privacy",
- "pallet-template",
  "pallet-timestamp",
  "pallet-trading-common",
  "pallet-trading-credit",
@@ -14435,7 +14507,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

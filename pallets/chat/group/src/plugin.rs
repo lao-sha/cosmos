@@ -5,7 +5,7 @@
 use crate::types::*;
 use codec::{Decode, Encode};
 use frame_support::pallet_prelude::*;
-use sp_std::{vec::Vec, collections::btree_map::BTreeMap};
+use sp_std::{vec, vec::Vec, collections::btree_map::BTreeMap};
 use sp_core::H256;
 use sp_runtime::traits::{Hash, Saturating};
 
@@ -91,10 +91,11 @@ impl<T: frame_system::Config> PluginEcosystem<T> {
             }
         }
 
+        let total_time = self.calculate_total_execution_time(&execution_results);
         Ok(PluginExecutionResult {
             hook_type,
             results: execution_results,
-            total_execution_time: self.calculate_total_execution_time(&execution_results),
+            total_execution_time: total_time,
         })
     }
 
@@ -165,7 +166,8 @@ impl<T: frame_system::Config> PluginEcosystem<T> {
         }
 
         // 检查版本格式
-        if !self.is_valid_semver(&plugin_info.version) {
+        let version_str = core::str::from_utf8(&plugin_info.version).unwrap_or("");
+        if !self.is_valid_semver(version_str) {
             return Err(PluginError::InvalidVersion);
         }
 
@@ -377,7 +379,7 @@ impl<T: frame_system::Config> PluginEcosystem<T> {
             failed_executions: 0,
             average_execution_time: 0,
             memory_usage: 0,
-            cpu_usage: 0.0,
+            cpu_usage: 0,
             last_execution: 0,
         }
     }
@@ -406,23 +408,23 @@ impl<T: frame_system::Config> PluginEcosystem<T> {
         }
     }
 
-    fn determine_allowed_apis(&self, permissions: &PluginPermissions) -> Vec<String> {
+    fn determine_allowed_apis(&self, permissions: &PluginPermissions) -> Vec<Vec<u8>> {
         let mut apis = Vec::new();
 
         if permissions.can_read_messages {
-            apis.push("message.read".to_string());
+            apis.push(b"message.read".to_vec());
         }
 
         if permissions.can_send_messages {
-            apis.push("message.send".to_string());
+            apis.push(b"message.send".to_vec());
         }
 
         if permissions.can_access_storage {
-            apis.push("storage.access".to_string());
+            apis.push(b"storage.access".to_vec());
         }
 
         if permissions.can_network_access {
-            apis.push("network.access".to_string());
+            apis.push(b"network.access".to_vec());
         }
 
         apis
@@ -430,12 +432,12 @@ impl<T: frame_system::Config> PluginEcosystem<T> {
 
     fn get_system_info(&self) -> PluginSystemInfo {
         PluginSystemInfo {
-            version: "1.0.0".to_string(),
-            platform: "Substrate".to_string(),
+            version: b"1.0.0".to_vec(),
+            platform: b"Substrate".to_vec(),
             features: vec![
-                "quantum-resistant".to_string(),
-                "ai-decision".to_string(),
-                "optimistic-ui".to_string(),
+                b"quantum-resistant".to_vec(),
+                b"ai-decision".to_vec(),
+                b"optimistic-ui".to_vec(),
             ],
         }
     }
@@ -473,7 +475,7 @@ impl<T: frame_system::Config> PluginEcosystem<T> {
         Ok(PluginResult {
             success: true,
             data: Vec::new(),
-            message: "Plugin executed successfully".to_string(),
+            message: b"Plugin executed successfully".to_vec(),
             modified_data: None,
         })
     }
@@ -671,7 +673,7 @@ pub struct PluginContext {
     /// 消息ID（如果适用）
     pub message_id: Option<MessageId>,
     /// 额外上下文数据
-    pub extra_data: BTreeMap<String, Vec<u8>>,
+    pub extra_data: BTreeMap<Vec<u8>, Vec<u8>>,
 }
 
 /// 插件沙盒环境
@@ -688,7 +690,7 @@ pub struct PluginSandbox {
     /// 是否允许文件访问
     pub file_access: bool,
     /// 允许的API列表
-    pub allowed_apis: Vec<String>,
+    pub allowed_apis: Vec<Vec<u8>>,
     /// 资源限制
     pub resource_limits: PluginResourceLimits,
 }
@@ -701,7 +703,7 @@ pub struct PluginResult {
     /// 返回数据
     pub data: Vec<u8>,
     /// 执行消息
-    pub message: String,
+    pub message: Vec<u8>,
     /// 修改后的数据（如果有）
     pub modified_data: Option<Vec<u8>>,
 }
@@ -741,8 +743,8 @@ pub struct PluginMetrics {
     pub average_execution_time: u64,
     /// 内存使用量
     pub memory_usage: u64,
-    /// CPU使用率
-    pub cpu_usage: f32,
+    /// CPU使用率 (0-100)
+    pub cpu_usage: u8,
     /// 最后执行时间
     pub last_execution: u64,
 }
@@ -777,11 +779,11 @@ pub struct PluginExecutionContext {
 #[derive(Clone, PartialEq, Eq, RuntimeDebug)]
 pub struct PluginSystemInfo {
     /// 系统版本
-    pub version: String,
+    pub version: Vec<u8>,
     /// 平台信息
-    pub platform: String,
+    pub platform: Vec<u8>,
     /// 支持的功能列表
-    pub features: Vec<String>,
+    pub features: Vec<Vec<u8>>,
 }
 
 /// 插件错误类型

@@ -699,14 +699,54 @@ export async function getCurrentBlock(): Promise<number> {
 }
 
 /**
- * 订阅区块
+ * 暂停服务（解卦师）
  */
-export async function subscribeBlocks(
-  callback: (blockNumber: number) => void
-): Promise<() => void> {
+export async function pauseProvider(
+  signer: KeyringPair,
+  callbacks?: TransactionCallbacks
+): Promise<TransactionResult> {
   const api = await getApi();
-  const unsub = await api.rpc.chain.subscribeNewHeads((header) => {
-    callback(header.number.toNumber());
-  });
-  return unsub;
+  const tx = (api.tx as any).divinationMarket.pauseProvider();
+  return signAndSend(tx, signer, callbacks);
+}
+
+/**
+ * 恢复服务（解卦师）
+ */
+export async function resumeProvider(
+  signer: KeyringPair,
+  callbacks?: TransactionCallbacks
+): Promise<TransactionResult> {
+  const api = await getApi();
+  const tx = (api.tx as any).divinationMarket.resumeProvider();
+  return signAndSend(tx, signer, callbacks);
+}
+
+/**
+ * 提交举报
+ */
+export async function submitReport(
+  signer: KeyringPair,
+  params: {
+    provider: string;
+    reportType: number;
+    evidenceCid: string;
+    description: string;
+    relatedOrderId?: number;
+    isAnonymous?: boolean;
+  },
+  callbacks?: TransactionCallbacks
+): Promise<TransactionResult> {
+  const api = await getApi();
+  const tx = (api.tx as any).divinationMarket.submitReport(
+    params.provider,
+    params.reportType,
+    params.evidenceCid,
+    params.description,
+    params.relatedOrderId || null,
+    null, // relatedBountyId
+    null, // relatedAnswerId
+    params.isAnonymous ?? false
+  );
+  return signAndSend(tx, signer, callbacks);
 }

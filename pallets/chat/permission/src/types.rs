@@ -26,10 +26,6 @@ pub enum SceneType {
     /// 当订单创建时自动授权买卖双方聊天
     Order,
 
-    /// 纪念馆场景：访客可联系管理员
-    /// 当用户访问或操作纪念馆时授权
-    Memorial,
-
     /// 群聊场景：群成员之间的聊天
     /// 群聊成员自动获得相互聊天权限
     Group,
@@ -47,14 +43,14 @@ impl Default for SceneType {
 
 /// 场景标识符枚举
 ///
-/// 用于唯一标识某个具体的业务场景实例，如订单ID、纪念馆ID等。
+/// 用于唯一标识某个具体的业务场景实例，如订单ID、群聊ID等。
 #[derive(Encode, Decode, DecodeWithMemTracking, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen, Default)]
 pub enum SceneId {
     /// 无特定 ID（如 MarketMaker 场景不需要具体ID）
     #[default]
     None,
 
-    /// 数字 ID（订单号、纪念馆ID、群聊ID等）
+    /// 数字 ID（订单号、群聊ID等）
     Numeric(u64),
 
     /// Hash ID（用于更复杂的标识需求）

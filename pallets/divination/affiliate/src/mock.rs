@@ -21,6 +21,7 @@ frame_support::construct_runtime!(
         System: frame_system,
         Balances: pallet_balances,
         Timestamp: pallet_timestamp,
+        Referral: pallet_affiliate_referral,
         Affiliate: pallet_affiliate,
     }
 );
@@ -118,7 +119,7 @@ parameter_types! {
     pub const MaxCodeLen: u32 = 32;
     
     /// 函数级中文注释：推荐链最大搜索深度
-    pub const MaxSearchHops: u32 = 15;
+    pub const MaxSearchHops: u32 = 20;
     
     /// 函数级中文注释：国库账户（测试账户：999）
     pub const TreasuryAccount: u64 = 999;
@@ -128,6 +129,29 @@ parameter_types! {
     
     /// 函数级中文注释：存储费用账户（测试账户：997）
     pub const StorageAccount: u64 = 997;
+    
+    /// 最大活跃提案数
+    pub const MaxActiveProposals: u32 = 10;
+    
+    /// 最大待执行提案数
+    pub const MaxReadyProposals: u32 = 5;
+    
+    /// 历史记录保留周数
+    pub const HistoryRetentionWeeks: u32 = 12;
+    
+    /// 提案过期区块数（7天）
+    pub const ProposalExpiry: u64 = 100800;
+}
+
+// ========================================
+// Referral Pallet 配置
+// ========================================
+
+impl pallet_affiliate_referral::Config for Test {
+    type MembershipProvider = MockMembershipProvider;
+    type MaxCodeLen = MaxCodeLen;
+    type MaxSearchHops = MaxSearchHops;
+    type WeightInfo = ();
 }
 
 // ========================================
@@ -158,12 +182,14 @@ impl pallet_affiliate::Config for Test {
     type EscrowPalletId = AffiliatePalletId;
     type WithdrawOrigin = frame_system::EnsureRoot<u64>;
     type AdminOrigin = frame_system::EnsureRoot<u64>;
-    type MembershipProvider = MockMembershipProvider;
-    type MaxCodeLen = MaxCodeLen;
-    type MaxSearchHops = MaxSearchHops;
     type BurnAccount = BurnAccount;
     type TreasuryAccount = TreasuryAccount;
     type StorageAccount = StorageAccount;
+    type MaxActiveProposals = MaxActiveProposals;
+    type MaxReadyProposals = MaxReadyProposals;
+    type HistoryRetentionWeeks = HistoryRetentionWeeks;
+    type ProposalExpiry = ProposalExpiry;
+    type WeightInfo = ();
 }
 
 // ========================================

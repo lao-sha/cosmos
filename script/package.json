@@ -1,0 +1,35 @@
+{
+  "name": "stardust-scripts",
+  "version": "1.0.0",
+  "description": "Stardust chain utility scripts and test suite",
+  "type": "module",
+  "scripts": {
+    "create-accounts": "tsx create-accounts-and-transfer.ts",
+    "test": "tsx run-all-tests.ts",
+    "test:all": "tsx run-all-tests.ts --all",
+    "test:infrastructure": "tsx run-all-tests.ts --infrastructure",
+    "test:balances": "tsx run-all-tests.ts --balances",
+    "test:divination": "tsx run-all-tests.ts --divination",
+    "test:chat": "tsx run-all-tests.ts --chat",
+    "test:trading": "tsx run-all-tests.ts --trading",
+    "test:escrow": "tsx run-all-tests.ts --escrow",
+    "test:governance": "tsx run-all-tests.ts --governance",
+    "test:workflow": "tsx run-all-tests.ts --workflow",
+    "test:infra": "tsx test-infrastructure.ts",
+    "test:balance": "tsx test-balances.ts",
+    "test:divine": "tsx test-divination.ts",
+    "test:live": "tsx test-chat.ts",
+    "test:trade": "tsx test-trading.ts",
+    "test:arb": "tsx test-escrow-arbitration.ts",
+    "test:gov": "tsx test-governance.ts",
+    "test:flow": "tsx test-workflows.ts"
+  },
+  "dependencies": {
+    "@polkadot/api": "^10.11.1",
+    "@polkadot/util-crypto": "^12.6.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

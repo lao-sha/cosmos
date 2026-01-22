@@ -32,6 +32,8 @@ pallet-trading-maker = { workspace = true }
 pallet-trading-common = { workspace = true }
 pallet-chat-permission = { workspace = true }
 pallet-timestamp = { workspace = true }
+pallet-storage-lifecycle = { workspace = true }
+pallet-stardust-ipfs = { path = "../../stardust-ipfs", default-features = false }
 
 [dev-dependencies]
 sp-io = { workspace = true }
@@ -55,6 +57,8 @@ std = [
     "pallet-trading-common/std",
     "pallet-chat-permission/std",
     "pallet-timestamp/std",
+    "pallet-storage-lifecycle/std",
+    "pallet-stardust-ipfs/std",
 ]
 runtime-benchmarks = [
     "frame-benchmarking/runtime-benchmarks",

@@ -77,8 +77,6 @@ pub const DAVE: u64 = 4;
 /// 函数级中文注释：测试源 pallet 标识
 pub const OTC_ORDER_SOURCE: [u8; 8] = *b"otc_ordr";
 pub const MAKER_SOURCE: [u8; 8] = *b"maker___";
-#[allow(dead_code)]
-pub const MEMORIAL_SOURCE: [u8; 8] = *b"memorial";
 
 /// 函数级中文注释：构建测试外部环境
 ///

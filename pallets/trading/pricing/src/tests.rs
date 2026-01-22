@@ -100,7 +100,7 @@ fn otc_orders_exceed_limit_removes_oldest() {
 
 /// Test 4: 添加Bridge兑换成功
 #[test]
-fn add_bridge_swap_works() {
+fn add_swap_order_works() {
     new_test_ext().execute_with(|| {
         System::set_block_number(1);
         
@@ -109,7 +109,7 @@ fn add_bridge_swap_works() {
         let qty = 50 * DUST;   // 50 DUST
 
         // 添加兑换
-        assert_ok!(Pricing::add_bridge_swap(timestamp, price, qty));
+        assert_ok!(Pricing::add_swap_order(timestamp, price, qty));
 
         // 验证聚合数据
         let agg = Pricing::bridge_aggregate();
@@ -138,10 +138,10 @@ fn add_bridge_swap_works() {
 fn bridge_multiple_swaps_average_price() {
     new_test_ext().execute_with(|| {
         // 兑换1: 100 DUST @ 55 USDT
-        assert_ok!(Pricing::add_bridge_swap(1000, 55 * USDT, 100 * DUST));
+        assert_ok!(Pricing::add_swap_order(1000, 55 * USDT, 100 * DUST));
 
         // 兑换2: 150 DUST @ 58 USDT
-        assert_ok!(Pricing::add_bridge_swap(2000, 58 * USDT, 150 * DUST));
+        assert_ok!(Pricing::add_swap_order(2000, 58 * USDT, 150 * DUST));
 
         let agg = Pricing::bridge_aggregate();
         assert_eq!(agg.total_dust, 250 * DUST);
@@ -167,7 +167,7 @@ fn get_market_stats_works() {
         assert_ok!(Pricing::add_otc_order(1000, 50 * USDT, 100 * DUST));
 
         // 添加Bridge兑换
-        assert_ok!(Pricing::add_bridge_swap(2000, 55 * USDT, 50 * DUST));
+        assert_ok!(Pricing::add_swap_order(2000, 55 * USDT, 50 * DUST));
 
         // 获取市场统计
         let stats = Pricing::get_market_stats();
@@ -202,7 +202,7 @@ fn get_dust_market_price_weighted_works() {
         assert_ok!(Pricing::add_otc_order(1000, 50 * USDT, 200 * DUST));
 
         // 添加Bridge兑换（100 DUST @ 60 USDT）
-        assert_ok!(Pricing::add_bridge_swap(2000, 60 * USDT, 100 * DUST));
+        assert_ok!(Pricing::add_swap_order(2000, 60 * USDT, 100 * DUST));
 
         // 加权平均价格: (200*50 + 100*60) / 300 = 53.33 USDT
         let weighted_price = Pricing::get_dust_market_price_weighted();

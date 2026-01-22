@@ -286,9 +286,10 @@ sp_api::decl_runtime_apis! {
         ///   - 1: 农历日期 (Lunar)
         ///   - 2: 四柱直接输入 (SiZhu)
         /// - `params`: 参数数组（根据 input_type 解释）
-        ///   - Solar: [year, month, day, hour, minute]
-        ///   - Lunar: [year, month, day, is_leap_month(0/1), hour, minute]
+        ///   - Solar: [year, month, day, hour, minute] 或 [year, month, day, hour, minute, longitude]
+        ///   - Lunar: [year, month, day, is_leap_month(0/1), hour, minute] 或 [..., longitude]
         ///   - SiZhu: [year_gz, month_gz, day_gz, hour_gz, birth_year]
+        ///   - longitude: 可选，经度×100的整数（如12050=120.50°E，负数=西经），用于真太阳时修正
         /// - `gender`: 性别 (0=Male, 1=Female)
         /// - `zishi_mode`: 子时模式 (1=Traditional, 2=Modern)
         ///
@@ -299,17 +300,26 @@ sp_api::decl_runtime_apis! {
         /// # 特点
         /// - ✅ 完全免费（无 Gas 费用）
         /// - ✅ 支持三种输入方式
+        /// - ✅ 支持真太阳时修正（可选经度参数）
         /// - ✅ 响应快速（< 100ms）
         /// - ❌ 不存储（关闭页面后数据丢失）
         ///
         /// # 示例
         /// ```javascript
-        /// // 公历输入
+        /// // 公历输入（不启用真太阳时）
         /// const chart = await api.call.baziChartApi.calculateBaziTempUnified(
         ///     0,                    // input_type: Solar
         ///     [1990, 5, 15, 14, 30], // params: year, month, day, hour, minute
         ///     0,                    // gender: Male
         ///     2,                    // zishi_mode: Modern
+        /// );
+        ///
+        /// // 公历输入（启用真太阳时，北京经度116.40°E）
+        /// const chart = await api.call.baziChartApi.calculateBaziTempUnified(
+        ///     0,                          // input_type: Solar
+        ///     [1990, 5, 15, 14, 30, 11640], // params: 含经度
+        ///     0,                          // gender: Male
+        ///     2,                          // zishi_mode: Modern
         /// );
         ///
         /// // 农历输入
@@ -333,62 +343,6 @@ sp_api::decl_runtime_apis! {
             params: sp_std::vec::Vec<u16>,
             gender: u8,
             zishi_mode: u8,
-        ) -> Option<String>;
-
-        /// 临时排盘（公历输入，不存储，免费）- 兼容旧接口
-        ///
-        /// 根据出生时间计算八字命盘，但不存储到链上。
-        /// 适用于用户"试用"功能，决定是否保存后再调用交易接口。
-        ///
-        /// # 参数
-        /// - `year`: 公历年份 (1900-2100)
-        /// - `month`: 公历月份 (1-12)
-        /// - `day`: 公历日期 (1-31)
-        /// - `hour`: 小时 (0-23)
-        /// - `minute`: 分钟 (0-59)
-        /// - `gender`: 性别 (0=Male, 1=Female)
-        /// - `zishi_mode`: 子时模式 (1=Traditional, 2=Modern)
-        /// - `longitude`: 出生地经度（可选，单位：1/100000 度，用于真太阳时修正）
-        ///
-        /// # 返回
-        /// - `Some(String)`: JSON 格式的完整命盘数据
-        /// - `None`: 输入参数无效
-        ///
-        /// # 特点
-        /// - ✅ 完全免费（无 Gas 费用）
-        /// - ✅ 响应快速（< 100ms）
-        /// - ❌ 不存储（关闭页面后数据丢失）
-        ///
-        /// # 示例
-        /// ```javascript
-        /// // 前端调用 - 临时排盘
-        /// const tempChart = await api.call.baziChartApi.calculateBaziTemp(
-        ///     1990, 5, 15, 14, 30,  // 1990年5月15日14:30
-        ///     0,    // gender: 0=Male
-        ///     2,    // zishi_mode: 2=Modern
-        ///     null  // longitude: 不修正真太阳时
-        /// );
-        ///
-        /// if (tempChart.isSome) {
-        ///     const chart = JSON.parse(tempChart.unwrap());
-        ///     console.log('四柱:', chart.sizhu);
-        ///     console.log('大运:', chart.dayun);
-        ///
-        ///     // 用户决定保存，再调用交易接口
-        ///     if (userWantsToSave) {
-        ///         await api.tx.baziChart.createBaziChart(...).signAndSend(account);
-        ///     }
-        /// }
-        /// ```
-        fn calculate_bazi_temp(
-            year: u16,
-            month: u8,
-            day: u8,
-            hour: u8,
-            minute: u8,
-            gender: u8,
-            zishi_mode: u8,
-            longitude: Option<i32>,
         ) -> Option<String>;
 
         // ================================

@@ -19,36 +19,77 @@ use sp_runtime::RuntimeDebug;
 /// 函数级详细中文注释：Subject类型枚举
 /// 
 /// 定义CID所属的业务域类型，用于：
-/// 1. SubjectFunding账户派生
+/// 1. SubjectFunding账户派生（每个域独立的资金账户）
 /// 2. 域级别的Pin优先级调度
 /// 3. 费用统计和分析
+/// 4. 分层存储策略配置（不同域不同副本数）
 /// 
 /// 类型说明：
-/// - Deceased：逝者档案（整合text文本、media媒体、works作品等内容类型）
-/// - Grave：墓位相关（封面图、背景音乐等）
-/// - Offerings：供奉品（图片、视频、音频等）
-/// - OtcOrder：OTC订单（聊天记录、文件等）
-/// - Evidence：证据类数据（法律文件、证明材料等）
-/// - Custom：自定义域（预留扩展，如宠物养成游戏等）
+/// - Evidence：证据类数据（法律文件、证明材料等）- 最高优先级
+/// - OtcOrder：OTC订单（交易证据、聊天记录等）
+/// - DivinationMarket：命理服务市场（服务描述、订单内容、评价等）
+/// - DivinationNft：命理NFT（NFT主图、描述、动画等）- 高价值资产
+/// - DivinationAi：AI解读内容（解读结果、摘要等）
+/// - Chat：聊天消息（私聊/群聊媒体、文件等）
+/// - Livestream：直播间（封面图、礼物图标等）- 临时数据
+/// - Swap：Swap兑换（兑换证据等）
+/// - Arbitration：仲裁证据（申诉材料、裁决文书、证据截图）- 法律级别
+/// - UserProfile：用户档案（头像、认证材料、简介图）
+/// - DivinationReport：命理排盘报告（八字/紫微/奇门等完整报告）
+/// - General：通用存储（默认类型）
+/// - Custom：自定义域（预留扩展）
+/// 
+/// 域ID映射（用于SubjectFunding账户派生）：
+/// - Evidence = 0
+/// - OtcOrder = 1
+/// - DivinationMarket = 2
+/// - DivinationNft = 3
+/// - DivinationAi = 4
+/// - Chat = 5
+/// - Livestream = 6
+/// - Swap = 7
+/// - Arbitration = 8
+/// - UserProfile = 9
+/// - DivinationReport = 10
+/// - General = 98
+/// - Custom = 99
+/// 
+/// 注意：以下数据类型有明确生命周期，建议使用 Temporary 层级或不 PIN：
+/// - Chat（聊天消息）：180天过期，建议不 PIN 或使用 Temporary
+/// - Livestream（直播间）：临时数据，建议使用 Temporary 或不 PIN
 #[derive(Clone, Encode, Decode, DecodeWithMemTracking, Eq, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub enum SubjectType {
-    /// 逝者档案（优先级最高）
-    Deceased,
-    /// 墓位相关
-    Grave,
-    /// 供奉品
-    Offerings,
-    /// OTC订单
-    OtcOrder,
-    /// 证据类数据
+    /// 证据类数据（最高优先级，Critical级别，永久保存）
     Evidence,
+    /// OTC订单（交易证据、聊天记录，需长期保存）
+    OtcOrder,
+    /// 命理服务市场（服务描述、订单内容、评价）
+    DivinationMarket,
+    /// 命理NFT（NFT主图、描述、动画）- 高价值数字资产，永久保存
+    DivinationNft,
+    /// AI解读内容（解读结果、摘要）
+    DivinationAi,
+    /// 聊天消息（私聊/群聊媒体、文件）- ⚠️ 180天过期，建议 Temporary 或不 PIN
+    Chat,
+    /// 直播间（封面图、礼物图标）- ⚠️ 临时数据，建议 Temporary 或不 PIN
+    Livestream,
+    /// Swap兑换（兑换证据）
+    Swap,
+    /// 仲裁证据（申诉材料、裁决文书、证据截图）- 法律级别，永久保存
+    Arbitration,
+    /// 用户档案（头像、认证材料、简介图）
+    UserProfile,
+    /// 命理排盘报告（八字/紫微/奇门等完整报告PDF/图片）
+    DivinationReport,
+    /// 通用存储（默认类型）
+    General,
     /// 自定义域（预留扩展）
     Custom(BoundedVec<u8, ConstU32<32>>),
 }
 
 impl Default for SubjectType {
     fn default() -> Self {
-        Self::Deceased
+        Self::General
     }
 }
 
@@ -59,8 +100,8 @@ impl Default for SubjectType {
 /// - 费用分摊机制（funding_share）
 /// 
 /// 字段说明：
-/// - subject_type：Subject类型（Deceased/Grave/Offerings等）
-/// - subject_id：Subject ID（如deceased_id, grave_id）
+/// - subject_type：Subject类型（Evidence/OtcOrder/General等）
+/// - subject_id：Subject ID
 /// - funding_share：费用分摊比例（0-100，默认100表示独占）
 /// 
 /// 使用场景：
@@ -70,7 +111,7 @@ impl Default for SubjectType {
 pub struct SubjectInfo {
     /// Subject类型
     pub subject_type: SubjectType,
-    /// Subject ID（如 deceased_id, grave_id）
+    /// Subject ID
     pub subject_id: u64,
     /// 费用分摊比例（0-100，默认100表示独占）
     pub funding_share: u8,
@@ -94,7 +135,7 @@ pub struct SubjectInfo {
 ///     auto_pin_enabled: true,        // 启用自动PIN
 ///     default_tier: PinTier::Standard, // 默认标准等级
 ///     subject_type_id: 10,           // 自定义类型ID
-///     owner_pallet: b"pallet-deceased-video",  // 所属pallet
+///     owner_pallet: b"pallet-evidence",  // 所属pallet
 ///     created_at: 12345,             // 注册时间
 /// }
 /// ```
@@ -107,7 +148,7 @@ pub struct DomainConfig {
     pub default_tier: PinTier,
     
     /// 域的SubjectType映射ID
-    /// - 内置类型: 1=Deceased, 2=Grave, 3=Offerings, 4=Evidence
+    /// - 内置类型: 1=Evidence, 2=OtcOrder, 3=General
     /// - 自定义类型: 10-255（由治理分配）
     pub subject_type_id: u8,
     
@@ -143,13 +184,13 @@ impl Default for DomainConfig {
 ///   * 副本数：5个
 ///   * 巡检周期：6小时
 ///   * 费率系数：1.5x
-///   * 适用场景：逝者核心档案、证据类数据
+///   * 适用场景：证据类数据、重要文件
 /// 
 /// - Standard（标准级）：
 ///   * 副本数：3个
 ///   * 巡检周期：24小时
 ///   * 费率系数：1.0x（基准）
-///   * 适用场景：墓位封面、供奉品图片（默认）
+///   * 适用场景：一般业务数据（默认）
 /// 
 /// - Temporary（临时级）：
 ///   * 副本数：1个
@@ -346,7 +387,7 @@ pub struct GlobalHealthStats<BlockNumber> {
 /// 3. 域级别的优先级调度决策
 /// 
 /// 字段说明：
-/// - domain：域名（如 b"deceased", b"offerings"）
+/// - domain：域名（如 b"evidence", b"otc"）
 /// - total_pins：该域的总Pin数量
 /// - total_size_bytes：该域的总存储量（字节）
 /// - healthy_count：健康CID数量
@@ -477,6 +518,30 @@ pub enum ChargeResult<BlockNumber> {
     EnterGrace { expires_at: BlockNumber },
 }
 
+/// 函数级详细中文注释：扣费策略枚举（四层机制）
+/// 
+/// 用于区分不同类型的扣费场景：
+/// - QuotaFirst：优先使用免费配额（所有类型统一）
+/// - UserFirst：优先使用用户充值
+/// 
+/// 设计理念：
+/// - 所有 SubjectType 统一扣费顺序
+/// - 配额用于公共池补贴
+/// - 提高配额使用的精确性和公平性
+#[derive(Clone, Encode, Decode, DecodeWithMemTracking, Eq, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+pub enum ChargeStrategy {
+    /// 配额优先：优先使用免费配额
+    QuotaFirst,
+    /// 用户优先：优先使用用户充值账户
+    UserFirst,
+}
+
+impl Default for ChargeStrategy {
+    fn default() -> Self {
+        Self::UserFirst
+    }
+}
+
 /// 函数级详细中文注释：Unpin原因枚举
 /// 
 /// 定义CID被Unpin的原因，用于：
@@ -560,7 +625,7 @@ impl Default for OperatorLayer {
 /// 函数级详细中文注释：分层存储策略配置结构体
 /// 
 /// 定义不同数据类型和优先级的分层存储策略，支持：
-/// 1. 按数据类型（Deceased/Grave/Evidence等）配置
+/// 1. 按数据类型（Evidence/OtcOrder/General等）配置
 /// 2. 按优先级（Critical/Standard/Temporary）配置
 /// 3. 动态调整副本分布（Layer 1/Layer 2）
 /// 4. 治理提案修改策略
@@ -579,16 +644,16 @@ impl Default for OperatorLayer {
 /// - allow_external: false     // 禁止Layer 3
 /// - min_total_replicas: 3     // 最少3副本
 /// 
-/// 逝者核心信息（高安全）：
-/// - core_replicas: 3          // Layer 1必须3副本
-/// - community_replicas: 2     // Layer 2补充2副本
+/// 通用数据（标准安全）：
+/// - core_replicas: 2          // Layer 1默认2副本
+/// - community_replicas: 1     // Layer 2补充1副本
 /// - allow_external: false     // 禁止Layer 3
-/// - min_total_replicas: 2     // 最少2副本
+/// - min_total_replicas: 1     // 最少1副本
 /// 
-/// 供奉品（标准）：
+/// 临时数据（低成本）：
 /// - core_replicas: 1          // Layer 1保底1副本
-/// - community_replicas: 2     // Layer 2补充2副本
-/// - allow_external: true      // 允许Layer 3（加密后）
+/// - community_replicas: 0     // 不使用Layer 2
+/// - allow_external: true      // 允许Layer 3
 /// - min_total_replicas: 1     // 最少1副本
 /// 
 /// 降级策略：
@@ -622,6 +687,7 @@ impl Default for StorageLayerConfig {
 
 impl StorageLayerConfig {
     /// 获取证据数据的默认配置（最高安全）
+    /// 适用于：Evidence - 法律证据、证明材料
     pub fn evidence_default() -> Self {
         Self {
             core_replicas: 5,
@@ -631,8 +697,42 @@ impl StorageLayerConfig {
         }
     }
 
-    /// 获取逝者核心数据的默认配置（高安全）
-    pub fn deceased_critical_default() -> Self {
+    /// 获取通用数据的默认配置（标准安全）
+    /// 适用于：General - 通用存储
+    pub fn general_default() -> Self {
+        Self {
+            core_replicas: 2,
+            community_replicas: 1,
+            allow_external: false,
+            min_total_replicas: 1,
+        }
+    }
+
+    /// 获取OTC订单的默认配置（标准安全）
+    /// 适用于：OtcOrder - 交易证据、聊天记录
+    pub fn otc_default() -> Self {
+        Self {
+            core_replicas: 2,
+            community_replicas: 1,
+            allow_external: true,
+            min_total_replicas: 1,
+        }
+    }
+
+    /// 获取命理市场的默认配置（标准安全）
+    /// 适用于：DivinationMarket - 服务描述、订单内容、评价
+    pub fn divination_market_default() -> Self {
+        Self {
+            core_replicas: 2,
+            community_replicas: 1,
+            allow_external: true,
+            min_total_replicas: 1,
+        }
+    }
+
+    /// 获取命理NFT的默认配置（高安全）
+    /// 适用于：DivinationNft - NFT主图、描述、动画（高价值数字资产）
+    pub fn divination_nft_default() -> Self {
         Self {
             core_replicas: 3,
             community_replicas: 2,
@@ -641,23 +741,110 @@ impl StorageLayerConfig {
         }
     }
 
-    /// 获取供奉品的默认配置（标准安全）
-    pub fn offerings_default() -> Self {
+    /// 获取AI解读的默认配置（标准安全）
+    /// 适用于：DivinationAi - AI解读内容、摘要
+    pub fn divination_ai_default() -> Self {
+        Self {
+            core_replicas: 2,
+            community_replicas: 1,
+            allow_external: true,
+            min_total_replicas: 1,
+        }
+    }
+
+    /// 获取聊天消息的默认配置（标准安全）
+    /// 适用于：Chat - 私聊/群聊媒体、文件
+    pub fn chat_default() -> Self {
+        Self {
+            core_replicas: 2,
+            community_replicas: 1,
+            allow_external: true,
+            min_total_replicas: 1,
+        }
+    }
+
+    /// 获取直播间的默认配置（低成本）
+    /// 适用于：Livestream - 封面图、礼物图标（临时数据）
+    pub fn livestream_default() -> Self {
         Self {
             core_replicas: 1,
+            community_replicas: 1,
+            allow_external: true,
+            min_total_replicas: 1,
+        }
+    }
+
+    /// 获取Swap兑换的默认配置（标准安全）
+    /// 适用于：Swap - 兑换证据
+    pub fn swap_default() -> Self {
+        Self {
+            core_replicas: 2,
+            community_replicas: 1,
+            allow_external: true,
+            min_total_replicas: 1,
+        }
+    }
+
+    /// 获取仲裁证据的默认配置（高安全）
+    /// 适用于：Arbitration - 申诉材料、裁决文书、证据截图（法律级别）
+    pub fn arbitration_default() -> Self {
+        Self {
+            core_replicas: 4,
             community_replicas: 2,
+            allow_external: false,
+            min_total_replicas: 2,
+        }
+    }
+
+    /// 获取用户档案的默认配置（标准安全）
+    /// 适用于：UserProfile - 头像、认证材料、简介图
+    pub fn user_profile_default() -> Self {
+        Self {
+            core_replicas: 2,
+            community_replicas: 1,
+            allow_external: true,
+            min_total_replicas: 1,
+        }
+    }
+
+    /// 获取命理排盘报告的默认配置（标准安全）
+    /// 适用于：DivinationReport - 八字/紫微/奇门等完整排盘报告
+    pub fn divination_report_default() -> Self {
+        Self {
+            core_replicas: 2,
+            community_replicas: 1,
             allow_external: true,
             min_total_replicas: 1,
         }
     }
 
     /// 获取临时数据的默认配置（低成本）
+    /// 适用于：临时文件、缓存数据
     pub fn temporary_default() -> Self {
         Self {
             core_replicas: 1,
             community_replicas: 0,
             allow_external: true,
             min_total_replicas: 1,
+        }
+    }
+
+    /// 根据 SubjectType 获取推荐的存储配置
+    pub fn for_subject_type(subject_type: &SubjectType) -> Self {
+        match subject_type {
+            SubjectType::Evidence => Self::evidence_default(),
+            SubjectType::OtcOrder => Self::otc_default(),
+            SubjectType::DivinationMarket => Self::divination_market_default(),
+            SubjectType::DivinationNft => Self::divination_nft_default(),
+            SubjectType::DivinationAi => Self::divination_ai_default(),
+            SubjectType::Chat => Self::chat_default(),
+            SubjectType::Livestream => Self::livestream_default(),
+            SubjectType::Swap => Self::swap_default(),
+            SubjectType::Arbitration => Self::arbitration_default(),
+            SubjectType::UserProfile => Self::user_profile_default(),
+            SubjectType::DivinationReport => Self::divination_report_default(),
+            SubjectType::General => Self::general_default(),
+            SubjectType::Custom(_) => Self::general_default(),
         }
     }
 }
@@ -680,7 +867,7 @@ impl StorageLayerConfig {
 /// 
 /// 使用场景：
 /// - `select_operators_by_layer()` 函数的返回值
-/// - `request_pin_for_deceased()` 中的运营者分配
+/// - `request_pin_for_subject()` 中的运营者分配
 /// - `LayeredPinAssignments` 存储的数据源
 #[derive(Clone, Encode, Decode, TypeInfo)]
 pub struct LayeredOperatorSelection<AccountId> {
@@ -705,7 +892,7 @@ pub struct LayeredOperatorSelection<AccountId> {
 /// - external_network：外部网络类型（如 "Filecoin", "Crust"）
 /// 
 /// 使用场景：
-/// - 在 `request_pin_for_deceased` 时创建
+/// - 在 `request_pin_for_subject` 时创建
 /// - 在OCW健康检查时读取
 /// - 在费用分配时读取
 /// - 在数据迁移时更新
@@ -747,7 +934,7 @@ pub struct LayeredPinAssignment<AccountId> {
 /// - 最终得分：max(0, min(100, 60 + 健康奖励 - 失败惩罚))
 /// 
 /// 使用场景：
-/// - 在Pin分配时更新（`request_pin_for_deceased`）
+/// - 在Pin分配时更新（`request_pin_for_subject`）
 /// - 在OCW健康检查时更新（`check_pin_health_via_ocw`）
 /// - 在运营者Dashboard展示（RPC查询）
 #[derive(Clone, Encode, Decode, DecodeWithMemTracking, Eq, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]

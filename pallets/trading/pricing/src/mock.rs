@@ -7,9 +7,13 @@ use sp_core::H256;
 use sp_runtime::{
     traits::{BlakeTwo256, IdentityLookup},
     BuildStorage,
+    testing::TestXt,
 };
 
 type Block = frame_system::mocking::MockBlock<Test>;
+
+/// Mock extrinsic type for testing
+pub type Extrinsic = TestXt<RuntimeCall, ()>;
 
 frame_support::construct_runtime!(
     pub enum Test {
@@ -21,6 +25,7 @@ frame_support::construct_runtime!(
 parameter_types! {
     pub const BlockHashCount: u64 = 250;
     pub const MaxPriceDeviation: u16 = 2000; // 20% (2000 bps)
+    pub const ExchangeRateUpdateInterval: u32 = 10; // 测试用较短间隔
 }
 
 impl frame_system::Config for Test {
@@ -56,9 +61,15 @@ impl frame_system::Config for Test {
     type PostTransactions = ();
 }
 
+impl frame_system::offchain::SendTransactionTypes<RuntimeCall> for Test {
+    type Extrinsic = Extrinsic;
+    type OverarchingCall = RuntimeCall;
+}
+
 impl pallet_pricing::Config for Test {
     type RuntimeEvent = RuntimeEvent;
     type MaxPriceDeviation = MaxPriceDeviation;
+    type ExchangeRateUpdateInterval = ExchangeRateUpdateInterval;
 }
 
 /// 函数级中文注释：创建测试环境

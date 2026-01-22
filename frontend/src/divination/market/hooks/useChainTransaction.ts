@@ -10,6 +10,8 @@ import {
   // Provider transactions
   registerProvider,
   updateProviderProfile,
+  pauseProvider,
+  resumeProvider,
   createPackage,
   updatePackage,
   deletePackage,
@@ -20,6 +22,7 @@ import {
   completeOrder,
   cancelOrder,
   requestRefund,
+  submitReport,
   submitFollowUp,
   replyFollowUp,
   // Review transactions
@@ -231,6 +234,49 @@ export function useChainTransaction() {
     ) => {
       return executeTransaction(
         (signer) => deletePackage(signer, packageId, createCallbacks()),
+        [] as [],
+        options
+      );
+    },
+    [executeTransaction]
+  );
+
+  const doPauseProvider = useCallback(
+    (options?: { onSuccess?: (result: TransactionResult) => void; onError?: (error: Error) => void }) => {
+      return executeTransaction(
+        (signer) => pauseProvider(signer, createCallbacks()),
+        [] as [],
+        options
+      );
+    },
+    [executeTransaction]
+  );
+
+  const doResumeProvider = useCallback(
+    (options?: { onSuccess?: (result: TransactionResult) => void; onError?: (error: Error) => void }) => {
+      return executeTransaction(
+        (signer) => resumeProvider(signer, createCallbacks()),
+        [] as [],
+        options
+      );
+    },
+    [executeTransaction]
+  );
+
+  const doSubmitReport = useCallback(
+    (
+      params: {
+        provider: string;
+        reportType: number;
+        evidenceCid: string;
+        description: string;
+        relatedOrderId?: number;
+        isAnonymous?: boolean;
+      },
+      options?: { onSuccess?: (result: TransactionResult) => void; onError?: (error: Error) => void }
+    ) => {
+      return executeTransaction(
+        (signer) => submitReport(signer, params, createCallbacks()),
         [] as [],
         options
       );
@@ -471,6 +517,8 @@ export function useChainTransaction() {
     // Provider 交易
     registerProvider: doRegisterProvider,
     updateProviderProfile: doUpdateProviderProfile,
+    pauseProvider: doPauseProvider,
+    resumeProvider: doResumeProvider,
     createPackage: doCreatePackage,
     updatePackage: doUpdatePackage,
     deletePackage: doDeletePackage,
@@ -482,6 +530,7 @@ export function useChainTransaction() {
     completeOrder: doCompleteOrder,
     cancelOrder: doCancelOrder,
     requestRefund: doRequestRefund,
+    submitReport: doSubmitReport,
     submitFollowUp: doSubmitFollowUp,
     replyFollowUp: doReplyFollowUp,
 

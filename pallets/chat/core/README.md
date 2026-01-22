@@ -29,7 +29,6 @@
 ### 与其他模块的关系
 
 - **pallet-stardust-ipfs**: 依赖IPFS模块存储加密的消息内容
-- **pallet-deceased**: 可用于逝者档案相关的留言和评论功能
 - **pallet-otc-order**: OTC订单系统中的买卖双方沟通渠道
 - **前端DApp**: 通过Polkadot-JS API调用，实现实时通讯功能
 
@@ -1496,31 +1495,6 @@ impl pallet_stardust_ipfs::Config for Runtime {
 
 - CID必须是加密后的（链上会验证）
 - IPFS节点需要配置为运营者，确保内容持久化
-- 建议使用`pallet-stardust-ipfs::request_pin_for_deceased`自动固定重要消息
-
-#### 2. 与 pallet-deceased 集成
-
-可用于逝者档案的留言和评论功能：
-
-```typescript
-// 为逝者留言
-const leaveMessage = async (
-  sender: any,
-  deceasedOwner: string,
-  message: string
-) => {
-  // 1. 加密并上传到IPFS
-  const cid = await encryptAndUpload(message);
-
-  // 2. 发送消息（使用System类型）
-  await api.tx.chat.sendMessage(
-    deceasedOwner,
-    cid,
-    4, // System类型
-    null
-  ).signAndSend(sender);
-};
-```
 
 ## 最佳实践
 

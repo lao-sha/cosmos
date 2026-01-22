@@ -238,7 +238,16 @@ export class TradingService {
   }
 
   /**
-   * 申请仲裁
+   * 发起争议（买家或做市商调用）
+   *
+   * 当交易出现问题时，任一方都可以发起争议。
+   * 发起后进入仲裁流程，等待对方响应。
+   *
+   * @param accountAddress 发起者地址
+   * @param orderId 订单ID
+   * @param reason 争议原因描述
+   * @param evidenceCid 证据的 IPFS CID（可选）
+   * @param onStatusChange 状态回调
    */
   async dispute(
     accountAddress: string,
@@ -255,12 +264,100 @@ export class TradingService {
         ? '0x' + CryptoJS.SHA256(evidenceCid).toString()
         : null;
 
-      const tx = api.tx.otcOrder.dispute(orderId, evidenceHash);
+      // 使用新的 initiateDispute 方法
+      const tx = api.tx.otcOrder.initiateDispute(orderId, reason, evidenceHash);
       await signAndSend(api, tx, accountAddress, onStatusChange);
-      console.log('[Trading] Dispute submitted:', orderId);
+      console.log('[Trading] Dispute initiated:', orderId);
     } catch (error) {
       console.error('[Trading] Dispute error:', error);
       throw error;
+    }
+  }
+
+  /**
+   * 响应争议（被争议方调用）
+   *
+   * 当对方发起争议后，被争议方需要在规定时间内响应。
+   * 如果不响应，可能会自动判定对方胜诉。
+   *
+   * @param accountAddress 响应者地址
+   * @param orderId 订单ID
+   * @param response 响应内容
+   * @param evidenceCid 证据的 IPFS CID（可选）
+   * @param onStatusChange 状态回调
+   */
+  async respondDispute(
+    accountAddress: string,
+    orderId: number,
+    response: string,
+    evidenceCid?: string,
+    onStatusChange?: (status: string) => void
+  ): Promise<void> {
+    const api = this.getApi();
+
+    try {
+      // 生成证据哈希（如果有证据）
+      const evidenceHash = evidenceCid
+        ? '0x' + CryptoJS.SHA256(evidenceCid).toString()
+        : null;
+
+      const tx = api.tx.otcOrder.respondDispute(orderId, response, evidenceHash);
+      await signAndSend(api, tx, accountAddress, onStatusChange);
+      console.log('[Trading] Dispute response submitted:', orderId);
+    } catch (error) {
+      console.error('[Trading] Respond dispute error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取争议详情
+   *
+   * @param orderId 订单ID
+   * @returns 争议信息或 null
+   */
+  async getDispute(orderId: number): Promise<{
+    initiator: string;
+    reason: string;
+    initiatorEvidence?: string;
+    respondentResponse?: string;
+    respondentEvidence?: string;
+    status: 'Initiated' | 'Responded' | 'Resolved';
+    deadline: number;
+    resolution?: 'BuyerWins' | 'MakerWins' | 'Split';
+  } | null> {
+    const api = this.getApi();
+
+    try {
+      const dispute = await api.query.otcOrder.disputes(orderId);
+
+      if (dispute.isNone) {
+        return null;
+      }
+
+      const data = dispute.unwrap();
+
+      return {
+        initiator: data.initiator.toString(),
+        reason: data.reason.toHuman() as string,
+        initiatorEvidence: data.initiatorEvidence.isSome
+          ? data.initiatorEvidence.unwrap().toHex()
+          : undefined,
+        respondentResponse: data.respondentResponse.isSome
+          ? (data.respondentResponse.unwrap().toHuman() as string)
+          : undefined,
+        respondentEvidence: data.respondentEvidence.isSome
+          ? data.respondentEvidence.unwrap().toHex()
+          : undefined,
+        status: data.status.toString() as any,
+        deadline: data.deadline.toNumber(),
+        resolution: data.resolution.isSome
+          ? (data.resolution.unwrap().toString() as any)
+          : undefined,
+      };
+    } catch (error) {
+      console.error('[Trading] Get dispute error:', error);
+      return null;
     }
   }
 

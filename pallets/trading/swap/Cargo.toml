@@ -27,6 +27,8 @@ pallet-escrow = { workspace = true }
 pallet-arbitration = { workspace = true }
 pallet-trading-common = { workspace = true }
 pallet-timestamp = { workspace = true }
+pallet-storage-lifecycle = { workspace = true }
+pallet-stardust-ipfs = { path = "../../stardust-ipfs", default-features = false }
 
 [dev-dependencies]
 sp-core = { workspace = true }
@@ -46,6 +48,8 @@ std = [
     "pallet-arbitration/std",
     "pallet-trading-common/std",
     "pallet-timestamp/std",
+    "pallet-storage-lifecycle/std",
+    "pallet-stardust-ipfs/std",
 ]
 runtime-benchmarks = [
     "frame-benchmarking/runtime-benchmarks",

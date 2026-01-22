@@ -632,3 +632,596 @@ fn get_live_room_ids_works() {
         assert!(live_rooms.contains(&0));
     });
 }
+
+// ============ 举报与申诉系统测试 ============
+
+#[test]
+fn report_room_works() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+
+        // ALICE 创建直播间
+        assert_ok!(Livestream::create_room(
+            RuntimeOrigin::signed(ALICE),
+            b"Test Room".to_vec(),
+            None,
+            LiveRoomType::Normal,
+            None,
+            None,
+        ));
+
+        // BOB 举报 ALICE 的直播间
+        assert_ok!(Livestream::report_room(
+            RuntimeOrigin::signed(BOB),
+            0, // room_id
+            crate::RoomReportType::IllegalContent,
+            b"QmTestEvidence123".to_vec(),
+            b"This room contains illegal content".to_vec(),
+            false, // not anonymous
+        ));
+
+        // 检查举报记录
+        let report = Livestream::room_reports(0).unwrap();
+        assert_eq!(report.reporter, BOB);
+        assert_eq!(report.room_id, 0);
+        assert_eq!(report.host, ALICE);
+        assert_eq!(report.status, crate::ReportStatus::Pending);
+
+        // 检查押金被锁定
+        assert_eq!(Balances::reserved_balance(BOB), 10_000_000_000_000);
+
+        // 检查事件
+        System::assert_has_event(
+            Event::RoomReported {
+                report_id: 0,
+                reporter: Some(BOB),
+                room_id: 0,
+                report_type: crate::RoomReportType::IllegalContent,
+            }
+            .into(),
+        );
+    });
+}
+
+#[test]
+fn report_room_fails_if_self_report() {
+    new_test_ext().execute_with(|| {
+        // ALICE 创建直播间
+        assert_ok!(Livestream::create_room(
+            RuntimeOrigin::signed(ALICE),
+            b"Test Room".to_vec(),
+            None,
+            LiveRoomType::Normal,
+            None,
+            None,
+        ));
+
+        // ALICE 不能举报自己的直播间
+        assert_noop!(
+            Livestream::report_room(
+                RuntimeOrigin::signed(ALICE),
+                0,
+                crate::RoomReportType::IllegalContent,
+                b"QmTest".to_vec(),
+                b"Test".to_vec(),
+                false,
+            ),
+            Error::<Test>::CannotReportSelf
+        );
+    });
+}
+
+#[test]
+fn report_room_cooldown_works() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+
+        // ALICE 创建直播间
+        assert_ok!(Livestream::create_room(
+            RuntimeOrigin::signed(ALICE),
+            b"Test Room".to_vec(),
+            None,
+            LiveRoomType::Normal,
+            None,
+            None,
+        ));
+
+        // BOB 第一次举报
+        assert_ok!(Livestream::report_room(
+            RuntimeOrigin::signed(BOB),
+            0,
+            crate::RoomReportType::IllegalContent,
+            b"QmTest1".to_vec(),
+            b"Test1".to_vec(),
+            false,
+        ));
+
+        // BOB 立即再次举报应该失败（冷却期）
+        assert_noop!(
+            Livestream::report_room(
+                RuntimeOrigin::signed(BOB),
+                0,
+                crate::RoomReportType::Harassment,
+                b"QmTest2".to_vec(),
+                b"Test2".to_vec(),
+                false,
+            ),
+            Error::<Test>::ReportInCooldown
+        );
+
+        // 前进 11 个区块（超过冷却期 10 blocks）
+        System::set_block_number(12);
+
+        // 现在可以再次举报
+        assert_ok!(Livestream::report_room(
+            RuntimeOrigin::signed(BOB),
+            0,
+            crate::RoomReportType::Harassment,
+            b"QmTest2".to_vec(),
+            b"Test2".to_vec(),
+            false,
+        ));
+    });
+}
+
+#[test]
+fn withdraw_room_report_works() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+
+        // 创建直播间并举报
+        assert_ok!(Livestream::create_room(
+            RuntimeOrigin::signed(ALICE),
+            b"Test Room".to_vec(),
+            None,
+            LiveRoomType::Normal,
+            None,
+            None,
+        ));
+
+        assert_ok!(Livestream::report_room(
+            RuntimeOrigin::signed(BOB),
+            0,
+            crate::RoomReportType::IllegalContent,
+            b"QmTest".to_vec(),
+            b"Test".to_vec(),
+            false,
+        ));
+
+        let initial_reserved = Balances::reserved_balance(BOB);
+        assert_eq!(initial_reserved, 10_000_000_000_000);
+
+        // 在窗口期内撤回（5 blocks）
+        System::set_block_number(3);
+
+        assert_ok!(Livestream::withdraw_room_report(
+            RuntimeOrigin::signed(BOB),
+            0,
+        ));
+
+        // 检查状态更新
+        let report = Livestream::room_reports(0).unwrap();
+        assert_eq!(report.status, crate::ReportStatus::Withdrawn);
+
+        // 检查退还 80% 押金，剩余 20% 被 slash
+        // unreserve 退还 80%，slash_reserved 处理剩余 20%
+        // 最终 reserved balance 应该是 0
+        assert_eq!(Balances::reserved_balance(BOB), 0);
+
+        // 验证总余额减少了 20%（被没收的部分）
+        let penalty = initial_reserved * 20 / 100;
+        let expected_total = 1_000_000_000_000_000 - penalty; // 初始余额 - 罚金
+        assert_eq!(Balances::free_balance(BOB), expected_total);
+    });
+}
+
+#[test]
+fn withdraw_room_report_fails_after_window() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+
+        // 创建直播间并举报
+        assert_ok!(Livestream::create_room(
+            RuntimeOrigin::signed(ALICE),
+            b"Test Room".to_vec(),
+            None,
+            LiveRoomType::Normal,
+            None,
+            None,
+        ));
+
+        assert_ok!(Livestream::report_room(
+            RuntimeOrigin::signed(BOB),
+            0,
+            crate::RoomReportType::IllegalContent,
+            b"QmTest".to_vec(),
+            b"Test".to_vec(),
+            false,
+        ));
+
+        // 超过窗口期（5 blocks）
+        System::set_block_number(7);
+
+        // 撤回应该失败
+        assert_noop!(
+            Livestream::withdraw_room_report(RuntimeOrigin::signed(BOB), 0),
+            Error::<Test>::WithdrawWindowExpired
+        );
+    });
+}
+
+#[test]
+fn resolve_room_report_upheld_works() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+
+        // 创建直播间并举报
+        assert_ok!(Livestream::create_room(
+            RuntimeOrigin::signed(ALICE),
+            b"Test Room".to_vec(),
+            None,
+            LiveRoomType::Normal,
+            None,
+            None,
+        ));
+
+        assert_ok!(Livestream::report_room(
+            RuntimeOrigin::signed(BOB),
+            0,
+            crate::RoomReportType::IllegalContent,
+            b"QmTest".to_vec(),
+            b"Test".to_vec(),
+            false,
+        ));
+
+        let initial_reserved = Balances::reserved_balance(BOB);
+
+        // 委员会审核：举报成立
+        assert_ok!(Livestream::resolve_room_report(
+            RuntimeOrigin::root(),
+            0, // report_id
+            crate::ReportStatus::Upheld,
+            Some(b"Confirmed illegal content".to_vec()),
+        ));
+
+        // 检查举报状态
+        let report = Livestream::room_reports(0).unwrap();
+        assert_eq!(report.status, crate::ReportStatus::Upheld);
+
+        // 检查押金已退还
+        assert_eq!(Balances::reserved_balance(BOB), 0);
+
+        // 检查直播间被封禁
+        let room = Livestream::live_rooms(0).unwrap();
+        assert_eq!(room.status, LiveRoomStatus::Banned);
+
+        // 检查封禁记录创建
+        let ban_record = Livestream::room_ban_records(0).unwrap();
+        assert_eq!(ban_record.room_id, 0);
+        assert_eq!(ban_record.host, ALICE);
+        assert_eq!(ban_record.is_appealed, false);
+    });
+}
+
+#[test]
+fn resolve_room_report_rejected_works() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+
+        // 创建直播间并举报
+        assert_ok!(Livestream::create_room(
+            RuntimeOrigin::signed(ALICE),
+            b"Test Room".to_vec(),
+            None,
+            LiveRoomType::Normal,
+            None,
+            None,
+        ));
+
+        assert_ok!(Livestream::report_room(
+            RuntimeOrigin::signed(BOB),
+            0,
+            crate::RoomReportType::IllegalContent,
+            b"QmTest".to_vec(),
+            b"Test".to_vec(),
+            false,
+        ));
+
+        // 委员会审核：举报驳回
+        assert_ok!(Livestream::resolve_room_report(
+            RuntimeOrigin::root(),
+            0,
+            crate::ReportStatus::Rejected,
+            None,
+        ));
+
+        // 检查举报状态
+        let report = Livestream::room_reports(0).unwrap();
+        assert_eq!(report.status, crate::ReportStatus::Rejected);
+
+        // 检查押金已退还
+        assert_eq!(Balances::reserved_balance(BOB), 0);
+
+        // 检查直播间未被封禁
+        let room = Livestream::live_rooms(0).unwrap();
+        assert_eq!(room.status, LiveRoomStatus::Preparing);
+    });
+}
+
+#[test]
+fn resolve_room_report_malicious_works() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+
+        // 创建直播间并举报
+        assert_ok!(Livestream::create_room(
+            RuntimeOrigin::signed(ALICE),
+            b"Test Room".to_vec(),
+            None,
+            LiveRoomType::Normal,
+            None,
+            None,
+        ));
+
+        assert_ok!(Livestream::report_room(
+            RuntimeOrigin::signed(BOB),
+            0,
+            crate::RoomReportType::IllegalContent,
+            b"QmTest".to_vec(),
+            b"Test".to_vec(),
+            false,
+        ));
+
+        let initial_reserved = Balances::reserved_balance(BOB);
+        let initial_free = Balances::free_balance(BOB);
+
+        // 委员会审核：恶意举报
+        assert_ok!(Livestream::resolve_room_report(
+            RuntimeOrigin::root(),
+            0,
+            crate::ReportStatus::Malicious,
+            None,
+        ));
+
+        // 检查举报状态
+        let report = Livestream::room_reports(0).unwrap();
+        assert_eq!(report.status, crate::ReportStatus::Malicious);
+
+        // 检查押金被没收（slash）
+        assert_eq!(Balances::reserved_balance(BOB), 0);
+        // 总余额减少（押金被没收）
+        assert_eq!(Balances::free_balance(BOB) + Balances::reserved_balance(BOB), initial_free);
+    });
+}
+
+#[test]
+fn appeal_room_ban_works() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+
+        // 创建直播间、举报并封禁
+        assert_ok!(Livestream::create_room(
+            RuntimeOrigin::signed(ALICE),
+            b"Test Room".to_vec(),
+            None,
+            LiveRoomType::Normal,
+            None,
+            None,
+        ));
+
+        assert_ok!(Livestream::report_room(
+            RuntimeOrigin::signed(BOB),
+            0,
+            crate::RoomReportType::IllegalContent,
+            b"QmTest".to_vec(),
+            b"Test".to_vec(),
+            false,
+        ));
+
+        assert_ok!(Livestream::resolve_room_report(
+            RuntimeOrigin::root(),
+            0,
+            crate::ReportStatus::Upheld,
+            Some(b"Banned".to_vec()),
+        ));
+
+        // ALICE 申诉封禁
+        assert_ok!(Livestream::appeal_room_ban(
+            RuntimeOrigin::signed(ALICE),
+            0,
+            b"QmAppealEvidence".to_vec(),
+            b"This was a mistake".to_vec(),
+        ));
+
+        // 检查申诉标记
+        let ban_record = Livestream::room_ban_records(0).unwrap();
+        assert_eq!(ban_record.is_appealed, true);
+
+        // 检查事件
+        System::assert_has_event(
+            Event::RoomBanAppealed {
+                room_id: 0,
+                host: ALICE,
+            }
+            .into(),
+        );
+    });
+}
+
+#[test]
+fn appeal_room_ban_fails_if_not_banned() {
+    new_test_ext().execute_with(|| {
+        // 创建直播间（未被封禁）
+        assert_ok!(Livestream::create_room(
+            RuntimeOrigin::signed(ALICE),
+            b"Test Room".to_vec(),
+            None,
+            LiveRoomType::Normal,
+            None,
+            None,
+        ));
+
+        // 申诉应该失败
+        assert_noop!(
+            Livestream::appeal_room_ban(
+                RuntimeOrigin::signed(ALICE),
+                0,
+                b"QmTest".to_vec(),
+                b"Test".to_vec(),
+            ),
+            Error::<Test>::RoomNotBanned
+        );
+    });
+}
+
+#[test]
+fn resolve_room_ban_appeal_upheld_works() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+
+        // 创建直播间、举报、封禁、申诉
+        assert_ok!(Livestream::create_room(
+            RuntimeOrigin::signed(ALICE),
+            b"Test Room".to_vec(),
+            None,
+            LiveRoomType::Normal,
+            None,
+            None,
+        ));
+
+        assert_ok!(Livestream::report_room(
+            RuntimeOrigin::signed(BOB),
+            0,
+            crate::RoomReportType::IllegalContent,
+            b"QmTest".to_vec(),
+            b"Test".to_vec(),
+            false,
+        ));
+
+        assert_ok!(Livestream::resolve_room_report(
+            RuntimeOrigin::root(),
+            0,
+            crate::ReportStatus::Upheld,
+            Some(b"Banned".to_vec()),
+        ));
+
+        assert_ok!(Livestream::appeal_room_ban(
+            RuntimeOrigin::signed(ALICE),
+            0,
+            b"QmAppeal".to_vec(),
+            b"Appeal".to_vec(),
+        ));
+
+        // 治理审核：申诉成功
+        assert_ok!(Livestream::resolve_room_ban_appeal(
+            RuntimeOrigin::root(),
+            0,
+            crate::AppealResult::Upheld,
+        ));
+
+        // 检查直播间解除封禁
+        let room = Livestream::live_rooms(0).unwrap();
+        assert_eq!(room.status, LiveRoomStatus::Ended);
+
+        // 检查封禁记录被删除
+        assert!(Livestream::room_ban_records(0).is_none());
+    });
+}
+
+#[test]
+fn resolve_room_ban_appeal_rejected_works() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+
+        // 创建直播间、举报、封禁、申诉
+        assert_ok!(Livestream::create_room(
+            RuntimeOrigin::signed(ALICE),
+            b"Test Room".to_vec(),
+            None,
+            LiveRoomType::Normal,
+            None,
+            None,
+        ));
+
+        assert_ok!(Livestream::report_room(
+            RuntimeOrigin::signed(BOB),
+            0,
+            crate::RoomReportType::IllegalContent,
+            b"QmTest".to_vec(),
+            b"Test".to_vec(),
+            false,
+        ));
+
+        assert_ok!(Livestream::resolve_room_report(
+            RuntimeOrigin::root(),
+            0,
+            crate::ReportStatus::Upheld,
+            Some(b"Banned".to_vec()),
+        ));
+
+        assert_ok!(Livestream::appeal_room_ban(
+            RuntimeOrigin::signed(ALICE),
+            0,
+            b"QmAppeal".to_vec(),
+            b"Appeal".to_vec(),
+        ));
+
+        // 治理审核：申诉驳回
+        assert_ok!(Livestream::resolve_room_ban_appeal(
+            RuntimeOrigin::root(),
+            0,
+            crate::AppealResult::Rejected,
+        ));
+
+        // 检查直播间仍然被封禁
+        let room = Livestream::live_rooms(0).unwrap();
+        assert_eq!(room.status, LiveRoomStatus::Banned);
+
+        // 检查封禁记录仍然存在
+        let ban_record = Livestream::room_ban_records(0).unwrap();
+        assert_eq!(ban_record.appeal_result, Some(crate::AppealResult::Rejected));
+    });
+}
+
+#[test]
+fn expire_room_report_works() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+
+        // 创建直播间并举报
+        assert_ok!(Livestream::create_room(
+            RuntimeOrigin::signed(ALICE),
+            b"Test Room".to_vec(),
+            None,
+            LiveRoomType::Normal,
+            None,
+            None,
+        ));
+
+        assert_ok!(Livestream::report_room(
+            RuntimeOrigin::signed(BOB),
+            0,
+            crate::RoomReportType::IllegalContent,
+            b"QmTest".to_vec(),
+            b"Test".to_vec(),
+            false,
+        ));
+
+        // 前进到超时时间之后（100 blocks）
+        System::set_block_number(102);
+
+        // 任何人都可以调用过期处理
+        assert_ok!(Livestream::expire_room_report(
+            RuntimeOrigin::signed(CHARLIE),
+            0,
+        ));
+
+        // 检查举报状态
+        let report = Livestream::room_reports(0).unwrap();
+        assert_eq!(report.status, crate::ReportStatus::Expired);
+
+        // 检查押金全额退还
+        assert_eq!(Balances::reserved_balance(BOB), 0);
+    });
+}
+

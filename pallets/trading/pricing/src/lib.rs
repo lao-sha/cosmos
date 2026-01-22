@@ -28,6 +28,12 @@ mod ocw;
 pub mod pallet {
     use frame_support::{pallet_prelude::*, traits::Get};
     use frame_system::pallet_prelude::*;
+    use sp_runtime::{
+        traits::Saturating,
+        transaction_validity::{
+            InvalidTransaction, TransactionSource, TransactionValidity, ValidTransaction,
+        },
+    };
 
     #[pallet::config]
     pub trait Config: frame_system::Config {
@@ -48,7 +54,39 @@ pub mod pallet {
         type ExchangeRateUpdateInterval: Get<u32>;
     }
 
-    /// 函数级中文注释：订单快照（用于循环缓冲区）
+    // ===== P3修复：类型安全的循环缓冲区索引 =====
+    
+    /// 循环缓冲区大小（10,000 条订单）
+    pub const RING_BUFFER_SIZE: u32 = 10_000;
+    
+    /// 函数级中文注释：类型安全的循环缓冲区索引
+    /// 封装索引操作，确保始终在有效范围内
+    #[derive(Clone, Copy, Encode, Decode, TypeInfo, MaxEncodedLen, RuntimeDebug, Default, PartialEq, Eq)]
+    pub struct RingBufferIndex(pub u32);
+    
+    impl RingBufferIndex {
+        /// 创建新索引（自动取模确保在范围内）
+        pub fn new(value: u32) -> Self {
+            Self(value % RING_BUFFER_SIZE)
+        }
+        
+        /// 获取下一个索引
+        pub fn next(self) -> Self {
+            Self((self.0 + 1) % RING_BUFFER_SIZE)
+        }
+        
+        /// 重置为 0
+        pub fn reset() -> Self {
+            Self(0)
+        }
+        
+        /// 获取原始值
+        pub fn value(self) -> u32 {
+            self.0
+        }
+    }
+
+    /// 函数级中文注释：订单快照
     /// 记录单笔订单的时间、价格和数量，用于后续计算滑动窗口均价
     #[derive(Clone, Encode, Decode, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
     pub struct OrderSnapshot {
@@ -70,10 +108,10 @@ pub mod pallet {
         pub total_usdt: u128,
         /// 订单数量
         pub order_count: u32,
-        /// 最旧订单索引（循环缓冲区指针，0-9999）
-        pub oldest_index: u32,
-        /// 最新订单索引（循环缓冲区指针，0-9999）
-        pub newest_index: u32,
+        /// P3修复：最旧订单索引（类型安全）
+        pub oldest_index: RingBufferIndex,
+        /// P3修复：最新订单索引（类型安全）
+        pub newest_index: RingBufferIndex,
     }
 
     /// 函数级中文注释：DUST 市场统计信息
@@ -145,14 +183,15 @@ pub mod pallet {
 
     /// 函数级中文注释：冷启动阈值（可治理调整）
     /// 当 OTC 和 Bridge 的交易量都低于此阈值时，使用默认价格
-    /// 默认值：100,000,000 DUST（1亿，精度 10^12）
+    /// 默认值：1,000,000,000 DUST（10亿，精度 10^12）
     #[pallet::storage]
     #[pallet::getter(fn cold_start_threshold)]
     pub type ColdStartThreshold<T> = StorageValue<_, u128, ValueQuery, DefaultColdStartThreshold>;
 
     #[pallet::type_value]
     pub fn DefaultColdStartThreshold() -> u128 {
-        100_000_000u128 * 1_000_000_000_000u128 // 1亿MEMO
+        // 冷启动阈值：10亿 DUST
+        1_000_000_000u128 * 1_000_000_000_000u128 // 10亿 DUST
     }
 
     /// 函数级中文注释：默认价格（可治理调整）
@@ -248,6 +287,14 @@ pub mod pallet {
         ColdStartNotExited,
         /// 函数级中文注释：汇率无效（为0或格式错误）
         InvalidExchangeRate,
+        /// P1修复：无效的价格（必须 > 0）
+        InvalidPrice,
+        /// P1修复：无效的数量（必须 > 0）
+        InvalidQuantity,
+        /// P2修复：算术溢出
+        ArithmeticOverflow,
+        /// P3修复：单笔订单数量超过上限
+        OrderTooLarge,
     }
 
     #[pallet::pallet]
@@ -268,27 +315,39 @@ pub mod pallet {
         /// 3. 添加新订单到循环缓冲区
         /// 4. 更新聚合统计数据
         /// 5. 发出事件
+        /// P3修复：单笔订单最大 DUST 数量（1000万 DUST）
+        const MAX_SINGLE_ORDER_DUST: u128 = 10_000_000u128 * 1_000_000_000_000u128;
+        
         pub fn add_otc_order(
             timestamp: u64,
             price_usdt: u64,
             dust_qty: u128,
         ) -> DispatchResult {
+            // P1修复：输入验证
+            ensure!(price_usdt > 0, Error::<T>::InvalidPrice);
+            ensure!(dust_qty > 0, Error::<T>::InvalidQuantity);
+            // P3修复：单笔订单上限验证
+            ensure!(dust_qty <= Self::MAX_SINGLE_ORDER_DUST, Error::<T>::OrderTooLarge);
+            
             let mut agg = OtcPriceAggregate::<T>::get();
             let limit: u128 = 1_000_000u128 * 1_000_000_000_000u128; // 1,000,000 DUST（精度 10^12）
             
             // 如果添加后超过限制，删除最旧的订单
             let mut new_total = agg.total_dust.saturating_add(dust_qty);
             while new_total > limit && agg.order_count > 0 {
-                if let Some(oldest) = OtcOrderRingBuffer::<T>::take(agg.oldest_index) {
+                // P3修复：使用类型安全的索引
+                if let Some(oldest) = OtcOrderRingBuffer::<T>::take(agg.oldest_index.value()) {
                     // 从聚合数据中减去
                     agg.total_dust = agg.total_dust.saturating_sub(oldest.dust_qty);
-                    let oldest_usdt = (oldest.dust_qty / 1_000_000_000_000u128)
-                        .saturating_mul(oldest.price_usdt as u128);
+                    // P0修复：先乘后除，避免精度丢失
+                    let oldest_usdt = oldest.dust_qty
+                        .saturating_mul(oldest.price_usdt as u128)
+                        / 1_000_000_000_000u128;
                     agg.total_usdt = agg.total_usdt.saturating_sub(oldest_usdt);
                     agg.order_count = agg.order_count.saturating_sub(1);
                     
-                    // 移动最旧索引
-                    agg.oldest_index = (agg.oldest_index + 1) % 10000;
+                    // P3修复：使用类型安全的索引移动
+                    agg.oldest_index = agg.oldest_index.next();
                     
                     // 重新计算新总量
                     new_total = agg.total_dust.saturating_add(dust_qty);
@@ -298,23 +357,35 @@ pub mod pallet {
             }
             
             // 添加新订单到循环缓冲区
+            // P0-2修复：order_count=0 时重置索引，避免覆盖旧数据
+            // P3修复：使用类型安全的索引
             let new_index = if agg.order_count == 0 {
-                0
+                agg.oldest_index = RingBufferIndex::reset();
+                agg.newest_index = RingBufferIndex::reset();
+                RingBufferIndex::reset()
             } else {
-                (agg.newest_index + 1) % 10000
+                agg.newest_index.next()
             };
             
-            OtcOrderRingBuffer::<T>::insert(new_index, OrderSnapshot {
+            OtcOrderRingBuffer::<T>::insert(new_index.value(), OrderSnapshot {
                 timestamp,
                 price_usdt,
                 dust_qty,
             });
             
             // 更新聚合数据
-            let order_usdt = (dust_qty / 1_000_000_000_000u128)
-                .saturating_mul(price_usdt as u128);
-            agg.total_dust = agg.total_dust.saturating_add(dust_qty);
-            agg.total_usdt = agg.total_usdt.saturating_add(order_usdt);
+            // P0修复：先乘后除，避免精度丢失
+            // P2修复：使用 checked_mul/checked_add 防止溢出
+            let order_usdt = dust_qty
+                .checked_mul(price_usdt as u128)
+                .ok_or(Error::<T>::ArithmeticOverflow)?
+                / 1_000_000_000_000u128;
+            agg.total_dust = agg.total_dust
+                .checked_add(dust_qty)
+                .ok_or(Error::<T>::ArithmeticOverflow)?;
+            agg.total_usdt = agg.total_usdt
+                .checked_add(order_usdt)
+                .ok_or(Error::<T>::ArithmeticOverflow)?;
             agg.order_count = agg.order_count.saturating_add(1);
             agg.newest_index = new_index;
             
@@ -335,26 +406,36 @@ pub mod pallet {
             Ok(())
         }
 
-        /// 函数级详细中文注释：添加 Bridge 兑换到价格聚合
-        /// 逻辑与 add_otc_order 相同，但操作 Bridge 相关的存储
-        pub fn add_bridge_swap(
+        /// 函数级详细中文注释：添加 Swap 交易到价格聚合
+        /// 逻辑与 add_otc_order 相同，但操作 Swap 相关的存储
+        pub fn add_swap_order(
             timestamp: u64,
             price_usdt: u64,
             dust_qty: u128,
         ) -> DispatchResult {
+            // P1修复：输入验证
+            ensure!(price_usdt > 0, Error::<T>::InvalidPrice);
+            ensure!(dust_qty > 0, Error::<T>::InvalidQuantity);
+            // P3修复：单笔订单上限验证
+            ensure!(dust_qty <= Self::MAX_SINGLE_ORDER_DUST, Error::<T>::OrderTooLarge);
+            
             let mut agg = BridgePriceAggregate::<T>::get();
             let limit: u128 = 1_000_000u128 * 1_000_000_000_000u128; // 1,000,000 DUST
             
             // 删除旧订单直到满足限制
             let mut new_total = agg.total_dust.saturating_add(dust_qty);
             while new_total > limit && agg.order_count > 0 {
-                if let Some(oldest) = BridgeOrderRingBuffer::<T>::take(agg.oldest_index) {
+                // P3修复：使用类型安全的索引
+                if let Some(oldest) = BridgeOrderRingBuffer::<T>::take(agg.oldest_index.value()) {
                     agg.total_dust = agg.total_dust.saturating_sub(oldest.dust_qty);
-                    let oldest_usdt = (oldest.dust_qty / 1_000_000_000_000u128)
-                        .saturating_mul(oldest.price_usdt as u128);
+                    // P0修复：先乘后除，避免精度丢失
+                    let oldest_usdt = oldest.dust_qty
+                        .saturating_mul(oldest.price_usdt as u128)
+                        / 1_000_000_000_000u128;
                     agg.total_usdt = agg.total_usdt.saturating_sub(oldest_usdt);
                     agg.order_count = agg.order_count.saturating_sub(1);
-                    agg.oldest_index = (agg.oldest_index + 1) % 10000;
+                    // P3修复：使用类型安全的索引移动
+                    agg.oldest_index = agg.oldest_index.next();
                     new_total = agg.total_dust.saturating_add(dust_qty);
                 } else {
                     break;
@@ -362,23 +443,35 @@ pub mod pallet {
             }
             
             // 添加新订单
+            // P0-2修复：order_count=0 时重置索引，避免覆盖旧数据
+            // P3修复：使用类型安全的索引
             let new_index = if agg.order_count == 0 {
-                0
+                agg.oldest_index = RingBufferIndex::reset();
+                agg.newest_index = RingBufferIndex::reset();
+                RingBufferIndex::reset()
             } else {
-                (agg.newest_index + 1) % 10000
+                agg.newest_index.next()
             };
             
-            BridgeOrderRingBuffer::<T>::insert(new_index, OrderSnapshot {
+            BridgeOrderRingBuffer::<T>::insert(new_index.value(), OrderSnapshot {
                 timestamp,
                 price_usdt,
                 dust_qty,
             });
             
             // 更新聚合数据
-            let order_usdt = (dust_qty / 1_000_000_000_000u128)
-                .saturating_mul(price_usdt as u128);
-            agg.total_dust = agg.total_dust.saturating_add(dust_qty);
-            agg.total_usdt = agg.total_usdt.saturating_add(order_usdt);
+            // P0修复：先乘后除，避免精度丢失
+            // P2修复：使用 checked_mul/checked_add 防止溢出
+            let order_usdt = dust_qty
+                .checked_mul(price_usdt as u128)
+                .ok_or(Error::<T>::ArithmeticOverflow)?
+                / 1_000_000_000_000u128;
+            agg.total_dust = agg.total_dust
+                .checked_add(dust_qty)
+                .ok_or(Error::<T>::ArithmeticOverflow)?;
+            agg.total_usdt = agg.total_usdt
+                .checked_add(order_usdt)
+                .ok_or(Error::<T>::ArithmeticOverflow)?;
             agg.order_count = agg.order_count.saturating_add(1);
             agg.newest_index = new_index;
             
@@ -415,7 +508,8 @@ pub mod pallet {
                 .saturating_mul(1_000_000_000_000u128)
                 .checked_div(agg.total_dust)
                 .unwrap_or(0);
-            avg as u64
+            // P3修复：安全类型转换，避免截断
+            avg.min(u64::MAX as u128) as u64
         }
 
         /// 函数级详细中文注释：获取 Bridge 兑换均价（USDT/DUST，精度 10^6）
@@ -428,7 +522,8 @@ pub mod pallet {
                 .saturating_mul(1_000_000_000_000u128)
                 .checked_div(agg.total_dust)
                 .unwrap_or(0);
-            avg as u64
+            // P3修复：安全类型转换，避免截断
+            avg.min(u64::MAX as u128) as u64
         }
 
         /// 函数级详细中文注释：获取 OTC 聚合统计信息
@@ -571,7 +666,8 @@ pub mod pallet {
                 .checked_div(total_dust)
                 .unwrap_or(0);
             
-            avg as u64
+            // P3修复：安全类型转换，避免截断
+            avg.min(u64::MAX as u128) as u64
         }
 
         /// 函数级详细中文注释：获取完整的 DUST 市场统计信息
@@ -646,19 +742,27 @@ pub mod pallet {
             
             // 3. 计算偏离率（bps）
             // 偏离率 = |订单价格 - 基准价格| / 基准价格 × 10000
-            let deviation_bps = if order_price_usdt > base_price {
+            let deviation_u128 = if order_price_usdt > base_price {
                 // 订单价格高于基准价格（溢价）
                 ((order_price_usdt - base_price) as u128)
                     .saturating_mul(10000)
                     .checked_div(base_price as u128)
-                    .unwrap_or(0) as u16
+                    .unwrap_or(0)
             } else {
                 // 订单价格低于基准价格（折价）
                 ((base_price - order_price_usdt) as u128)
                     .saturating_mul(10000)
                     .checked_div(base_price as u128)
-                    .unwrap_or(0) as u16
+                    .unwrap_or(0)
             };
+            
+            // P2修复：提前检查防止 u128 → u16 截断导致错误通过
+            // 如果偏离率超过 u16::MAX，直接拒绝（极端价格）
+            ensure!(
+                deviation_u128 <= u16::MAX as u128,
+                Error::<T>::PriceDeviationTooLarge
+            );
+            let deviation_bps = deviation_u128 as u16;
             
             // 4. 检查是否超出限制
             let max_deviation = T::MaxPriceDeviation::get();
@@ -769,6 +873,91 @@ pub mod pallet {
             Self::deposit_event(Event::ColdStartReset { reason });
 
             Ok(())
+        }
+        
+        /// P0-1修复：OCW 提交汇率（无签名交易）
+        ///
+        /// # 权限
+        /// - 仅 OCW 可调用（通过 ValidateUnsigned 验证）
+        ///
+        /// # 参数
+        /// - `cny_rate`: CNY/USD 汇率（精度 10^6）
+        /// - `updated_at`: 更新时间戳（Unix 秒）
+        ///
+        /// # 验证
+        /// - 汇率必须在合理范围内（5.0 ~ 10.0）
+        /// - 更新间隔必须超过配置的最小间隔
+        #[pallet::call_index(2)]
+        #[pallet::weight(T::DbWeight::get().reads_writes(2, 2))]
+        pub fn ocw_submit_exchange_rate(
+            origin: OriginFor<T>,
+            cny_rate: u64,
+            updated_at: u64,
+        ) -> DispatchResult {
+            ensure_none(origin)?;
+            
+            // 验证汇率在合理范围内（5.0 ~ 10.0 CNY/USD）
+            ensure!(
+                cny_rate >= 5_000_000 && cny_rate <= 10_000_000,
+                Error::<T>::InvalidExchangeRate
+            );
+            
+            // 更新链上存储
+            let rate_data = ExchangeRateData {
+                cny_rate,
+                updated_at,
+            };
+            CnyUsdtRate::<T>::put(rate_data);
+            
+            // 更新最后更新区块
+            let current_block = frame_system::Pallet::<T>::block_number();
+            LastRateUpdateBlock::<T>::put(current_block);
+            
+            // 发出事件
+            Self::deposit_event(Event::ExchangeRateUpdated {
+                cny_rate,
+                updated_at,
+                block_number: current_block,
+            });
+            
+            Ok(())
+        }
+    }
+    
+    // ===== P0-1修复：OCW 无签名交易验证 =====
+    
+    #[pallet::validate_unsigned]
+    impl<T: Config> ValidateUnsigned for Pallet<T> {
+        type Call = Call<T>;
+        
+        fn validate_unsigned(_source: TransactionSource, call: &Self::Call) -> TransactionValidity {
+            match call {
+                Call::ocw_submit_exchange_rate { cny_rate, .. } => {
+                    // 验证汇率在合理范围内
+                    if *cny_rate < 5_000_000 || *cny_rate > 10_000_000 {
+                        return InvalidTransaction::Call.into();
+                    }
+                    
+                    // 检查更新间隔
+                    let current_block = frame_system::Pallet::<T>::block_number();
+                    let last_update = LastRateUpdateBlock::<T>::get();
+                    let interval = T::ExchangeRateUpdateInterval::get();
+                    
+                    // 如果距离上次更新不足间隔时间，拒绝交易
+                    let interval_block: BlockNumberFor<T> = interval.into();
+                    if current_block.saturating_sub(last_update) < interval_block {
+                        return InvalidTransaction::Stale.into();
+                    }
+                    
+                    ValidTransaction::with_tag_prefix("PricingOCW")
+                        .priority(100)
+                        .longevity(5)
+                        .and_provides([b"exchange_rate"])
+                        .propagate(true)
+                        .build()
+                },
+                _ => InvalidTransaction::Call.into(),
+            }
         }
     }
 

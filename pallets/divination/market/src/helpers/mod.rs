@@ -4,4 +4,4 @@
 
 mod credit;
 mod provider;
-mod report;
+// 注：举报模块已迁移到统一仲裁模块 (pallet-arbitration)

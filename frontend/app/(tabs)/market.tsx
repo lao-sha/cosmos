@@ -7,7 +7,6 @@ import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { BottomNavBar } from '@/components/BottomNavBar';
 
 const THEME_COLOR = '#B2955D';
 const THEME_BG = '#F5F5F7';
@@ -186,8 +185,6 @@ export default function MarketPage() {
           <Text style={styles.footerText}>服务完成后自动结算</Text>
         </View>
       </ScrollView>
-
-      <BottomNavBar activeTab="market" />
     </View>
     </View>
   );

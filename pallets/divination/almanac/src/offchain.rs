@@ -353,14 +353,44 @@ fn extract_lunar_day(data: &lite_json::JsonValue) -> Option<u8> {
 }
 
 /// 从干支字符串提取天干
-fn extract_tiangan(_data: &lite_json::JsonValue, _field: &str) -> Option<u8> {
-    // TODO: 实现天干解析
+/// 天干：甲(0)乙(1)丙(2)丁(3)戊(4)己(5)庚(6)辛(7)壬(8)癸(9)
+fn extract_tiangan(data: &lite_json::JsonValue, field: &str) -> Option<u8> {
+    let ganzhi_str = extract_string_field(data, field)?;
+    
+    // 天干映射表
+    let tiangan_map = [
+        ("甲", 0), ("乙", 1), ("丙", 2), ("丁", 3), ("戊", 4),
+        ("己", 5), ("庚", 6), ("辛", 7), ("壬", 8), ("癸", 9),
+    ];
+    
+    // 干支字符串的第一个字符是天干
+    for (name, num) in tiangan_map.iter() {
+        if ganzhi_str.starts_with(name) {
+            return Some(*num);
+        }
+    }
+    
     None
 }
 
 /// 从干支字符串提取地支
-fn extract_dizhi(_data: &lite_json::JsonValue, _field: &str) -> Option<u8> {
-    // TODO: 实现地支解析
+/// 地支：子(0)丑(1)寅(2)卯(3)辰(4)巳(5)午(6)未(7)申(8)酉(9)戌(10)亥(11)
+fn extract_dizhi(data: &lite_json::JsonValue, field: &str) -> Option<u8> {
+    let ganzhi_str = extract_string_field(data, field)?;
+    
+    // 地支映射表
+    let dizhi_map = [
+        ("子", 0), ("丑", 1), ("寅", 2), ("卯", 3), ("辰", 4), ("巳", 5),
+        ("午", 6), ("未", 7), ("申", 8), ("酉", 9), ("戌", 10), ("亥", 11),
+    ];
+    
+    // 干支字符串的第二个字符是地支
+    for (name, num) in dizhi_map.iter() {
+        if ganzhi_str.contains(name) {
+            return Some(*num);
+        }
+    }
+    
     None
 }
 

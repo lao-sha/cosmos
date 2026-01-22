@@ -51,8 +51,6 @@ pub enum AccessPolicy<T: Config> {
     OwnerOnly,
     /// 指定用户列表
     SharedWith(AuthorizedUsers<T>),
-    /// 家庭成员（关联逝者ID）
-    FamilyMembers(u64),
     /// 定时访问（到期后自动撤销）
     TimeboxedAccess {
         users: AuthorizedUsers<T>,

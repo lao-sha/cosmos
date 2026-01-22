@@ -90,9 +90,17 @@ impl<T: Config> Pallet<T> {
             }
 
             // 累计应得金额
+            let is_new_entry = Entitlement::<T>::get(current_cycle, referrer).is_zero();
             Entitlement::<T>::mutate(current_cycle, referrer, |balance| {
                 *balance = balance.saturating_add(share);
             });
+
+            // P2: 添加到周期账户列表（用于高效结算迭代）
+            if is_new_entry {
+                CycleAccounts::<T>::mutate(current_cycle, |accounts| {
+                    let _ = accounts.try_push(referrer.clone());
+                });
+            }
 
             // 如果是第一层，且有时长，更新直推活跃数
             if index == 0 {
@@ -118,48 +126,49 @@ impl<T: Config> Pallet<T> {
         }
     }
 
-    /// 函数级中文注释：结算指定周期
+    /// 函数级中文注释：结算指定周期（P2优化版）
     ///
     /// 参数：
     /// - cycle: 周编号
     /// - max_accounts: 本次最多结算的账户数（分页）
     ///
     /// 返回：实际结算的账户数
+    ///
+    /// P2优化：使用 CycleAccounts 索引替代 iter_prefix 全量迭代
     pub fn do_settle_cycle(
         cycle: u32,
         max_accounts: u32,
     ) -> Result<u32, DispatchError> {
         // 获取当前结算游标
-        let cursor = SettleCursor::<T>::get(cycle);
+        let cursor = SettleCursor::<T>::get(cycle) as usize;
 
-        // 获取待结算账户列表（简化实现：迭代 Entitlement）
-        let mut settled_count = 0u32;
-        let mut current_index = cursor;
+        // P2优化：从 CycleAccounts 获取账户列表，避免全量迭代
+        let accounts = CycleAccounts::<T>::get(cycle);
+        let total_accounts = accounts.len();
+
+        // 如果游标已超过账户数，说明结算完成
+        if cursor >= total_accounts {
+            SettleCursor::<T>::remove(cycle);
+            CycleAccounts::<T>::remove(cycle);
+            CurrentSettlingCycle::<T>::kill();
+            return Ok(0);
+        }
 
         // 批量转账列表
         let mut transfers = sp_std::vec::Vec::new();
+        let mut settled_count = 0u32;
 
-        // 迭代 Entitlement 存储
-        for (account, amount) in Entitlement::<T>::iter_prefix(cycle) {
-            // 跳过已处理的账户
-            if current_index > 0 {
-                current_index = current_index.saturating_sub(1);
-                continue;
-            }
-
+        // 从游标位置开始处理
+        for account in accounts.iter().skip(cursor).take(max_accounts as usize) {
+            let amount = Entitlement::<T>::get(cycle, account);
+            
             if amount.is_zero() {
+                settled_count += 1;
                 continue;
             }
 
-            // 添加到转账列表
             transfers.push((account.clone(), amount));
-
             settled_count += 1;
-
-            // 达到批量上限
-            if settled_count >= max_accounts {
-                break;
-            }
         }
 
         // 批量转账
@@ -167,7 +176,7 @@ impl<T: Config> Pallet<T> {
             Self::do_batch_withdraw(&transfers)
                 .map_err(|_| Error::<T>::WithdrawFailed)?;
 
-            // 清理已结算账户
+            // 清理已结算账户的 Entitlement
             for (account, _) in &transfers {
                 Entitlement::<T>::remove(cycle, account);
             }
@@ -189,13 +198,14 @@ impl<T: Config> Pallet<T> {
         }
 
         // 更新结算游标
-        let new_cursor = cursor.saturating_add(settled_count);
+        let new_cursor = (cursor as u32).saturating_add(settled_count);
         SettleCursor::<T>::insert(cycle, new_cursor);
 
         // 检查是否结算完成
-        if settled_count < max_accounts {
-            // 结算完成，清理游标
+        if (new_cursor as usize) >= total_accounts {
+            // 结算完成，清理存储
             SettleCursor::<T>::remove(cycle);
+            CycleAccounts::<T>::remove(cycle);
             CurrentSettlingCycle::<T>::kill();
         } else {
             // 未完成，记录当前结算周期

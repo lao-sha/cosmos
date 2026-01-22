@@ -108,21 +108,18 @@ pub fn is_kong(dizhi: DiZhi, kongwang: (DiZhi, DiZhi)) -> bool {
 /// }
 /// ```
 pub fn calculate_all_kongwang<T: crate::pallet::Config>(sizhu: &SiZhu<T>) -> KongWangInfo {
-	// 计算年柱空亡
+	// 计算各柱所在旬的空亡（用于显示）
 	let year_kongwang = calculate_kongwang(&sizhu.year_zhu.ganzhi);
-	let year_is_kong = is_kong(sizhu.year_zhu.ganzhi.zhi, year_kongwang);
-
-	// 计算月柱空亡
 	let month_kongwang = calculate_kongwang(&sizhu.month_zhu.ganzhi);
-	let month_is_kong = is_kong(sizhu.month_zhu.ganzhi.zhi, month_kongwang);
-
-	// 计算日柱空亡
 	let day_kongwang = calculate_kongwang(&sizhu.day_zhu.ganzhi);
-	let day_is_kong = is_kong(sizhu.day_zhu.ganzhi.zhi, day_kongwang);
-
-	// 计算时柱空亡
 	let hour_kongwang = calculate_kongwang(&sizhu.hour_zhu.ganzhi);
-	let hour_is_kong = is_kong(sizhu.hour_zhu.ganzhi.zhi, hour_kongwang);
+
+	// 判断是否落空亡：以日柱空亡为准，检查各柱地支是否在日柱空亡中
+	// 注意：日支永远不可能在自己的空亡中（地支总在自己所属的旬内）
+	let year_is_kong = is_kong(sizhu.year_zhu.ganzhi.zhi, day_kongwang);
+	let month_is_kong = is_kong(sizhu.month_zhu.ganzhi.zhi, day_kongwang);
+	let day_is_kong = false; // 日支不可能落入日柱空亡
+	let hour_is_kong = is_kong(sizhu.hour_zhu.ganzhi.zhi, day_kongwang);
 
 	KongWangInfo {
 		year_kongwang,
@@ -158,21 +155,18 @@ pub fn calculate_all_kongwang_temp(
 	day_ganzhi: &GanZhi,
 	hour_ganzhi: &GanZhi,
 ) -> KongWangInfo {
-	// 计算年柱空亡
+	// 计算各柱所在旬的空亡（用于显示）
 	let year_kongwang = calculate_kongwang(year_ganzhi);
-	let year_is_kong = is_kong(year_ganzhi.zhi, year_kongwang);
-
-	// 计算月柱空亡
 	let month_kongwang = calculate_kongwang(month_ganzhi);
-	let month_is_kong = is_kong(month_ganzhi.zhi, month_kongwang);
-
-	// 计算日柱空亡
 	let day_kongwang = calculate_kongwang(day_ganzhi);
-	let day_is_kong = is_kong(day_ganzhi.zhi, day_kongwang);
-
-	// 计算时柱空亡
 	let hour_kongwang = calculate_kongwang(hour_ganzhi);
-	let hour_is_kong = is_kong(hour_ganzhi.zhi, hour_kongwang);
+
+	// 判断是否落空亡：以日柱空亡为准，检查各柱地支是否在日柱空亡中
+	// 注意：日支永远不可能在自己的空亡中（地支总在自己所属的旬内）
+	let year_is_kong = is_kong(year_ganzhi.zhi, day_kongwang);
+	let month_is_kong = is_kong(month_ganzhi.zhi, day_kongwang);
+	let day_is_kong = false; // 日支不可能落入日柱空亡
+	let hour_is_kong = is_kong(hour_ganzhi.zhi, day_kongwang);
 
 	KongWangInfo {
 		year_kongwang,
@@ -281,5 +275,60 @@ mod tests {
 			assert_eq!(kong1, DiZhi(*kong1_val));
 			assert_eq!(kong2, DiZhi(*kong2_val));
 		}
+	}
+
+	#[test]
+	fn test_kongwang_uses_day_pillar() {
+		// 验证空亡判断以日柱为准
+		// 例：日柱甲子（甲子旬，空亡=戌亥），年柱丙戌（甲申旬）
+		// 年支戌应该落入日柱空亡，而非年柱自己的空亡（午未）
+
+		let day_ganzhi = GanZhi::from_index(0).unwrap();    // 甲子，甲子旬，空亡=戌亥
+		let year_ganzhi = GanZhi::from_index(22).unwrap();  // 丙戌，甲申旬，空亡=午未
+
+		let day_kongwang = calculate_kongwang(&day_ganzhi);
+		let year_kongwang = calculate_kongwang(&year_ganzhi);
+
+		// 日柱空亡应该是戌(10)、亥(11)
+		assert_eq!(day_kongwang, (DiZhi(10), DiZhi(11)));
+		// 年柱所在旬空亡应该是午(6)、未(7)
+		assert_eq!(year_kongwang, (DiZhi(6), DiZhi(7)));
+
+		// 年支是戌(10)
+		assert_eq!(year_ganzhi.zhi, DiZhi(10));
+
+		// 正确：年支戌落入日柱空亡（戌亥空）
+		assert!(is_kong(year_ganzhi.zhi, day_kongwang));
+
+		// 错误逻辑的结果：年支戌不在年柱自己的空亡（午未空）中
+		assert!(!is_kong(year_ganzhi.zhi, year_kongwang));
+	}
+
+	#[test]
+	fn test_calculate_all_kongwang_temp_correct_logic() {
+		// 测试 calculate_all_kongwang_temp 使用正确的日柱空亡逻辑
+		// 日柱：甲子（甲子旬，空亡=戌亥）
+		// 年柱：丙戌（年支=戌，应落空亡）
+		// 月柱：丁亥（月支=亥，应落空亡）
+		// 时柱：庚寅（时支=寅，不落空亡）
+
+		let year = GanZhi::from_index(22).unwrap();  // 丙戌
+		let month = GanZhi::from_index(23).unwrap(); // 丁亥
+		let day = GanZhi::from_index(0).unwrap();    // 甲子
+		let hour = GanZhi::from_index(26).unwrap();  // 庚寅
+
+		let info = calculate_all_kongwang_temp(&year, &month, &day, &hour);
+
+		// 日柱空亡是戌亥
+		assert_eq!(info.day_kongwang, (DiZhi(10), DiZhi(11)));
+
+		// 年支戌落空亡
+		assert!(info.year_is_kong);
+		// 月支亥落空亡
+		assert!(info.month_is_kong);
+		// 日支永不落空亡
+		assert!(!info.day_is_kong);
+		// 时支寅不落空亡
+		assert!(!info.hour_is_kong);
 	}
 }

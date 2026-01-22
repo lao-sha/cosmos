@@ -201,7 +201,7 @@ export class DivinationMarketService {
   }
 
   /**
-   * 注销解卦师
+   * 注销解卦师（暂停服务）
    * @param onStatusChange 状态回调
    */
   async deactivateProvider(onStatusChange?: StatusCallback): Promise<void> {
@@ -215,6 +215,26 @@ export class DivinationMarketService {
     onStatusChange?.('准备交易...');
 
     const tx = api.tx.divinationMarket.deactivateProvider();
+
+    onStatusChange?.('等待签名...');
+    await signAndSend(api, tx, accountAddress, onStatusChange);
+  }
+
+  /**
+   * 重新激活解卦师
+   * @param onStatusChange 状态回调
+   */
+  async reactivateProvider(onStatusChange?: StatusCallback): Promise<void> {
+    const api = this.getApi();
+    const accountAddress = getCurrentSignerAddress();
+
+    if (!accountAddress) {
+      throw new Error('No signer address available. Please unlock wallet first.');
+    }
+
+    onStatusChange?.('准备交易...');
+
+    const tx = api.tx.divinationMarket.reactivateProvider();
 
     onStatusChange?.('等待签名...');
     await signAndSend(api, tx, accountAddress, onStatusChange);
@@ -386,6 +406,92 @@ export class DivinationMarketService {
     }
   }
 
+  /**
+   * 更新套餐信息
+   * @param packageId 套餐ID
+   * @param name 新名称（可选）
+   * @param description 新描述（可选）
+   * @param price 新价格（可选）
+   * @param duration 新预计时间（可选）
+   * @param onStatusChange 状态回调
+   */
+  async updatePackage(
+    packageId: number,
+    name?: string,
+    description?: string,
+    price?: bigint,
+    duration?: number,
+    onStatusChange?: StatusCallback
+  ): Promise<void> {
+    const api = this.getApi();
+    const accountAddress = getCurrentSignerAddress();
+
+    if (!accountAddress) {
+      throw new Error('No signer address available. Please unlock wallet first.');
+    }
+
+    onStatusChange?.('准备交易...');
+
+    const tx = api.tx.divinationMarket.updatePackage(
+      packageId,
+      name || null,
+      description || null,
+      price?.toString() || null,
+      duration || null
+    );
+
+    onStatusChange?.('等待签名...');
+    await signAndSend(api, tx, accountAddress, onStatusChange);
+  }
+
+  /**
+   * 停用套餐
+   * @param packageId 套餐ID
+   * @param onStatusChange 状态回调
+   */
+  async deactivatePackage(
+    packageId: number,
+    onStatusChange?: StatusCallback
+  ): Promise<void> {
+    const api = this.getApi();
+    const accountAddress = getCurrentSignerAddress();
+
+    if (!accountAddress) {
+      throw new Error('No signer address available. Please unlock wallet first.');
+    }
+
+    onStatusChange?.('准备交易...');
+
+    const tx = api.tx.divinationMarket.deactivatePackage(packageId);
+
+    onStatusChange?.('等待签名...');
+    await signAndSend(api, tx, accountAddress, onStatusChange);
+  }
+
+  /**
+   * 重新激活套餐
+   * @param packageId 套餐ID
+   * @param onStatusChange 状态回调
+   */
+  async reactivatePackage(
+    packageId: number,
+    onStatusChange?: StatusCallback
+  ): Promise<void> {
+    const api = this.getApi();
+    const accountAddress = getCurrentSignerAddress();
+
+    if (!accountAddress) {
+      throw new Error('No signer address available. Please unlock wallet first.');
+    }
+
+    onStatusChange?.('准备交易...');
+
+    const tx = api.tx.divinationMarket.reactivatePackage(packageId);
+
+    onStatusChange?.('等待签名...');
+    await signAndSend(api, tx, accountAddress, onStatusChange);
+  }
+
   // ===== 订单相关 =====
 
   /**
@@ -443,7 +549,7 @@ export class DivinationMarketService {
   }
 
   /**
-   * 提交解答
+   * 提交解答（解卦师完成订单）
    * @param orderId 订单ID
    * @param answer 解答内容
    * @param onStatusChange 状态回调
@@ -469,6 +575,151 @@ export class DivinationMarketService {
 
     onStatusChange?.('等待签名...');
     await signAndSend(api, tx, accountAddress, onStatusChange);
+  }
+
+  /**
+   * 接受订单（解卦师调用）
+   * @param orderId 订单ID
+   * @param onStatusChange 状态回调
+   */
+  async acceptOrder(
+    orderId: number,
+    onStatusChange?: StatusCallback
+  ): Promise<void> {
+    const api = this.getApi();
+    const accountAddress = getCurrentSignerAddress();
+
+    if (!accountAddress) {
+      throw new Error('No signer address available. Please unlock wallet first.');
+    }
+
+    onStatusChange?.('准备交易...');
+
+    const tx = api.tx.divinationMarket.acceptOrder(orderId);
+
+    onStatusChange?.('等待签名...');
+    await signAndSend(api, tx, accountAddress, onStatusChange);
+  }
+
+  /**
+   * 取消订单（用户或解卦师调用）
+   * @param orderId 订单ID
+   * @param reason 取消原因（可选）
+   * @param onStatusChange 状态回调
+   */
+  async cancelOrder(
+    orderId: number,
+    reason?: string,
+    onStatusChange?: StatusCallback
+  ): Promise<void> {
+    const api = this.getApi();
+    const accountAddress = getCurrentSignerAddress();
+
+    if (!accountAddress) {
+      throw new Error('No signer address available. Please unlock wallet first.');
+    }
+
+    onStatusChange?.('准备交易...');
+
+    const tx = api.tx.divinationMarket.cancelOrder(orderId, reason || null);
+
+    onStatusChange?.('等待签名...');
+    await signAndSend(api, tx, accountAddress, onStatusChange);
+  }
+
+  /**
+   * 确认完成订单（用户调用）
+   *
+   * 用户在收到解答后调用此方法确认完成，资金将释放给解卦师
+   *
+   * @param orderId 订单ID
+   * @param onStatusChange 状态回调
+   */
+  async completeOrder(
+    orderId: number,
+    onStatusChange?: StatusCallback
+  ): Promise<void> {
+    const api = this.getApi();
+    const accountAddress = getCurrentSignerAddress();
+
+    if (!accountAddress) {
+      throw new Error('No signer address available. Please unlock wallet first.');
+    }
+
+    onStatusChange?.('准备交易...');
+
+    const tx = api.tx.divinationMarket.completeOrder(orderId);
+
+    onStatusChange?.('等待签名...');
+    await signAndSend(api, tx, accountAddress, onStatusChange);
+  }
+
+  /**
+   * 发起订单争议
+   *
+   * 当用户对解答不满意或解卦师未按时完成时，可以发起争议
+   *
+   * @param orderId 订单ID
+   * @param reason 争议原因
+   * @param evidenceCid 证据的 IPFS CID（可选）
+   * @param onStatusChange 状态回调
+   */
+  async disputeOrder(
+    orderId: number,
+    reason: string,
+    evidenceCid?: string,
+    onStatusChange?: StatusCallback
+  ): Promise<void> {
+    const api = this.getApi();
+    const accountAddress = getCurrentSignerAddress();
+
+    if (!accountAddress) {
+      throw new Error('No signer address available. Please unlock wallet first.');
+    }
+
+    onStatusChange?.('准备交易...');
+
+    const tx = api.tx.divinationMarket.disputeOrder(
+      orderId,
+      reason,
+      evidenceCid || null
+    );
+
+    onStatusChange?.('等待签名...');
+    await signAndSend(api, tx, accountAddress, onStatusChange);
+  }
+
+  /**
+   * 订阅订单状态变化
+   * @param orderId 订单ID
+   * @param callback 状态变化回调
+   * @returns 取消订阅函数
+   */
+  async subscribeToOrder(
+    orderId: number,
+    callback: (order: Order) => void
+  ): Promise<() => void> {
+    const api = this.getApi();
+
+    const unsub = await api.query.divinationMarket.orders(orderId, (order) => {
+      if (!order.isEmpty) {
+        const data = order.toJSON() as any;
+        callback({
+          id: data.id,
+          customer: data.customer,
+          providerId: data.providerId,
+          packageId: data.packageId,
+          questionCid: data.questionCid,
+          answerCid: data.answerCid,
+          amount: BigInt(data.amount),
+          status: data.status,
+          createdAt: data.createdAt,
+          completedAt: data.completedAt,
+        });
+      }
+    });
+
+    return unsub;
   }
 
   /**
@@ -576,6 +827,61 @@ export class DivinationMarketService {
     onStatusChange?.('准备交易...');
 
     const tx = api.tx.divinationMarket.submitReview(orderId, rating, comment);
+
+    onStatusChange?.('等待签名...');
+    await signAndSend(api, tx, accountAddress, onStatusChange);
+  }
+
+  /**
+   * 提现（解卦师提取已完成订单的收入）
+   * @param amount 提现金额（可选，不传则提取全部）
+   * @param onStatusChange 状态回调
+   */
+  async withdraw(amount?: bigint, onStatusChange?: StatusCallback): Promise<void> {
+    const api = this.getApi();
+    const accountAddress = getCurrentSignerAddress();
+
+    if (!accountAddress) {
+      throw new Error('No signer address available. Please unlock wallet first.');
+    }
+
+    onStatusChange?.('准备交易...');
+
+    const tx = amount
+      ? api.tx.divinationMarket.withdraw(amount.toString())
+      : api.tx.divinationMarket.withdrawAll();
+
+    onStatusChange?.('等待签名...');
+    await signAndSend(api, tx, accountAddress, onStatusChange);
+  }
+
+  /**
+   * 打赏（额外打赏解卦师）
+   * @param providerId 解卦师ID
+   * @param amount 打赏金额
+   * @param orderId 相关订单ID（可选）
+   * @param onStatusChange 状态回调
+   */
+  async tip(
+    providerId: number,
+    amount: bigint,
+    orderId?: number,
+    onStatusChange?: StatusCallback
+  ): Promise<void> {
+    const api = this.getApi();
+    const accountAddress = getCurrentSignerAddress();
+
+    if (!accountAddress) {
+      throw new Error('No signer address available. Please unlock wallet first.');
+    }
+
+    onStatusChange?.('准备交易...');
+
+    const tx = api.tx.divinationMarket.tip(
+      providerId,
+      amount.toString(),
+      orderId || null
+    );
 
     onStatusChange?.('等待签名...');
     await signAndSend(api, tx, accountAddress, onStatusChange);

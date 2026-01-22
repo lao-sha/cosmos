@@ -19,6 +19,7 @@ import { LoadingSpinner, EmptyState } from '@/divination/market/components';
 import { THEME, SHADOWS } from '@/divination/market/theme';
 import { DIVINATION_TYPES, SORT_OPTIONS } from '@/divination/market/constants/market.constants';
 import { Provider, ProviderFilterParams } from '@/divination/market/types';
+import { BottomNavBar } from '@/components/BottomNavBar';
 
 export default function MarketScreen() {
   const router = useRouter();
@@ -190,6 +191,9 @@ export default function MarketScreen() {
         <Ionicons name="add" size={24} color={THEME.textInverse} />
         <Text style={styles.fabText}>成为解卦师</Text>
       </TouchableOpacity>
+
+      {/* 底部导航栏 */}
+      <BottomNavBar activeTab="market" />
     </SafeAreaView>
   );
 }
@@ -302,12 +306,12 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 16,
-    paddingBottom: 80,
+    paddingBottom: 140,
   },
   fab: {
     position: 'absolute',
     right: 16,
-    bottom: 24,
+    bottom: 84,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: THEME.primary,

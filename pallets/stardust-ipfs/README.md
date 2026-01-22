@@ -2,7 +2,12 @@
 
 ## 模块概述
 
-IPFS存储服务管理模块，提供去中心化内容固定（Pin）服务，是纪念平台的核心基础设施模块。该模块实现了完整的IPFS存储服务系统，包括内容固定、运营者管理、三层分层策略、自动扣费、OCW健康巡检等核心功能，为整个纪念平台的内容存储提供稳定可靠的去中心化基础设施。
+IPFS存储服务管理模块，提供去中心化内容固定（Pin）服务，是Stardust平台的核心基础设施模块。该模块实现了完整的IPFS存储服务系统，包括内容固定、运营者管理、三层分层策略、自动扣费、OCW健康巡检等核心功能，为整个平台的内容存储提供稳定可靠的去中心化基础设施。
+
+本模块支持多种业务场景：
+- **纪念平台**：逝者档案、墓位信息、供奉品等内容存储
+- **占卜服务**：AI解读结果、NFT媒体、服务市场内容等存储
+- **通用存储**：通过自定义域（Custom SubjectType）支持任意业务扩展
 
 ### 设计理念
 
@@ -37,7 +42,7 @@ IPFS存储服务管理模块，提供去中心化内容固定（Pin）服务，�
 - **三层扣费策略**：IpfsPoolAccount → SubjectFunding → 宽限期
 - **周期性扣费**：每7天自动扣除存储费用
 - **宽限期保护**：资金不足时进入宽限期，保护现有服务
-- **配额管理**：每个deceased每月100 DUST免费配额
+- **配额管理**：每个subject每月100 DUST免费配额
 
 ### 5. OCW健康巡检机制
 - **自动状态检查**：定期检查所有Pin的健康状态
@@ -130,9 +135,9 @@ pub struct TierConfig {
 ```rust
 #[derive(Decode, Encode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum SubjectType {
-    Deceased,      // 逝者相关内容（整合了text文本、media媒体、works作品等）
-    Grave,         // 墓位相关内容
-    Offerings,     // 供奉品内容
+    General,      // 逝者相关内容（整合了text文本、media媒体、works作品等）
+    General,         // 墓位相关内容
+    OtcOrder,     // 供奉品内容
     OtcOrder,      // OTC订单内容
     Evidence,      // 证据类数据
     Custom(BoundedVec<u8, ConstU32<32>>), // 自定义域（预留扩展）
@@ -322,14 +327,14 @@ pub fn request_pin(
 **权限**：任何签名账户
 **扣费**：从调用者账户直接扣除费用
 
-#### `request_pin_for_deceased`
+#### `request_pin_for_subject`
 为逝者请求固定内容
 
 ```rust
 #[pallet::call_index(1)]
-pub fn request_pin_for_deceased(
+pub fn request_pin_for_subject(
     origin: OriginFor<T>,
-    deceased_id: u64,              // 逝者ID
+    subject_id: u64,              // 逝者ID
     cid: Vec<u8>,                   // IPFS CID
     tier: Option<PinTier>,          // Pin层级（可选，默认Standard）
 ) -> DispatchResult
@@ -768,18 +773,18 @@ NoAvailableOperators,
 
 ### 主体相关错误
 
-#### `DeceasedNotFound`
+#### `GeneralNotFound`
 逝者不存在
 ```rust
 /// 指定的逝者记录不存在
-DeceasedNotFound,
+GeneralNotFound,
 ```
 
-#### `GraveNotFound`
+#### `GeneralNotFound`
 墓位不存在
 ```rust
 /// 指定的墓位记录不存在
-GraveNotFound,
+GeneralNotFound,
 ```
 
 #### `SubjectInGracePeriod`
@@ -884,18 +889,18 @@ type CreatorProvider: CreatorProvider<Self::AccountId, u64>;
 type OwnerProvider: OwnerProvider<Self::AccountId, u64>;
 
 /// 墓位Owner提供者
-type GraveOwnerProvider: OwnerProvider<Self::AccountId, u64>;
+type GeneralOwnerProvider: OwnerProvider<Self::AccountId, u64>;
 ```
 
 ### 域配置
 ```rust
 /// 逝者域编码
 #[pallet::constant]
-type DeceasedDomain: Get<u8>;
+type GeneralDomain: Get<u8>;
 
 /// 墓位域编码
 #[pallet::constant]
-type GraveDomain: Get<u8>;
+type GeneralDomain: Get<u8>;
 ```
 
 ## 使用示例
@@ -927,9 +932,9 @@ assert_ok!(result);
 
 ```rust
 // 为逝者固定主图
-let result = IpfsService::request_pin_for_deceased(
-    RuntimeOrigin::signed(deceased_owner),
-    deceased_id,
+let result = IpfsService::request_pin_for_subject(
+    RuntimeOrigin::signed(subject_owner),
+    subject_id,
     b"QmMainImageCID123".to_vec(),     // 主图CID
     Some(PinTier::Standard),           // 标准层级
 );
@@ -937,7 +942,7 @@ let result = IpfsService::request_pin_for_deceased(
 assert_ok!(result);
 
 // 系统会自动：
-// 1. 检查caller是否为deceased的owner
+// 1. 检查caller是否为subject的owner
 // 2. 优先使用免费配额
 // 3. 配额不足时从SubjectFunding扣费
 // 4. 自动分配3个运营者（Standard层级默认副本数）
@@ -950,8 +955,8 @@ assert_ok!(result);
 // 为逝者的SubjectFunding账户充值
 let result = IpfsService::fund_subject_account(
     RuntimeOrigin::signed(funder),
-    SubjectType::Deceased,
-    deceased_id,
+    SubjectType::General,
+    subject_id,
     100 * DUST,                        // 充值100 DUST
 );
 
@@ -973,7 +978,7 @@ pub trait Config: frame_system::Config {
 
 // 在extrinsic中自动Pin内容
 #[pallet::weight(10_000)]
-pub fn create_deceased_with_image(
+pub fn create_subject_with_image(
     origin: OriginFor<T>,
     name_cid: Vec<u8>,
     main_image_cid: Vec<u8>,
@@ -981,20 +986,20 @@ pub fn create_deceased_with_image(
     let who = ensure_signed(origin)?;
 
     // 创建逝者记录
-    let deceased_id = Self::do_create_deceased(&who, name_cid.clone())?;
+    let subject_id = Self::do_create_subject(&who, name_cid.clone())?;
 
     // 自动Pin名称CID（Critical层级，重要数据）
-    T::IpfsPinner::pin_cid_for_deceased(
+    T::IpfsPinner::pin_cid_for_subject(
         who.clone(),
-        deceased_id,
+        subject_id,
         name_cid,
         Some(PinTier::Critical),
     )?;
 
     // 自动Pin主图CID（Standard层级）
-    T::IpfsPinner::pin_cid_for_deceased(
+    T::IpfsPinner::pin_cid_for_subject(
         who,
-        deceased_id,
+        subject_id,
         main_image_cid,
         Some(PinTier::Standard),
     )?;
@@ -1068,22 +1073,22 @@ pub fn do_billing_cycle() -> DispatchResult {
 
 ## 集成说明
 
-### 与deceased模块集成
+### 与subject模块集成
 
-该模块通过`IpfsPinner` trait为`pallet-deceased`提供自动Pin服务。
+该模块通过`IpfsPinner` trait为`pallet-subject`提供自动Pin服务。
 
-**架构说明**：pallet-deceased内部整合了text（文本）、media（媒体）、works（作品）等内容类型子模块，所有这些内容的IPFS存储都通过统一的`SubjectType::Deceased`进行管理。
+**架构说明**：pallet-subject内部整合了text（文本）、media（媒体）、works（作品）等内容类型子模块，所有这些内容的IPFS存储都通过统一的`SubjectType::General`进行管理。
 
 ```rust
-// 在deceased创建时自动Pin相关内容
+// 在subject创建时自动Pin相关内容
 impl<T: Config> IpfsPinner<T::AccountId, T::Balance> for Pallet<T> {
-    fn pin_cid_for_deceased(
+    fn pin_cid_for_subject(
         caller: T::AccountId,
-        deceased_id: u64,
+        subject_id: u64,
         cid: Vec<u8>,
         tier: Option<PinTier>,
     ) -> DispatchResult {
-        // 1. 验证caller权限（必须是deceased的owner）
+        // 1. 验证caller权限（必须是subject的owner）
         // 2. 检查宽限期状态
         // 3. 计算费用并尝试扣费
         // 4. 提交Pin请求
@@ -1094,9 +1099,9 @@ impl<T: Config> IpfsPinner<T::AccountId, T::Balance> for Pallet<T> {
 
 **自动Pin场景：**
 - 逝者档案基础信息（Critical层级）
-- 媒体内容（deceased::media子模块）：照片、视频、音频（Standard层级）
-- 文本内容（deceased::text子模块）：文章、留言（Standard层级）
-- 作品数据（deceased::works子模块）：AI训练数据（Standard层级）
+- 媒体内容（subject::media子模块）：照片、视频、音频（Standard层级）
+- 文本内容（subject::text子模块）：文章、留言（Standard层级）
+- 作品数据（subject::works子模块）：AI训练数据（Standard层级）
 - 证据文件（evidence pallet）：法律文件（Critical层级）
 
 ### ContentRegistry接口集成
@@ -1336,9 +1341,9 @@ ipfs-cluster-service init
 **Critical层级适用于**：
 ```rust
 // 重要身份文件
-IpfsPinner::pin_cid_for_deceased(
+IpfsPinner::pin_cid_for_subject(
     caller,
-    deceased_id,
+    subject_id,
     identity_document_cid,
     Some(PinTier::Critical), // 使用Critical层级
 )?;
@@ -1347,9 +1352,9 @@ IpfsPinner::pin_cid_for_deceased(
 **Standard层级适用于**：
 ```rust
 // 一般照片内容
-IpfsPinner::pin_cid_for_deceased(
+IpfsPinner::pin_cid_for_subject(
     caller,
-    deceased_id,
+    subject_id,
     photo_cid,
     Some(PinTier::Standard), // 使用Standard层级
 )?;
@@ -1358,9 +1363,9 @@ IpfsPinner::pin_cid_for_deceased(
 **Temporary层级适用于**：
 ```rust
 // 测试或草稿内容
-IpfsPinner::pin_cid_for_deceased(
+IpfsPinner::pin_cid_for_subject(
     caller,
-    deceased_id,
+    subject_id,
     draft_cid,
     Some(PinTier::Temporary), // 使用Temporary层级
 )?;
@@ -1371,15 +1376,15 @@ IpfsPinner::pin_cid_for_deceased(
 **定期充值策略**：
 ```rust
 // 建议每月检查一次SubjectFunding余额
-let balance = Self::subject_funding_balance(SubjectType::Deceased, deceased_id);
-let monthly_cost = Self::estimate_monthly_cost(deceased_id);
+let balance = Self::subject_funding_balance(SubjectType::General, subject_id);
+let monthly_cost = Self::estimate_monthly_cost(subject_id);
 
 if balance < monthly_cost.saturating_mul(2u32.into()) {
     // 余额不足两个月费用，建议充值
     Self::fund_subject_account(
         origin,
-        SubjectType::Deceased,
-        deceased_id,
+        SubjectType::General,
+        subject_id,
         monthly_cost.saturating_mul(6u32.into()), // 充值6个月
     )?;
 }
@@ -1409,9 +1414,9 @@ pub fn create_content(
     let content_id = Self::do_create_content(&who, content_cid.clone())?;
 
     // 然后自动Pin内容
-    T::IpfsPinner::pin_cid_for_deceased(
+    T::IpfsPinner::pin_cid_for_subject(
         who,
-        deceased_id,
+        subject_id,
         content_cid,
         Some(PinTier::Standard),
     )?;
@@ -1487,3 +1492,306 @@ fn update_minimum_bond(new_bond: T::Balance) {
 - 定期一致性检查
 
 通过遵循这些最佳实践，可以确保IPFS存储服务的稳定性、安全性和经济性，为整个纪念平台提供可靠的去中心化存储基础设施。
+
+## 与 Divination（占卜）模块集成
+
+`stardust-ipfs` 模块为 `divination` 占卜模块体系提供去中心化存储服务。占卜模块使用 `SubjectType::Custom` 来注册自定义内容域。
+
+### 占卜模块IPFS存储需求概览
+
+| 模块 | 存储内容 | 建议Pin层级 | 估算大小 |
+|------|---------|-------------|----------|
+| **meihua** (梅花易数) | AI解读结果 | Standard | 2-10 KB |
+| **tarot** (塔罗牌) | AI解读结果 | Standard | 2-10 KB |
+| **xiaoliuren** (小六壬) | 占问事项 + AI解读 | Temporary/Standard | 2-11 KB |
+| **daliuren** (大六壬) | 占问事项 + 解读内容 | Temporary/Standard | 5-21 KB |
+| **liuyao** (六爻) | 卦辞 + 占问事项 | Standard/Temporary | 1-6 KB |
+| **qimen** (奇门遁甲) | AI综合解读 | Standard | 5-30 KB |
+| **ziwei** (紫微斗数) | 归档命盘数据（计划中） | Temporary | 3-10 KB |
+| **ai** (AI解读) | 解读内容 + 摘要 | Standard/Temporary | 2-22 KB |
+| **market** (服务市场) | 头像/问答/评价/举报证据等 | 多层级 | 5-150 KB |
+| **nft** (占卜NFT) | 图片/描述/动画 | Critical/Standard | 100KB-55MB |
+| **affiliate** (推广治理) | 治理提案内容 | Standard | 2-16 KB |
+
+### 使用 Custom SubjectType
+
+占卜模块应使用 `SubjectType::Custom` 来注册自己的内容域：
+
+```rust
+// 定义占卜相关的域标识
+pub const DIVINATION_AI_DOMAIN: &[u8] = b"divination-ai";
+pub const DIVINATION_MARKET_DOMAIN: &[u8] = b"divination-market";
+pub const DIVINATION_NFT_DOMAIN: &[u8] = b"divination-nft";
+pub const DIVINATION_CHART_DOMAIN: &[u8] = b"divination-chart";
+
+// 创建 SubjectType
+fn divination_subject_type(domain: &[u8]) -> SubjectType {
+    SubjectType::Custom(
+        BoundedVec::try_from(domain.to_vec())
+            .expect("domain name within bounds")
+    )
+}
+
+// 使用示例
+let ai_subject = SubjectType::Custom(b"divination-ai".to_vec().try_into().unwrap());
+let market_subject = SubjectType::Custom(b"divination-market".to_vec().try_into().unwrap());
+```
+
+### 占卜模块域名规范
+
+| 域名 | 用途 | subject_id含义 |
+|------|------|---------------|
+| `divination-ai` | AI解读内容 | request_id |
+| `divination-market` | 服务市场内容 | order_id / provider_id |
+| `divination-nft` | NFT媒体内容 | nft_id |
+| `divination-chart` | 命盘归档数据 | chart_id |
+| `divination-gov` | 治理提案内容 | proposal_id |
+
+### 集成示例：AI解读模块
+
+```rust
+// 在 AI 解读模块中自动 Pin 解读结果
+#[pallet::weight(30_000_000)]
+pub fn submit_ai_interpretation(
+    origin: OriginFor<T>,
+    chart_id: u64,
+    interpretation_cid: Vec<u8>,
+) -> DispatchResult {
+    let who = ensure_signed(origin)?;
+    
+    // 1. 验证权限（AI预言机）
+    ensure!(T::AiOracle::is_authorized(&who), Error::<T>::NotAuthorized);
+    
+    // 2. 获取chart信息
+    let chart = ChartById::<T>::get(chart_id).ok_or(Error::<T>::ChartNotFound)?;
+    
+    // 3. 自动Pin AI解读内容（使用Standard层级）
+    T::IpfsPinner::pin_cid(
+        who.clone(),
+        SubjectType::Custom(b"divination-ai".to_vec().try_into().unwrap()),
+        chart_id,
+        interpretation_cid.clone(),
+        Some(PinTier::Standard),
+    )?;
+    
+    // 4. 更新chart的interpretation_cid
+    ChartById::<T>::mutate(chart_id, |c| {
+        if let Some(chart) = c {
+            chart.interpretation_cid = Some(
+                BoundedVec::try_from(interpretation_cid).unwrap()
+            );
+        }
+    });
+    
+    Self::deposit_event(Event::AiInterpretationSubmitted { chart_id });
+    Ok(())
+}
+```
+
+### 集成示例：NFT媒体存储
+
+```rust
+// 铸造占卜NFT时自动Pin媒体文件
+#[pallet::weight(50_000_000)]
+pub fn mint_nft(
+    origin: OriginFor<T>,
+    divination_type: DivinationType,
+    result_id: u64,
+    name: Vec<u8>,
+    image_cid: Vec<u8>,           // 图片 IPFS CID（必需）
+    animation_cid: Option<Vec<u8>>, // 动画 IPFS CID（可选）
+    royalty_rate: u16,
+) -> DispatchResult {
+    let who = ensure_signed(origin)?;
+    
+    // 创建NFT记录
+    let nft_id = Self::do_create_nft(&who, divination_type, result_id, name)?;
+    
+    // Pin图片（Critical层级 - 高价值数字资产）
+    T::IpfsPinner::pin_cid(
+        who.clone(),
+        SubjectType::Custom(b"divination-nft".to_vec().try_into().unwrap()),
+        nft_id,
+        image_cid.clone(),
+        Some(PinTier::Critical),
+    )?;
+    
+    // 如果有动画，也Pin（Standard层级）
+    if let Some(anim_cid) = animation_cid.clone() {
+        T::IpfsPinner::pin_cid(
+            who.clone(),
+            SubjectType::Custom(b"divination-nft".to_vec().try_into().unwrap()),
+            nft_id,
+            anim_cid,
+            Some(PinTier::Standard),
+        )?;
+    }
+    
+    Ok(())
+}
+```
+
+### 集成示例：服务市场
+
+```rust
+// 服务市场提交解读答案时Pin内容
+#[pallet::weight(40_000_000)]
+pub fn submit_answer(
+    origin: OriginFor<T>,
+    order_id: u64,
+    answer_cid: Vec<u8>,  // 解读内容 IPFS CID
+) -> DispatchResult {
+    let who = ensure_signed(origin)?;
+    
+    // 验证是该订单的服务提供者
+    let order = Orders::<T>::get(order_id).ok_or(Error::<T>::OrderNotFound)?;
+    ensure!(order.provider == who, Error::<T>::NotProvider);
+    
+    // Pin解读内容（Standard层级 - 付费服务内容）
+    T::IpfsPinner::pin_cid(
+        who.clone(),
+        SubjectType::Custom(b"divination-market".to_vec().try_into().unwrap()),
+        order_id,
+        answer_cid.clone(),
+        Some(PinTier::Standard),
+    )?;
+    
+    // 更新订单状态
+    Self::do_complete_order(order_id, answer_cid)?;
+    
+    Ok(())
+}
+
+// 举报时Pin证据（Critical层级 - 法律相关）
+#[pallet::weight(50_000_000)]
+pub fn report_provider(
+    origin: OriginFor<T>,
+    provider: T::AccountId,
+    report_type: ReportType,
+    evidence_cid: Vec<u8>,  // 证据 IPFS CID
+    description: Vec<u8>,
+) -> DispatchResult {
+    let who = ensure_signed(origin)?;
+    
+    let report_id = Self::do_create_report(&who, &provider, report_type, description)?;
+    
+    // Pin证据（Critical层级 - 争议/法律相关）
+    T::IpfsPinner::pin_cid(
+        who.clone(),
+        SubjectType::Custom(b"divination-market".to_vec().try_into().unwrap()),
+        report_id,
+        evidence_cid,
+        Some(PinTier::Critical),
+    )?;
+    
+    Ok(())
+}
+```
+
+### Pin层级选择指南（占卜模块）
+
+| 内容类型 | 建议层级 | 理由 |
+|----------|---------|------|
+| NFT主图 | **Critical** | 高价值数字资产，需要最高可靠性 |
+| 举报证据 | **Critical** | 法律/争议相关，不可丢失 |
+| AI解读结果 | **Standard** | 核心业务数据，需要可靠存储 |
+| 服务解读回答 | **Standard** | 付费服务内容，需要可靠存储 |
+| 服务提供者介绍 | **Standard** | 商业信息，长期展示 |
+| NFT描述/动画 | **Standard** | 资产附属信息 |
+| 治理提案内容 | **Standard** | 治理记录，需要保留 |
+| 占卜问题描述 | **Temporary** | 用户输入，可重新提交 |
+| 追问/回复内容 | **Temporary** | 交互记录，时效性强 |
+| 评价内容 | **Temporary** | 评价详情，辅助信息 |
+| 归档命盘 | **Temporary** | 可从链上解档恢复 |
+
+### SubjectFunding 充值（占卜模块）
+
+为占卜服务的存储费用预先充值：
+
+```rust
+// 为服务提供者的内容存储充值
+IpfsService::fund_subject_account(
+    RuntimeOrigin::signed(provider),
+    SubjectType::Custom(b"divination-market".to_vec().try_into().unwrap()),
+    provider_id,  // 服务提供者ID作为subject_id
+    100 * DUST,   // 充值100 DUST
+)?;
+
+// 为NFT系列的媒体存储充值
+IpfsService::fund_subject_account(
+    RuntimeOrigin::signed(creator),
+    SubjectType::Custom(b"divination-nft".to_vec().try_into().unwrap()),
+    collection_id,
+    500 * DUST,   // 充值500 DUST（NFT媒体较大）
+)?;
+```
+
+### 删除时的Unpin处理
+
+当用户删除占卜相关记录时，应同步请求Unpin关联的IPFS内容：
+
+```rust
+// 删除命盘时清理IPFS存储
+fn delete_chart(chart_id: u64) -> DispatchResult {
+    let chart = ChartById::<T>::get(chart_id)?;
+    
+    // 1. 删除链上数据
+    ChartById::<T>::remove(chart_id);
+    
+    // 2. 如果有AI解读CID，请求Unpin
+    if let Some(cid) = chart.interpretation_cid {
+        T::IpfsPinner::request_unpin(cid.to_vec())?;
+    }
+    
+    // 3. 返还存储押金
+    T::Currency::unreserve(&chart.creator, chart.deposit);
+    
+    Ok(())
+}
+
+// 销毁NFT时清理媒体文件
+fn burn_nft(nft_id: u64) -> DispatchResult {
+    let nft = Nfts::<T>::get(nft_id)?;
+    
+    // Unpin图片
+    T::IpfsPinner::request_unpin(nft.metadata.image_cid.to_vec())?;
+    
+    // Unpin动画（如果有）
+    if let Some(anim_cid) = nft.metadata.animation_cid {
+        T::IpfsPinner::request_unpin(anim_cid.to_vec())?;
+    }
+    
+    // 删除NFT记录
+    Nfts::<T>::remove(nft_id);
+    
+    Ok(())
+}
+```
+
+### 配置参数建议（占卜模块）
+
+```rust
+// runtime/src/lib.rs
+
+parameter_types! {
+    /// 占卜内容每 KB 存储基础费率
+    pub const DivinationStorageFeePerKb: Balance = 1_000_000_000; // 0.001 DUST
+    
+    /// 占卜AI解读月免费配额
+    pub const AiInterpretationMonthlyQuota: Balance = 50_000_000_000; // 50 KB等值
+    
+    /// NFT媒体最大大小 (50 MB)
+    pub const MaxNftMediaSize: u64 = 50 * 1024 * 1024;
+    
+    /// 占卜模块扣费周期（区块数，约7天）
+    pub const DivinationBillingPeriod: BlockNumber = 201_600; // 7天 @ 3秒/块
+    
+    /// 占卜模块宽限期（区块数，约7天）
+    pub const DivinationGracePeriod: BlockNumber = 201_600;
+}
+```
+
+### 相关文档
+
+- [Divination IPFS集成指南](../divination/IPFS_INTEGRATION_GUIDE.md) - 详细的占卜模块IPFS存储需求分析
+- [存储押金与删除机制分析](../divination/STORAGE_DEPOSIT_AND_DELETION_ANALYSIS.md) - 占卜模块存储押金设计

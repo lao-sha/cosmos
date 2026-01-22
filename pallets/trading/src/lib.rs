@@ -41,7 +41,7 @@
 //! 
 //! pallet-trading-common (工具库)
 //!   ├── 数据掩码（姓名、身份证、生日）
-//!   └── 数据验证（TRON地址、EPAY配置）
+//!   └── 数据验证（TRON地址）
 //! ```
 //! 
 //! ### 重构优势
@@ -142,7 +142,7 @@ pub use pallet_bridge;
 
 /// 公共工具模块
 /// 
-/// 提供数据掩码（姓名、身份证、生日）和数据验证（TRON 地址、EPAY 配置）功能。
+/// 提供数据掩码（姓名、身份证、生日）和数据验证（TRON 地址）功能。
 pub use pallet_trading_common;
 
 // ===== 聚合类型导出（便于前端使用）=====
@@ -183,7 +183,6 @@ pub mod utils {
         mask_id_card,
         mask_birthday,
         is_valid_tron_address,
-        is_valid_epay_config,
     };
 }
 

@@ -146,7 +146,7 @@ export default function MeihuaPage() {
     setShowTxStatus,
   } = useDivinationSave({
     divinationType: DivinationType.Meihua,
-    historyRoute: '/divination/meihua-list',
+    historyRoute: '/divination/history',
   });
 
   // 获取卦名

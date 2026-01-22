@@ -536,6 +536,12 @@ pub mod pallet {
             new_credit_score: u16,
             recovery_reason: u8, // 0=30DaysClean, 1=10OrdersBonus
         },
+
+        /// 🆕 信用记录已清理（on_idle自动清理）
+        CreditRecordsCleanedUp {
+            processed_accounts: u32,
+            cleaned_records: u32,
+        },
     }
 
     // ===== Error =====
@@ -606,8 +612,29 @@ pub mod pallet {
 
     // ===== Hooks =====
     
+    /// 🆕 清理游标：用于追踪上次清理到哪个账户
+    #[pallet::storage]
+    pub type CleanupCursor<T: Config> = StorageValue<_, T::AccountId, OptionQuery>;
+
     #[pallet::hooks]
-    impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {}
+    impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+        /// 🆕 空闲时自动清理过期的订单历史和违约记录
+        ///
+        /// 清理策略：
+        /// - BuyerOrderHistory：保留最近20条，删除超过90天的记录
+        /// - BuyerViolations：保留最近20条，删除超过180天的记录
+        /// - DefaultHistory：保留最近50条，删除超过365天的记录
+        fn on_idle(now: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
+            let base_weight = Weight::from_parts(30_000, 0);
+            
+            // 确保有足够权重执行清理
+            if remaining_weight.ref_time() < base_weight.ref_time() * 5 {
+                return Weight::zero();
+            }
+            
+            Self::cleanup_expired_records(now, 5)
+        }
+    }
 
     // ===== Extrinsics =====
     
@@ -1713,6 +1740,79 @@ pub mod pallet {
                 maker::ServiceStatus::Warning => 1,
                 maker::ServiceStatus::Suspended => 2,
             }
+        }
+
+        /// 🆕 清理过期的订单历史和违约记录
+        ///
+        /// 清理策略：
+        /// - BuyerOrderHistory：保留90天内的记录
+        /// - DefaultHistory：保留365天内的记录
+        ///
+        /// # 参数
+        /// - `now`: 当前区块号
+        /// - `max_accounts`: 每次最多处理的账户数
+        ///
+        /// # 返回
+        /// - 消耗的权重
+        pub fn cleanup_expired_records(now: BlockNumberFor<T>, max_accounts: u32) -> Weight {
+            let mut cleaned_count = 0u32;
+            let mut processed_count = 0u32;
+            
+            // 90天的区块数（假设6秒/块）
+            let threshold_block_90: u32 = now.saturated_into::<u32>().saturating_sub(90 * 14400);
+            
+            // 遍历 BuyerOrderHistory，清理超过90天的记录
+            for (account, mut history) in BuyerOrderHistory::<T>::iter().take(max_accounts as usize) {
+                processed_count = processed_count.saturating_add(1);
+                
+                let original_len = history.len();
+                
+                // 只保留90天内的记录（使用 created_at_block 字段）
+                history.retain(|record| record.created_at_block > threshold_block_90);
+                
+                // 如果记录被清理了，更新存储
+                if history.len() < original_len {
+                    if history.is_empty() {
+                        BuyerOrderHistory::<T>::remove(&account);
+                    } else {
+                        BuyerOrderHistory::<T>::insert(&account, history);
+                    }
+                    cleaned_count = cleaned_count.saturating_add(1);
+                }
+            }
+            
+            // 遍历 DefaultHistory，清理超过365天的记录
+            let threshold_block_365: BlockNumberFor<T> = now.saturating_sub((365u32 * 14400u32).into());
+            
+            for (account, mut history) in DefaultHistory::<T>::iter().take(max_accounts as usize) {
+                let original_len = history.len();
+                
+                // 只保留365天内的记录（DefaultHistory 存储的是区块号）
+                history.retain(|&block| block > threshold_block_365);
+                
+                if history.len() < original_len {
+                    if history.is_empty() {
+                        DefaultHistory::<T>::remove(&account);
+                    } else {
+                        DefaultHistory::<T>::insert(&account, history);
+                    }
+                    cleaned_count = cleaned_count.saturating_add(1);
+                }
+            }
+            
+            // 如果有清理发生，发出事件
+            if cleaned_count > 0 {
+                Self::deposit_event(Event::CreditRecordsCleanedUp {
+                    processed_accounts: processed_count,
+                    cleaned_records: cleaned_count,
+                });
+            }
+            
+            // 返回消耗的权重
+            Weight::from_parts(
+                (processed_count as u64) * 50_000 + (cleaned_count as u64) * 30_000 + 10_000,
+                0
+            )
         }
     }
 }

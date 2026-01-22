@@ -172,7 +172,7 @@ export default function DaliurenPage() {
     setShowTxStatus,
   } = useDivinationSave({
     divinationType: DivinationType.Daliuren,
-    historyRoute: '/divination/daliuren-list',
+    historyRoute: '/divination/history',
   });
 
   // 计算大六壬

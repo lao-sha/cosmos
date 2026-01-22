@@ -2986,6 +2986,214 @@ pub fn compare_zhuan_fei_charts(
     (xing_diff, men_diff, shen_diff)
 }
 
+// ==================== 增强格局检测 ====================
+
+/// 五不遇时类型
+///
+/// 时干克日干，为五不遇时，主诸事不利
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WuBuYuShi {
+    /// 甲日遇庚时（庚克甲）
+    JiaGeng,
+    /// 乙日遇辛时（辛克乙）
+    YiXin,
+    /// 丙日遇壬时（壬克丙）
+    BingRen,
+    /// 丁日遇癸时（癸克丁）
+    DingGui,
+    /// 戊日遇甲时（甲克戊）
+    WuJia,
+    /// 己日遇乙时（乙克己）
+    JiYi,
+    /// 庚日遇丙时（丙克庚）
+    GengBing,
+    /// 辛日遇丁时（丁克辛）
+    XinDing,
+    /// 壬日遇戊时（戊克壬）
+    RenWu,
+    /// 癸日遇己时（己克癸）
+    GuiJi,
+}
+
+impl WuBuYuShi {
+    /// 获取名称
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::JiaGeng => "甲日庚时",
+            Self::YiXin => "乙日辛时",
+            Self::BingRen => "丙日壬时",
+            Self::DingGui => "丁日癸时",
+            Self::WuJia => "戊日甲时",
+            Self::JiYi => "己日乙时",
+            Self::GengBing => "庚日丙时",
+            Self::XinDing => "辛日丁时",
+            Self::RenWu => "壬日戊时",
+            Self::GuiJi => "癸日己时",
+        }
+    }
+
+    /// 获取描述
+    pub fn description(&self) -> &'static str {
+        "时干克日干，诸事不利，百事难成"
+    }
+}
+
+/// 检测五不遇时
+///
+/// 时干克日干，为五不遇时
+///
+/// ## 口诀
+///
+/// 甲日庚时、乙日辛时、丙日壬时、丁日癸时、戊日甲时、
+/// 己日乙时、庚日丙时、辛日丁时、壬日戊时、癸日己时
+pub fn check_wu_bu_yu_shi(day_gan: TianGan, hour_gan: TianGan) -> Option<WuBuYuShi> {
+    match (day_gan, hour_gan) {
+        (TianGan::Jia, TianGan::Geng) => Some(WuBuYuShi::JiaGeng),
+        (TianGan::Yi, TianGan::Xin) => Some(WuBuYuShi::YiXin),
+        (TianGan::Bing, TianGan::Ren) => Some(WuBuYuShi::BingRen),
+        (TianGan::Ding, TianGan::Gui) => Some(WuBuYuShi::DingGui),
+        (TianGan::Wu, TianGan::Jia) => Some(WuBuYuShi::WuJia),
+        (TianGan::Ji, TianGan::Yi) => Some(WuBuYuShi::JiYi),
+        (TianGan::Geng, TianGan::Bing) => Some(WuBuYuShi::GengBing),
+        (TianGan::Xin, TianGan::Ding) => Some(WuBuYuShi::XinDing),
+        (TianGan::Ren, TianGan::Wu) => Some(WuBuYuShi::RenWu),
+        (TianGan::Gui, TianGan::Ji) => Some(WuBuYuShi::GuiJi),
+        _ => None,
+    }
+}
+
+/// 时干入墓检测结果
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShiGanRuMu {
+    /// 时干
+    pub shi_gan: TianGan,
+    /// 墓库地支
+    pub mu_zhi: DiZhi,
+    /// 落宫
+    pub gong: JiuGong,
+}
+
+/// 检测时干入墓
+///
+/// 时干临其墓库之宫位，主做事迟缓、受阻
+///
+/// ## 时干入墓表
+///
+/// | 时干 | 墓库 | 宫位 |
+/// |------|------|------|
+/// | 甲乙 | 未 | 坤二宫 |
+/// | 丙丁 | 戌 | 乾六宫 |
+/// | 庚辛 | 丑 | 艮八宫 |
+/// | 壬癸 | 辰 | 巽四宫 |
+pub fn check_shi_gan_ru_mu(hour_gan: TianGan, palaces: &[Palace; 9]) -> Option<ShiGanRuMu> {
+    // 找到时干所在的宫位
+    for palace in palaces.iter() {
+        if palace.tian_pan_gan == hour_gan {
+            // 检查是否入墓
+            let mu_result = check_qi_yi_ru_mu(hour_gan, palace.gong);
+            if let Some(ru_mu) = mu_result {
+                return Some(ShiGanRuMu {
+                    shi_gan: hour_gan,
+                    mu_zhi: ru_mu.mu_zhi,
+                    gong: palace.gong,
+                });
+            }
+        }
+    }
+    None
+}
+
+/// 天显时格类型
+///
+/// 时干临值符宫（值符所在的宫位），主时机正好、天时相助
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TianXianShiGe {
+    /// 时干
+    pub shi_gan: TianGan,
+    /// 值符星
+    pub zhi_fu_xing: JiuXing,
+    /// 落宫
+    pub gong: JiuGong,
+}
+
+/// 检测天显时格
+///
+/// 时干临值符所在宫位，为天显时格，主诸事顺利
+pub fn check_tian_xian_shi_ge(
+    hour_gan: TianGan,
+    zhi_fu_xing: JiuXing,
+    palaces: &[Palace; 9],
+) -> Option<TianXianShiGe> {
+    // 找到值符星所在的宫位
+    let mut zhi_fu_gong: Option<JiuGong> = None;
+    for palace in palaces.iter() {
+        if palace.xing == zhi_fu_xing {
+            zhi_fu_gong = Some(palace.gong);
+            break;
+        }
+    }
+
+    // 检查时干是否也在值符宫
+    if let Some(gong) = zhi_fu_gong {
+        for palace in palaces.iter() {
+            if palace.gong == gong && palace.tian_pan_gan == hour_gan {
+                return Some(TianXianShiGe {
+                    shi_gan: hour_gan,
+                    zhi_fu_xing,
+                    gong,
+                });
+            }
+        }
+    }
+    None
+}
+
+/// 真假格类型
+///
+/// 用于区分格局的真假吉凶
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZhenJiaGe {
+    /// 真格：三奇得使、门星相生
+    ZhenGe,
+    /// 假格：三奇入墓、门迫、击刑
+    JiaGe,
+}
+
+/// 综合检测真假格
+///
+/// 判断当前宫位的格局是真吉还是假吉
+pub fn check_zhen_jia_ge(
+    tian_pan_gan: TianGan,
+    xing: JiuXing,
+    men: Option<BaMen>,
+    gong: JiuGong,
+) -> ZhenJiaGe {
+    // 检查是否有入墓
+    if check_qi_yi_ru_mu(tian_pan_gan, gong).is_some() {
+        return ZhenJiaGe::JiaGe;
+    }
+
+    // 检查是否有击刑
+    if check_liu_yi_ji_xing(tian_pan_gan, gong).is_some() {
+        return ZhenJiaGe::JiaGe;
+    }
+
+    // 检查门迫（门克宫）
+    if let Some(m) = men {
+        if m.wu_xing().conquers(&gong.wu_xing()) {
+            return ZhenJiaGe::JiaGe;
+        }
+    }
+
+    // 三奇得使为真格
+    if check_san_qi_de_shi(tian_pan_gan, xing, men) {
+        return ZhenJiaGe::ZhenGe;
+    }
+
+    // 默认为真格
+    ZhenJiaGe::ZhenGe
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

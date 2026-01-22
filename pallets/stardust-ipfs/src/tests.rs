@@ -38,7 +38,6 @@ parameter_types! {
     pub const MaxLocks: u32 = 50;
     pub const IpfsMaxCidHashLen: u32 = 64;
     pub const SubjectPalletId: frame_support::PalletId = frame_support::PalletId(*b"ipfs/sub");
-    pub const DeceasedDomain: u8 = 1;
     pub IpfsPoolPalletId: frame_support::PalletId = frame_support::PalletId(*b"py/ipfs+");
     pub OperatorEscrowPalletId: frame_support::PalletId = frame_support::PalletId(*b"py/opesc");
     pub const MonthlyPublicFeeQuota: Balance = 100_000_000_000_000; // 100 DUST
@@ -111,21 +110,6 @@ impl pallet_balances::Config for Test {
     type DoneSlashHandler = ();
 }
 
-
-pub struct OwnerMap;
-impl crate::OwnerProvider<AccountId> for OwnerMap {
-    fn owner_of(subject_id: u64) -> Option<AccountId> {
-        Some(subject_id)
-    }
-}
-
-pub struct CreatorMap;
-impl crate::CreatorProvider<AccountId> for CreatorMap {
-    fn creator_of(_subject_id: u64) -> Option<AccountId> {
-        Some(1) // Mock: 所有subject的创建者都是账户1
-    }
-}
-
 impl crate::Config for Test {
     type RuntimeEvent = RuntimeEvent;
     type Currency = Balances;
@@ -138,9 +122,6 @@ impl crate::Config for Test {
     type MinCapacityGiB = frame_support::traits::ConstU32<1>;
     type WeightInfo = ();
     type SubjectPalletId = SubjectPalletId;
-    type DeceasedDomain = DeceasedDomain;
-    type OwnerProvider = OwnerMap;
-    type CreatorProvider = CreatorMap;
     type IpfsPoolAccount = IpfsPoolAccount;
     type OperatorEscrowAccount = OperatorEscrowAccount;
     type MonthlyPublicFeeQuota = MonthlyPublicFeeQuota;
@@ -171,7 +152,7 @@ fn run_to_block(n: u64) {
     }
 }
 
-/// TODO: Week 4 Day 3修复完成 - 计费队列限流测试
+/// ✅ Week 4 Day 3 已完成 - 计费队列限流测试
 #[test]
 fn charge_due_respects_limit_and_requeues() {
     new_test_ext().execute_with(|| {
@@ -216,7 +197,7 @@ fn charge_due_respects_limit_and_requeues() {
         });
         // 提前给派生账户充值（直接给 owner 账户足额余额即可覆盖）
         let subject_account = crate::Pallet::<Test>::derive_subject_funding_account_v2(
-            crate::types::SubjectType::Deceased,
+            crate::types::SubjectType::General,
             1
         );
         let _ = <Test as crate::Config>::Currency::deposit_creating(&subject_account, 1_000_000_000_000_000);
@@ -294,14 +275,13 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 // ========================================
 
 /// 函数级中文注释：测试1 - 为逝者pin CID成功（pool配额内）
-/// TODO: Week 4 Day 2修复中
-/// ⭐ P2优化：暂时注释（使用旧API，需要适配新API）
+/// 🔮 延迟实现：API 已重构，需要适配新的 pin_cid_for_subject 接口
 // #[test]
-// fn pin_for_deceased_works() {
+// fn pin_for_subject_works() {
 //     new_test_ext().execute_with(|| {
 //         System::set_block_number(1);
 //         let caller: AccountId = 1;
-//         let deceased_id: u64 = 1;  // 修复：deceased owner必须与caller匹配
+//         let subject_id: u64 = 1;  // 修复：subject owner必须与caller匹配
 //         let cid = H256::repeat_byte(99);
 //         let size: u64 = 1_073_741_824; // 1 GiB
 //         let replicas: u32 = 3;
@@ -312,9 +292,9 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 //         let _ = <Test as crate::Config>::Currency::deposit_creating(&pool, 1_000_000_000_000_000);
 
 //         // 执行pin
-//         assert_ok!(crate::Pallet::<Test>::request_pin_for_deceased(
+//         assert_ok!(crate::Pallet::<Test>::request_pin_for_subject(
 //             RuntimeOrigin::signed(caller),
-//             deceased_id,
+//             subject_id,
 //             cid,
 //             size,
 //             replicas,
@@ -329,7 +309,7 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 
 //         // 验证PinSubjectOf存储
 //         let (_subject_owner, subject_id) = crate::PinSubjectOf::<Test>::get(cid).unwrap();
-//         assert_eq!(subject_id, deceased_id);
+//         assert_eq!(subject_id, subject_id);
 
 //         // 验证事件 (cid_hash, payer, replicas, size, price)
 //         System::assert_has_event(
@@ -339,14 +319,13 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 //     });
 // }
 
-/// ⭐ P2优化：暂时注释（使用旧API）
 /// 函数级中文注释：测试2 - pin重复CID失败
-/// TODO: Week 4 Day 4 P0修复完成 - 添加重复CID检查
+/// 🔮 延迟实现：API 已重构，测试逻辑需要适配新接口
 // #[test]
 // fn pin_duplicate_cid_fails() {
 //     new_test_ext().execute_with(|| {
 //         let caller: AccountId = 1;
-//         let deceased_id: u64 = 1;
+//         let subject_id: u64 = 1;
 //         let cid = H256::repeat_byte(88);
 
         // 给pool充值
@@ -354,9 +333,9 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 //         let _ = <Test as crate::Config>::Currency::deposit_creating(&pool, 1_000_000_000_000_000);
 
         // 第一次pin成功
-//         assert_ok!(crate::Pallet::<Test>::request_pin_for_deceased(
+//         assert_ok!(crate::Pallet::<Test>::request_pin_for_subject(
 //             RuntimeOrigin::signed(caller),
-//             deceased_id,
+//             subject_id,
 //             cid,
 //             1_073_741_824,
 //             1,
@@ -365,9 +344,9 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 
         // 第二次pin同一个CID应该失败（CidAlreadyPinned）
 //         assert_err!(
-//             crate::Pallet::<Test>::request_pin_for_deceased(
+//             crate::Pallet::<Test>::request_pin_for_subject(
 //                 RuntimeOrigin::signed(caller),
-//                 deceased_id,
+//                 subject_id,
 //                 cid,
 //                 1_073_741_824,
 //                 2,
@@ -379,18 +358,17 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 // }
 
 /// ⭐ P2优化：暂时注释（使用旧API）
-/// 函数级中文注释：测试3 - pin需要有效的deceased_id
+/// 函数级中文注释：测试3 - pin需要有效的subject_id
 // #[test]
-// fn pin_requires_valid_deceased_id() {
+// fn pin_requires_valid_subject_id() {
 //     new_test_ext().execute_with(|| {
 //         let caller: AccountId = 1;
-//         let invalid_deceased_id: u64 = 0; // OwnerMap mock中0会返回None
 //         let cid = H256::repeat_byte(77);
 
-        // 尝试为无效的deceased_id pin
-//         assert!(crate::Pallet::<Test>::request_pin_for_deceased(
+        // 尝试为无效的subject_id pin
+//         assert!(crate::Pallet::<Test>::request_pin_for_subject(
 //             RuntimeOrigin::signed(caller),
-//             invalid_deceased_id,
+//             invalid_subject_id,
 //             cid,
 //             1_073_741_824,
 //             1,
@@ -406,7 +384,7 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 // fn pin_validates_params() {
 //     new_test_ext().execute_with(|| {
 //         let caller: AccountId = 1;
-//         let deceased_id: u64 = 100;
+//         let subject_id: u64 = 100;
 //         let cid = H256::repeat_byte(66);
 
 //         // 给pool充值
@@ -415,9 +393,9 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 
 //         // replicas = 0 应该失败
 //         assert_noop!(
-//             crate::Pallet::<Test>::request_pin_for_deceased(
+//             crate::Pallet::<Test>::request_pin_for_subject(
 //                 RuntimeOrigin::signed(caller),
-//                 deceased_id,
+//                 subject_id,
 //                 cid,
 //                 1_073_741_824,
 //                 0, // invalid replicas
@@ -428,9 +406,9 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 
 //         // size = 0 应该失败
 //         assert_noop!(
-//             crate::Pallet::<Test>::request_pin_for_deceased(
+//             crate::Pallet::<Test>::request_pin_for_subject(
 //                 RuntimeOrigin::signed(caller),
-//                 deceased_id,
+//                 subject_id,
 //                 H256::repeat_byte(67),
 //                 0, // invalid size
 //                 1,
@@ -448,7 +426,7 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 // fn pin_uses_subject_funding_when_over_quota() {
 //     new_test_ext().execute_with(|| {
 //         let caller: AccountId = 1;
-//         let deceased_id: u64 = 1;
+//         let subject_id: u64 = 1;
 //         let cid = H256::repeat_byte(55);
 //         let amount: Balance = 50_000_000_000_000; // 50 DUST
 
@@ -458,21 +436,21 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 
 //         // 设置配额已用95 DUST（剩余5 DUST，不足50）
 //         let reset_block = System::block_number() + QuotaResetPeriod::get();
-//         crate::PublicFeeQuotaUsage::<Test>::insert(deceased_id, (95_000_000_000_000u128, reset_block));
+//         crate::PublicFeeQuotaUsage::<Test>::insert(subject_id, (95_000_000_000_000u128, reset_block));
 
 //         // 给SubjectFunding充值
 //         let subject_account = crate::Pallet::<Test>::derive_subject_funding_account_v2(
-//             crate::types::SubjectType::Deceased,
-//             deceased_id
+//             crate::types::SubjectType::General,
+//             subject_id
 //         );
 //         let _ = <Test as crate::Config>::Currency::deposit_creating(&subject_account, 200_000_000_000_000);
 
 //         let subject_balance_before = <Test as crate::Config>::Currency::free_balance(&subject_account);
 
 //         // 执行pin（应该从subject扣款）
-//         assert_ok!(crate::Pallet::<Test>::request_pin_for_deceased(
+//         assert_ok!(crate::Pallet::<Test>::request_pin_for_subject(
 //             RuntimeOrigin::signed(caller),
-//             deceased_id,
+//             subject_id,
 //             cid,
 //             1_073_741_824,
 //             1,
@@ -492,7 +470,7 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 // fn pin_fallback_to_caller() {
 //     new_test_ext().execute_with(|| {
 //         let caller: AccountId = 1;
-//         let deceased_id: u64 = 1;
+//         let subject_id: u64 = 1;
 //         let cid = H256::repeat_byte(44);
 //         let amount: Balance = 50_000_000_000_000;
 
@@ -502,9 +480,9 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 //         let caller_balance_before = <Test as crate::Config>::Currency::free_balance(&caller);
 
 //         // 执行pin（应该从caller扣款）
-//         assert_ok!(crate::Pallet::<Test>::request_pin_for_deceased(
+//         assert_ok!(crate::Pallet::<Test>::request_pin_for_subject(
 //             RuntimeOrigin::signed(caller),
-//             deceased_id,
+//             subject_id,
 //             cid,
 //             1_073_741_824,
 //             1,
@@ -523,16 +501,16 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 // fn pin_fails_when_all_accounts_insufficient() {
 //     new_test_ext().execute_with(|| {
 //         let caller: AccountId = 999; // 未充值的账户
-//         let deceased_id: u64 = 100;
+//         let subject_id: u64 = 100;
 //         let cid = H256::repeat_byte(33);
 //         let amount: Balance = 50_000_000_000_000;
 
 //         // Pool, Subject, Caller都没有余额
 
 //         // 执行pin应该失败
-//         assert!(crate::Pallet::<Test>::request_pin_for_deceased(
+//         assert!(crate::Pallet::<Test>::request_pin_for_subject(
 //             RuntimeOrigin::signed(caller),
-//             deceased_id,
+//             subject_id,
 //             cid,
 //             1_073_741_824,
 //             1,
@@ -549,7 +527,7 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 // fn pin_quota_resets_correctly() {
 //     new_test_ext().execute_with(|| {
 //         let caller: AccountId = 1;
-//         let deceased_id: u64 = 1;
+//         let subject_id: u64 = 1;
 //         let cid = H256::repeat_byte(22);
 //         let amount: Balance = 50_000_000_000_000;
 
@@ -559,12 +537,12 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 
 //         // 设置配额已过期（reset_block = 当前块）
 //         let current_block = System::block_number();
-//         crate::PublicFeeQuotaUsage::<Test>::insert(deceased_id, (95_000_000_000_000u128, current_block));
+//         crate::PublicFeeQuotaUsage::<Test>::insert(subject_id, (95_000_000_000_000u128, current_block));
 
 //         // 执行pin（应触发配额重置）
-//         assert_ok!(crate::Pallet::<Test>::request_pin_for_deceased(
+//         assert_ok!(crate::Pallet::<Test>::request_pin_for_subject(
 //             RuntimeOrigin::signed(caller),
-//             deceased_id,
+//             subject_id,
 //             cid,
 //             1_073_741_824,
 //             1,
@@ -572,7 +550,7 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 //         ));
 
 //         // 验证配额已重置
-//         let (used, reset_block) = crate::PublicFeeQuotaUsage::<Test>::get(deceased_id);
+//         let (used, reset_block) = crate::PublicFeeQuotaUsage::<Test>::get(subject_id);
 //         assert_eq!(used, amount); // 重置后只用了50 DUST
 //         assert_eq!(reset_block, current_block + QuotaResetPeriod::get());
 //     });
@@ -609,7 +587,7 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 // fn pin_fee_goes_to_operator_escrow() {
 //     new_test_ext().execute_with(|| {
 //         let caller: AccountId = 1;
-//         let deceased_id: u64 = 1;
+//         let subject_id: u64 = 1;
 //         let cid = H256::repeat_byte(1);
 //         let amount: Balance = 50_000_000_000_000;
 
@@ -621,9 +599,9 @@ fn charge_due_enters_grace_then_expire_on_insufficient_balance() {
 //         let escrow_balance_before = <Test as crate::Config>::Currency::free_balance(&escrow);
 
 //         // 执行pin
-//         assert_ok!(crate::Pallet::<Test>::request_pin_for_deceased(
+//         assert_ok!(crate::Pallet::<Test>::request_pin_for_subject(
 //             RuntimeOrigin::signed(caller),
-//             deceased_id,
+//             subject_id,
 //             cid,
 //             1_073_741_824,
 //             1,
@@ -670,7 +648,7 @@ fn genesis_config_initializes_correctly() {
     });
 }
 
-/// 函数级中文注释：测试12 - request_pin_for_deceased支持tier参数
+/// 函数级中文注释：测试12 - request_pin_for_subject支持tier参数
 #[test]
 fn request_pin_with_tier_works() {
     use crate::types::{TierConfig, PinTier};
@@ -683,7 +661,7 @@ fn request_pin_with_tier_works() {
         crate::PinTierConfig::<Test>::insert(PinTier::Standard, TierConfig::default());
         
         let caller: AccountId = 1;
-        let deceased_id: u64 = 1;
+        let subject_id: u64 = 1;
         let cid = b"QmTest123456789".to_vec();
         
         // 注册一个Core运营者
@@ -705,9 +683,9 @@ fn request_pin_with_tier_works() {
         let _ = <Test as crate::Config>::Currency::deposit_creating(&pool, 10_000_000_000_000_000);
         
         // 执行pin（使用Standard tier）
-        assert_ok!(crate::Pallet::<Test>::request_pin_for_deceased(
+        assert_ok!(crate::Pallet::<Test>::request_pin_for_subject(
             RuntimeOrigin::signed(caller),
-            deceased_id,
+            subject_id,
             cid.clone(),
             Some(PinTier::Standard),
         ));
@@ -722,7 +700,7 @@ fn request_pin_with_tier_works() {
         assert_eq!(tier, PinTier::Standard);
         
         // 验证域索引已注册
-        let domain = b"deceased".to_vec();
+        let domain = b"subject".to_vec();
         let domain_bounded = frame_support::BoundedVec::try_from(domain).unwrap();
         assert!(crate::DomainPins::<Test>::contains_key(&domain_bounded, &cid_hash));
     });
@@ -736,7 +714,7 @@ fn four_layer_charge_from_ipfs_pool() {
     new_test_ext().execute_with(|| {
         System::set_block_number(1);
         
-        let deceased_id: u64 = 1;
+        let subject_id: u64 = 1;
         let cid_hash = H256::repeat_byte(99);
         let amount: Balance = 10_000_000_000_000; // 10 DUST
         
@@ -746,8 +724,8 @@ fn four_layer_charge_from_ipfs_pool() {
         
         // 注册CidToSubject
         let subject_info = crate::types::SubjectInfo {
-            subject_type: crate::types::SubjectType::Deceased,
-            subject_id: deceased_id,
+            subject_type: crate::types::SubjectType::General,
+            subject_id: subject_id,
             funding_share: 100,
         };
         let subject_vec = frame_support::BoundedVec::try_from(vec![subject_info]).unwrap();
@@ -782,7 +760,7 @@ fn four_layer_charge_fallback_to_subject_funding() {
     new_test_ext().execute_with(|| {
         System::set_block_number(1);
         
-        let deceased_id: u64 = 1;
+        let subject_id: u64 = 1;
         let cid_hash = H256::repeat_byte(88);
         let amount: Balance = 10_000_000_000_000;
         
@@ -792,15 +770,15 @@ fn four_layer_charge_fallback_to_subject_funding() {
         
         // SubjectFunding充足
         let subject_account = crate::Pallet::<Test>::derive_subject_funding_account_v2(
-            SubjectType::Deceased,
-            deceased_id
+            SubjectType::General,
+            subject_id
         );
         let _ = <Test as crate::Config>::Currency::deposit_creating(&subject_account, 1_000_000_000_000_000);
         
         // 注册CidToSubject
         let subject_info = SubjectInfo {
-            subject_type: SubjectType::Deceased,
-            subject_id: deceased_id,
+            subject_type: SubjectType::General,
+            subject_id: subject_id,
             funding_share: 100,
         };
         let subject_vec = frame_support::BoundedVec::try_from(vec![subject_info]).unwrap();
@@ -867,7 +845,7 @@ fn on_finalize_auto_billing_success() {
     new_test_ext().execute_with(|| {
         System::set_block_number(1);
         
-        let deceased_id: u64 = 1;
+        let subject_id: u64 = 1;
         let cid_hash = H256::repeat_byte(77);
         let amount: Balance = 5_000_000_000_000;
         
@@ -877,8 +855,8 @@ fn on_finalize_auto_billing_success() {
         
         // 注册CidToSubject
         let subject_info = SubjectInfo {
-            subject_type: SubjectType::Deceased,
-            subject_id: deceased_id,
+            subject_type: SubjectType::General,
+            subject_id: subject_id,
             funding_share: 100,
         };
         let subject_vec = frame_support::BoundedVec::try_from(vec![subject_info]).unwrap();

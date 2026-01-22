@@ -9,7 +9,6 @@
 //! - 公共 Trait 定义（PricingProvider, MakerInterface, MakerCreditInterface）
 //! - 脱敏函数（姓名、身份证、生日）
 //! - TRON 地址验证
-//! - EPAY 配置验证
 //! - 时间转换工具
 //!
 //! ## 特点
@@ -49,7 +48,7 @@ pub use traits::{
 
 // 重新导出工具函数
 pub use mask::{mask_name, mask_id_card, mask_birthday};
-pub use validation::{is_valid_tron_address, is_valid_epay_config};
+pub use validation::is_valid_tron_address;
 pub use time::{
     blocks_to_seconds,
     seconds_to_blocks,

@@ -6,7 +6,7 @@
 
 1. **pallet-maker** - 做市商管理（申请、审核、押金、提现）
 2. **pallet-otc-order** - OTC 订单管理（创建、支付、释放、取消、争议）
-3. **pallet-bridge** - DUST ↔ USDT 桥接（兑换、OCW 处理）
+3. **pallet-swap** - DUST → USDT 做市商兑换服务（OCW 验证、超时退款）
 4. **pallet-trading-common** - 公共工具库（数据掩码、验证）
 
 ### 核心价值
@@ -56,16 +56,15 @@ pallet-otc-order (独立模块 - OTC 订单)
   ├── 争议处理
   └── 信用分记录
 
-pallet-bridge (独立模块 - 桥接服务)
-  ├── 官方桥接（治理管理）
-  ├── 做市商桥接（市场化服务）
+pallet-swap (独立模块 - 做市商兑换服务)
+  ├── 做市商兑换（市场化服务）
   ├── OCW 自动验证
   ├── 超时退款机制
   └── TRC20 交易哈希防重放
 
 pallet-trading-common (工具库)
   ├── 数据掩码（姓名、身份证、生日）
-  └── 数据验证（TRON 地址、EPAY 配置）
+  └── 数据验证（TRON 地址）
 ```
 
 ### 模块依赖关系
@@ -75,7 +74,7 @@ pallet-trading (统一接口层)
     │
     ├─► pallet-maker
     │   ├── 提供做市商信息查询接口
-    │   └── 被 pallet-otc-order 和 pallet-bridge 调用
+    │   └── 被 pallet-otc-order 和 pallet-swap 调用
     │
     ├─► pallet-otc-order
     │   ├── 调用 pallet-maker::MakerInterface 查询做市商信息
@@ -84,7 +83,7 @@ pallet-trading (统一接口层)
     │   ├── 调用 pallet-credit::MakerCreditInterface 记录做市商信用
     │   └── 调用 pallet-pricing::PricingProvider 添加价格数据
     │
-    ├─► pallet-bridge
+    ├─► pallet-swap
     │   ├── 调用 pallet-maker::MakerInterface 查询做市商信息
     │   ├── 调用 pallet-escrow::Escrow 锁定/释放资金
     │   ├── 调用 pallet-credit::CreditInterface 记录信用
@@ -93,18 +92,18 @@ pallet-trading (统一接口层)
     └─► pallet-trading-common
         ├── 被 pallet-maker 调用（数据脱敏、验证）
         ├── 被 pallet-otc-order 调用（数据脱敏、验证）
-        └── 被 pallet-bridge 调用（数据脱敏、验证）
+        └── 被 pallet-swap 调用（数据脱敏、验证）
 ```
 
 ### 重构优势
 
 | 优势 | 说明 | 具体体现 |
 |------|------|----------|
-| **低耦合** | 子模块独立开发、测试、部署 | 修改 Maker 逻辑不影响 OTC 和 Bridge |
+| **低耦合** | 子模块独立开发、测试、部署 | 修改 Maker 逻辑不影响 OTC 和 Swap |
 | **高内聚** | 每个模块职责单一清晰 | Maker 只管做市商，OTC 只管订单 |
-| **易维护** | 修改子模块不影响其他模块 | 升级 Bridge 不需要重新测试 Maker |
+| **易维护** | 修改子模块不影响其他模块 | 升级 Swap 不需要重新测试 Maker |
 | **易测试** | 独立模块独立测试 | 每个模块有独立的 mock 和 tests |
-| **灵活集成** | Runtime 可选择性集成 | 可以只集成 OTC，不集成 Bridge |
+| **灵活集成** | Runtime 可选择性集成 | 可以只集成 OTC，不集成 Swap |
 
 ---
 
@@ -152,12 +151,11 @@ pub mod otc_types {
 - **Order**: OTC 订单记录，包含做市商、买家、价格、数量、状态等
 - **OrderState**: `Created | PaidOrCommitted | Released | Refunded | Canceled | Disputed | Closed | Expired`
 
-#### 1.3 Bridge 相关类型
+#### 1.3 Swap 相关类型
 
 ```rust
-pub mod bridge_types {
-    pub use pallet_bridge::{
-        SwapRequest,           // 官方桥接兑换请求
+pub mod swap_types {
+    pub use pallet_swap::{
         SwapStatus,            // 兑换状态枚举
         MakerSwapRecord,       // 做市商兑换记录
     };
@@ -166,8 +164,7 @@ pub mod bridge_types {
 
 **主要类型说明：**
 
-- **SwapRequest**: 官方桥接兑换请求
-- **SwapStatus**: `Pending | Completed | UserReported | Arbitrating | ArbitrationApproved | ArbitrationRejected | Refunded`
+- **SwapStatus**: `Pending | AwaitingVerification | Completed | VerificationFailed | UserReported | Arbitrating | ArbitrationApproved | ArbitrationRejected | Refunded`
 - **MakerSwapRecord**: 做市商兑换记录，包含 TRC20 交易哈希
 
 #### 1.4 公共工具
@@ -179,7 +176,6 @@ pub mod utils {
         mask_id_card,          // 身份证号脱敏
         mask_birthday,         // 生日脱敏
         is_valid_tron_address, // TRON 地址验证
-        is_valid_epay_config,  // EPAY 配置验证
     };
 }
 ```
@@ -198,7 +194,7 @@ pub mod utils {
 pub struct PlatformStats {
     pub total_makers: u64,   // 总做市商数（来自 pallet-maker）
     pub total_orders: u64,   // 总订单数（来自 pallet-otc-order）
-    pub total_swaps: u64,    // 总兑换数（来自 pallet-bridge）
+    pub total_swaps: u64,    // 总兑换数（来自 pallet-swap）
 }
 ```
 
@@ -257,8 +253,6 @@ pub fn submit_info(
     min_amount: BalanceOf<T>,     // 最小交易金额
     wechat_id: Vec<u8>,           // 微信号
     payment_methods_json: Vec<u8>, // 收款方式（JSON格式）
-    epay_no: Option<Vec<u8>>,     // EPAY 商户号（可选）
-    epay_key_cid: Option<Vec<u8>>, // EPAY 密钥 CID（可选，加密）
 ) -> DispatchResult
 ```
 
@@ -392,42 +386,16 @@ pub fn dispute_order(origin: OriginFor<T>, order_id: u64) -> DispatchResult
 
 ---
 
-### 3. pallet-bridge（桥接服务）
+### 3. pallet-swap（做市商兑换服务）
 
-#### 3.1 swap - 官方桥接
+> ℹ️ **版本说明**: v0.2.0 移除了官方桥接功能，仅保留做市商兑换服务
+
+#### 3.1 create_swap - 创建做市商兑换
 
 ```rust
 #[pallet::call_index(0)]
-#[pallet::weight(T::WeightInfo::swap())]
-pub fn swap(
-    origin: OriginFor<T>,
-    dust_amount: BalanceOf<T>, // DUST 数量
-    tron_address: Vec<u8>,     // USDT 接收地址
-) -> DispatchResult
-```
-
-**功能：** 用户发起官方桥接，锁定 DUST，等待治理发送 USDT
-
-**超时机制：** `SwapTimeout` 区块后自动退款
-
-#### 3.2 complete_swap - 完成官方桥接
-
-```rust
-#[pallet::call_index(1)]
-#[pallet::weight(T::WeightInfo::complete_swap())]
-pub fn complete_swap(origin: OriginFor<T>, swap_id: u64) -> DispatchResult
-```
-
-**功能：** 治理委员会标记桥接完成，DUST 转入国库
-
-**权限：** `GovernanceOrigin`
-
-#### 3.3 maker_swap - 做市商桥接
-
-```rust
-#[pallet::call_index(2)]
-#[pallet::weight(T::WeightInfo::maker_swap())]
-pub fn maker_swap(
+#[pallet::weight(T::WeightInfo::create_swap())]
+pub fn create_swap(
     origin: OriginFor<T>,
     maker_id: u64,             // 做市商 ID
     dust_amount: BalanceOf<T>, // DUST 数量
@@ -435,27 +403,27 @@ pub fn maker_swap(
 ) -> DispatchResult
 ```
 
-**功能：** 用户发起做市商桥接，锁定 DUST，等待做市商发送 USDT
+**功能：** 用户发起做市商兑换，锁定 DUST，等待做市商发送 USDT
 
-**超时机制：** `OcwSwapTimeoutBlocks` 区块后自动退款
+**超时机制：** `SwapTimeoutBlocks` 区块后自动退款
 
-#### 3.4 mark_swap_complete - 标记做市商桥接完成
+#### 3.2 submit_trc20_tx_hash - 提交 TRC20 交易哈希
 
 ```rust
-#[pallet::call_index(3)]
-#[pallet::weight(T::WeightInfo::mark_swap_complete())]
-pub fn mark_swap_complete(
+#[pallet::call_index(1)]
+#[pallet::weight(T::WeightInfo::submit_trc20_tx_hash())]
+pub fn submit_trc20_tx_hash(
     origin: OriginFor<T>,
     swap_id: u64,
     trc20_tx_hash: Vec<u8>, // TRC20 交易哈希（USDT 转账证明）
 ) -> DispatchResult
 ```
 
-**功能：** 做市商提交 TRC20 交易哈希，标记桥接完成
+**功能：** 做市商提交 TRC20 交易哈希，等待 OCW 验证
 
 **防重放机制：** 记录已使用的交易哈希，防止同一笔交易被重复使用
 
-#### 3.5 report_swap - 举报做市商
+#### 3.3 report_swap - 举报做市商
 
 ```rust
 #[pallet::call_index(4)]
@@ -526,27 +494,24 @@ pub enum Event<T: Config> {
 }
 ```
 
-### 3. pallet-bridge 事件
+### 3. pallet-swap 事件
 
 ```rust
 pub enum Event<T: Config> {
-    /// 官方桥接请求已创建 [swap_id, user, dust_amount, tron_address]
-    SwapCreated(u64, T::AccountId, BalanceOf<T>, Vec<u8>),
+    /// 做市商兑换已创建 [swap_id, user, maker_id, dust_amount, usdt_address]
+    SwapCreated(u64, T::AccountId, u64, BalanceOf<T>, Vec<u8>),
 
-    /// 官方桥接已完成 [swap_id]
+    /// TRC20 交易哈希已提交 [swap_id, trc20_tx_hash]
+    TxHashSubmitted(u64, Vec<u8>),
+
+    /// 兑换已完成 [swap_id]
     SwapCompleted(u64),
-
-    /// 做市商桥接已创建 [swap_id, user, maker_id, dust_amount, usdt_address]
-    MakerSwapCreated(u64, T::AccountId, u64, BalanceOf<T>, Vec<u8>),
-
-    /// 做市商桥接已完成 [swap_id, trc20_tx_hash]
-    MakerSwapCompleted(u64, Vec<u8>),
 
     /// 用户已举报 [swap_id, user]
     SwapReported(u64, T::AccountId),
 
-    /// 桥接已退款 [swap_id, user, dust_amount]
-    SwapRefunded(u64, T::AccountId, BalanceOf<T>),
+    /// 兑换已超时退款 [swap_id, user, dust_amount]
+    SwapTimeout(u64, T::AccountId, BalanceOf<T>),
 }
 ```
 
@@ -606,21 +571,20 @@ impl pallet_otc_order::Config for Runtime {
 }
 ```
 
-### 3. pallet-bridge 配置
+### 3. pallet-swap 配置
 
 ```rust
-impl pallet_bridge::Config for Runtime {
+impl pallet_swap::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type Currency = Balances;
     type Escrow = Escrow;
     type Pricing = Pricing;
     type MakerPallet = Maker;
     type Credit = Credit;
-    type GovernanceOrigin = EnsureTreasury;
 
     // 常量参数
-    type SwapTimeout = ConstU32<43_200>;                         // 3天官方桥接超时（区块数）
-    type OcwSwapTimeoutBlocks = ConstU32<14_400>;                // 1天做市商桥接超时（区块数）
+    type SwapTimeoutBlocks = ConstU32<14_400>;                   // 1天超时（区块数）
+    type TxHashTtlBlocks = ConstU32<{ 30 * DAYS }>;              // 30天 TTL 过期清理
     type MinSwapAmount = ConstU128<100_000_000_000>;             // 最小 100 DUST
     type WeightInfo = ();
 }
@@ -672,8 +636,6 @@ async function submitInfo(api: ApiPromise, account: KeyringPair) {
     100_000_000_000,                      // min_amount (100 DUST)
     'wechat_12345',                       // wechat_id
     JSON.stringify({ alipay: '13812345678' }), // payment_methods_json
-    'EPAY12345',                          // epay_no (可选)
-    'QmXXXepayKeyCID',                    // epay_key_cid (可选)
   );
 
   await tx.signAndSend(account);
@@ -878,67 +840,25 @@ async function queryMakerOrders(api: ApiPromise, makerId: number) {
 
 ---
 
-### 3. Bridge 兑换管理
-
-#### 3.1 官方桥接流程
+### 3. Swap 兑换管理
 
 ```typescript
-// 发起官方桥接
-async function officialSwap(
-  api: ApiPromise,
-  account: KeyringPair,
-  dustAmount: string,
-  tronAddress: string,
-) {
-  const tx = api.tx.bridge.swap(dustAmount, tronAddress);
-
-  await tx.signAndSend(account, ({ status, events }) => {
-    if (status.isInBlock) {
-      events.forEach(({ event }) => {
-        if (api.events.bridge.SwapCreated.is(event)) {
-          const [swapId, user, dustAmount, tronAddress] = event.data;
-          console.log('官方桥接创建成功:', {
-            swapId: swapId.toString(),
-            user: user.toString(),
-            dustAmount: dustAmount.toString(),
-            tronAddress: tronAddress.toHuman(),
-          });
-        }
-      });
-    }
-  });
-}
-
-// 治理委员会标记完成
-async function completeSwap(
-  api: ApiPromise,
-  governanceAccount: KeyringPair,
-  swapId: number,
-) {
-  const tx = api.tx.bridge.completeSwap(swapId);
-  await tx.signAndSend(governanceAccount);
-}
-```
-
-#### 3.2 做市商桥接流程
-
-```typescript
-// 用户发起做市商桥接
-async function makerSwap(
+// 用户发起做市商兑换
+async function createSwap(
   api: ApiPromise,
   account: KeyringPair,
   makerId: number,
   dustAmount: string,
   usdtAddress: string,
 ) {
-  const tx = api.tx.bridge.makerSwap(makerId, dustAmount, usdtAddress);
+  const tx = api.tx.swap.createSwap(makerId, dustAmount, usdtAddress);
 
   await tx.signAndSend(account, ({ status, events }) => {
     if (status.isInBlock) {
       events.forEach(({ event }) => {
-        if (api.events.bridge.MakerSwapCreated.is(event)) {
+        if (api.events.swap.SwapCreated.is(event)) {
           const [swapId, user, makerId, dustAmount, usdtAddress] = event.data;
-          console.log('做市商桥接创建成功:', {
+          console.log('做市商兑换创建成功:', {
             swapId: swapId.toString(),
             user: user.toString(),
             makerId: makerId.toString(),
@@ -951,14 +871,14 @@ async function makerSwap(
   });
 }
 
-// 做市商标记完成（提交 TRC20 交易哈希）
-async function markSwapComplete(
+// 做市商提交 TRC20 交易哈希
+async function submitTrc20TxHash(
   api: ApiPromise,
   makerAccount: KeyringPair,
   swapId: number,
   trc20TxHash: string,
 ) {
-  const tx = api.tx.bridge.markSwapComplete(swapId, trc20TxHash);
+  const tx = api.tx.swap.submitTrc20TxHash(swapId, trc20TxHash);
   await tx.signAndSend(makerAccount);
 }
 
@@ -968,37 +888,18 @@ async function reportSwap(
   account: KeyringPair,
   swapId: number,
 ) {
-  const tx = api.tx.bridge.reportSwap(swapId);
+  const tx = api.tx.swap.reportSwap(swapId);
   await tx.signAndSend(account);
 }
 
 // 查询兑换详情
 async function querySwap(api: ApiPromise, swapId: number) {
-  // 查询官方桥接
-  const officialSwap = await api.query.bridge.swapRequests(swapId);
-  if (officialSwap.isSome) {
-    const data = officialSwap.unwrap();
-    console.log('官方桥接详情:', {
-      swapId: data.id.toString(),
-      user: data.user.toString(),
-      dustAmount: data.dustAmount.toString(),
-      tronAddress: data.tronAddress.toHuman(),
-      completed: data.completed.isTrue,
-      priceUsdt: data.priceUsdt.toString(),
-      createdAt: data.createdAt.toString(),
-      expireAt: data.expireAt.toString(),
-    });
-    return;
-  }
-
-  // 查询做市商桥接
-  const makerSwap = await api.query.bridge.makerSwaps(swapId);
-  if (makerSwap.isSome) {
-    const data = makerSwap.unwrap();
-    console.log('做市商桥接详情:', {
+  const swap = await api.query.swap.makerSwaps(swapId);
+  if (swap.isSome) {
+    const data = swap.unwrap();
+    console.log('做市商兑换详情:', {
       swapId: data.swapId.toString(),
       makerId: data.makerId.toString(),
-      maker: data.maker.toString(),
       user: data.user.toString(),
       dustAmount: data.dustAmount.toString(),
       usdtAmount: data.usdtAmount.toString(),
@@ -1021,7 +922,7 @@ async function querySwap(api: ApiPromise, swapId: number) {
 async function getPlatformStats(api: ApiPromise) {
   const totalMakers = await api.query.maker.nextMakerId();
   const totalOrders = await api.query.otcOrder.nextOrderId();
-  const totalSwaps = await api.query.bridge.nextSwapId();
+  const totalSwaps = await api.query.swap.nextSwapId();
 
   console.log('平台统计:', {
     totalMakers: totalMakers.toNumber(),
@@ -1165,17 +1066,16 @@ impl pallet_otc_order::Config for Runtime {
     type WeightInfo = ();
 }
 
-// 3. 配置 pallet-bridge
-impl pallet_bridge::Config for Runtime {
+// 3. 配置 pallet-swap
+impl pallet_swap::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type Currency = Balances;
     type Escrow = Escrow;
     type Pricing = Pricing;
     type MakerPallet = Maker;
     type Credit = Credit;
-    type GovernanceOrigin = EnsureTreasury;
-    type SwapTimeout = ConstU32<43_200>;
-    type OcwSwapTimeoutBlocks = ConstU32<14_400>;
+    type SwapTimeoutBlocks = ConstU32<14_400>;
+    type TxHashTtlBlocks = ConstU32<{ 30 * DAYS }>;
     type MinSwapAmount = ConstU128<100_000_000_000>;
     type WeightInfo = ();
 }
@@ -1191,7 +1091,7 @@ construct_runtime! {
         // Trading modules
         Maker: pallet_maker,
         OtcOrder: pallet_otc_order,
-        Bridge: pallet_bridge,
+        Swap: pallet_swap,
 
         // Dependencies
         Escrow: pallet_escrow,
@@ -1230,8 +1130,6 @@ pub struct MakerApplication<T: Config> {
     pub masked_birthday: BoundedVec<u8, ConstU32<16>>,      // 脱敏生日
     pub masked_payment_info: BoundedVec<u8, ConstU32<512>>, // 脱敏收款方式
     pub wechat_id: BoundedVec<u8, ConstU32<64>>,            // 微信号
-    pub epay_no: Option<BoundedVec<u8, ConstU32<32>>>,      // EPAY 商户号
-    pub epay_key_cid: Option<Cid>,                          // EPAY 密钥 CID
     pub target_deposit_usd: u64,          // 押金目标 USD 价值（1000 USD）
     pub last_price_check: BlockNumberFor<T>, // 上次价格检查时间
     pub deposit_warning: bool,            // 押金不足警告
@@ -1255,28 +1153,12 @@ pub struct Order<T: Config> {
     pub payment_commit: H256,             // 支付承诺哈希
     pub contact_commit: H256,             // 联系方式承诺哈希
     pub state: OrderState,                // 订单状态
-    pub epay_trade_no: Option<BoundedVec<u8, ConstU32<64>>>, // EPAY 交易号
     pub completed_at: Option<MomentOf>,   // 订单完成时间
     pub is_first_purchase: bool,          // 是否为首购订单
 }
 ```
 
-### 3. SwapRequest（官方桥接）
-
-```rust
-pub struct SwapRequest<T: Config> {
-    pub id: u64,                          // 兑换 ID
-    pub user: T::AccountId,               // 用户地址
-    pub dust_amount: BalanceOf<T>,        // DUST 数量
-    pub tron_address: TronAddress,        // TRON 地址
-    pub completed: bool,                  // 是否已完成
-    pub price_usdt: u64,                  // 兑换时的 USDT 单价（精度 10^6）
-    pub created_at: BlockNumberFor<T>,    // 创建时间戳（区块号）
-    pub expire_at: BlockNumberFor<T>,     // 超时时间（区块号）
-}
-```
-
-### 4. MakerSwapRecord（做市商桥接）
+### 3. MakerSwapRecord（做市商兑换）
 
 ```rust
 pub struct MakerSwapRecord<T: Config> {
@@ -1312,7 +1194,7 @@ pub struct MakerSwapRecord<T: Config> {
 # 子模块依赖
 pallet-maker = { path = "../maker", default-features = false }
 pallet-otc-order = { path = "../otc-order", default-features = false }
-pallet-bridge = { path = "../bridge", default-features = false }
+pallet-swap = { path = "../swap", default-features = false }
 pallet-trading-common = { path = "../trading-common", default-features = false }
 ```
 
@@ -1322,7 +1204,7 @@ pallet-trading-common = { path = "../trading-common", default-features = false }
 // 直接导出子模块
 pub use pallet_maker;
 pub use pallet_otc_order;
-pub use pallet_bridge;
+pub use pallet_swap;
 pub use pallet_trading_common;
 
 // 聚合类型导出
@@ -1339,12 +1221,12 @@ pub struct TradingApi;
 impl TradingApi {
     pub fn get_platform_stats<T>() -> PlatformStats
     where
-        T: pallet_maker::Config + pallet_otc_order::Config + pallet_bridge::Config,
+        T: pallet_maker::Config + pallet_otc_order::Config + pallet_swap::Config,
     {
         PlatformStats {
             total_makers: pallet_maker::NextMakerId::<T>::get(),
             total_orders: pallet_otc_order::NextOrderId::<T>::get(),
-            total_swaps: pallet_bridge::NextSwapId::<T>::get(),
+            total_swaps: pallet_swap::NextSwapId::<T>::get(),
         }
     }
 }
@@ -1398,16 +1280,12 @@ pub fn mask_birthday(birthday: &str) -> Vec<u8>;
 // TRON 地址验证
 pub fn is_valid_tron_address(address: &[u8]) -> bool;
 // 规则：长度 34，开头 'T'，Base58 编码
-
-// EPAY 配置验证
-pub fn is_valid_epay_config(epay_no: &Option<Vec<u8>>, epay_key: &Option<Vec<u8>>) -> bool;
-// 规则：epay_no (10-32字符)，epay_key (16-64字符)，要么都有要么都没有
 ```
 
 #### 4.3 防重放攻击
 
 ```rust
-// pallet-bridge 记录已使用的 TRC20 交易哈希
+// pallet-swap 记录已使用的 TRC20 交易哈希
 pub type UsedTronTxHashes<T: Config> = StorageMap<
     _,
     Blake2_128Concat,
@@ -1430,7 +1308,7 @@ construct_runtime! {
     pub struct Runtime {
         Maker: pallet_maker,
         OtcOrder: pallet_otc_order,
-        Bridge: pallet_bridge,
+        Swap: pallet_swap,
     }
 }
 
@@ -1450,7 +1328,7 @@ construct_runtime! {
 // ✅ 推荐
 await api.tx.maker.lockDeposit().signAndSend(account);
 await api.tx.otcOrder.createOrder(...).signAndSend(account);
-await api.tx.bridge.swap(...).signAndSend(account);
+await api.tx.swap.createSwap(...).signAndSend(account);
 
 // ❌ 不推荐（无此 API）
 await api.tx.trading.lockDeposit().signAndSend(account);
@@ -1462,7 +1340,7 @@ await api.tx.trading.lockDeposit().signAndSend(account);
 
 ```typescript
 // ✅ 推荐（统一导入）
-import { maker_types, otc_types, bridge_types } from 'pallet-trading';
+import { maker_types, otc_types, swap_types } from 'pallet-trading';
 
 // ✅ 也可以直接导入子模块
 import { MakerApplication } from 'pallet-maker';
@@ -1505,9 +1383,9 @@ try {
 ### 核心业务模块
 
 - **[pallet-maker](../maker/README.md)**: 做市商管理
-- **[pallet-otc-order](../otc-order/README.md)**: OTC 订单管理
-- **[pallet-bridge](../bridge/README.md)**: DUST ↔ USDT 桥接
-- **[pallet-trading-common](../trading-common/README.md)**: 公共工具库
+- **[pallet-otc-order](../otc/README.md)**: OTC 订单管理
+- **[pallet-swap](../swap/README.md)**: DUST → USDT 做市商兑换
+- **[pallet-trading-common](../common/README.md)**: 公共工具库
 
 ### 依赖模块
 
@@ -1526,7 +1404,9 @@ try {
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| v0.1.0 | 2025-11-03 | 重构为统一接口层，拆分为 4 个子模块（maker/otc-order/bridge/trading-common） |
+| v0.1.0 | 2025-11-03 | 重构为统一接口层，拆分为 4 个子模块（maker/otc/swap/common） |
+| v0.2.0 | 2026-01-18 | pallet-swap: 移除官方桥接功能，仅保留做市商兑换 |
+| v0.3.0 | 2026-01-18 | pallet-swap: 重命名 bridge → swap |
 
 ---
 

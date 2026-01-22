@@ -186,3 +186,187 @@ where
         }
     }
 }
+
+// ============ 举报与申诉系统类型 ============
+
+/// 直播间举报类型
+#[derive(
+    Encode,
+    Decode,
+    DecodeWithMemTracking,
+    Clone,
+    Copy,
+    RuntimeDebug,
+    PartialEq,
+    Eq,
+    TypeInfo,
+    MaxEncodedLen,
+)]
+pub enum RoomReportType {
+    /// 违规内容（涉黄、暴力等）
+    IllegalContent,
+    /// 虚假宣传
+    FalseAdvertising,
+    /// 骚扰观众
+    Harassment,
+    /// 诈骗行为
+    Fraud,
+    /// 其他
+    Other,
+}
+
+/// 举报状态
+#[derive(
+    Encode,
+    Decode,
+    DecodeWithMemTracking,
+    Clone,
+    Copy,
+    RuntimeDebug,
+    PartialEq,
+    Eq,
+    TypeInfo,
+    MaxEncodedLen,
+)]
+pub enum ReportStatus {
+    /// 待审核
+    Pending,
+    /// 审核中
+    UnderReview,
+    /// 举报成立
+    Upheld,
+    /// 举报驳回
+    Rejected,
+    /// 恶意举报
+    Malicious,
+    /// 已撤回
+    Withdrawn,
+    /// 已过期
+    Expired,
+}
+
+/// 申诉结果
+#[derive(
+    Encode,
+    Decode,
+    DecodeWithMemTracking,
+    Clone,
+    Copy,
+    RuntimeDebug,
+    PartialEq,
+    Eq,
+    TypeInfo,
+    MaxEncodedLen,
+)]
+pub enum AppealResult {
+    /// 申诉成立（解除封禁）
+    Upheld,
+    /// 申诉驳回（维持封禁）
+    Rejected,
+}
+
+/// 直播间举报记录
+#[derive(Encode, Decode, DecodeWithMemTracking, RuntimeDebug, PartialEq, Eq, TypeInfo, MaxEncodedLen)]
+#[scale_info(skip_type_params(MaxCidLen, MaxDescriptionLen))]
+pub struct RoomReportRecord<AccountId, Balance, BlockNumber, MaxCidLen, MaxDescriptionLen>
+where
+    MaxCidLen: Get<u32>,
+    MaxDescriptionLen: Get<u32>,
+{
+    /// 举报 ID
+    pub id: u64,
+    /// 举报者账户
+    pub reporter: AccountId,
+    /// 被举报的直播间 ID
+    pub room_id: u64,
+    /// 被举报的主播账户
+    pub host: AccountId,
+    /// 举报类型
+    pub report_type: RoomReportType,
+    /// 证据 IPFS CID
+    pub evidence_cid: BoundedVec<u8, MaxCidLen>,
+    /// 举报描述
+    pub description: BoundedVec<u8, MaxDescriptionLen>,
+    /// 押金金额
+    pub deposit: Balance,
+    /// 举报状态
+    pub status: ReportStatus,
+    /// 创建时间（区块号）
+    pub created_at: BlockNumber,
+    /// 处理时间（区块号）
+    pub resolved_at: Option<BlockNumber>,
+    /// 是否匿名举报
+    pub is_anonymous: bool,
+}
+
+// 手动实现 Clone
+impl<AccountId, Balance, BlockNumber, MaxCidLen, MaxDescriptionLen> Clone
+    for RoomReportRecord<AccountId, Balance, BlockNumber, MaxCidLen, MaxDescriptionLen>
+where
+    AccountId: Clone,
+    Balance: Clone,
+    BlockNumber: Clone,
+    MaxCidLen: Get<u32>,
+    MaxDescriptionLen: Get<u32>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            reporter: self.reporter.clone(),
+            room_id: self.room_id,
+            host: self.host.clone(),
+            report_type: self.report_type,
+            evidence_cid: self.evidence_cid.clone(),
+            description: self.description.clone(),
+            deposit: self.deposit.clone(),
+            status: self.status,
+            created_at: self.created_at.clone(),
+            resolved_at: self.resolved_at.clone(),
+            is_anonymous: self.is_anonymous,
+        }
+    }
+}
+
+/// 直播间封禁记录
+#[derive(Encode, Decode, DecodeWithMemTracking, RuntimeDebug, PartialEq, Eq, TypeInfo, MaxEncodedLen)]
+#[scale_info(skip_type_params(MaxDescriptionLen))]
+pub struct RoomBanRecord<AccountId, BlockNumber, MaxDescriptionLen>
+where
+    MaxDescriptionLen: Get<u32>,
+{
+    /// 被封禁的直播间 ID
+    pub room_id: u64,
+    /// 被封禁的主播账户
+    pub host: AccountId,
+    /// 封禁时间（区块号）
+    pub banned_at: BlockNumber,
+    /// 封禁原因
+    pub reason: BoundedVec<u8, MaxDescriptionLen>,
+    /// 关联的举报 ID（如果有）
+    pub related_report_id: Option<u64>,
+    /// 是否已申诉
+    pub is_appealed: bool,
+    /// 申诉结果
+    pub appeal_result: Option<AppealResult>,
+}
+
+// 手动实现 Clone
+impl<AccountId, BlockNumber, MaxDescriptionLen> Clone
+    for RoomBanRecord<AccountId, BlockNumber, MaxDescriptionLen>
+where
+    AccountId: Clone,
+    BlockNumber: Clone,
+    MaxDescriptionLen: Get<u32>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            room_id: self.room_id,
+            host: self.host.clone(),
+            banned_at: self.banned_at.clone(),
+            reason: self.reason.clone(),
+            related_report_id: self.related_report_id,
+            is_appealed: self.is_appealed,
+            appeal_result: self.appeal_result,
+        }
+    }
+}

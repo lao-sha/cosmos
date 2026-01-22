@@ -14,7 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useWalletStore } from '@/stores/wallet.store';
-import { useProvider, useOrders } from '@/divination/market/hooks';
+import { useProvider, useOrders, useChainTransaction } from '@/divination/market/hooks';
 import {
   Avatar,
   TierBadge,
@@ -28,12 +28,20 @@ import { THEME, SHADOWS } from '@/divination/market/theme';
 import { Order, ProviderDashboard } from '@/divination/market/types';
 import { formatBalance, formatTimeAgo, truncateAddress } from '@/divination/market/utils/market.utils';
 import { getIpfsUrl } from '@/divination/market/services/ipfs.service';
+import { Alert } from 'react-native';
 
 export default function ProviderDashboardScreen() {
   const router = useRouter();
   const { address } = useWalletStore();
   const { isProvider, providerInfo, loading, getDashboard } = useProvider();
   const { getReceivedOrders } = useOrders();
+  const { 
+    updateProviderProfile, 
+    pauseProvider, 
+    resumeProvider, 
+    withdraw,
+    isProcessing 
+  } = useChainTransaction();
 
   const [dashboard, setDashboard] = useState<ProviderDashboard | null>(null);
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
@@ -63,6 +71,92 @@ export default function ProviderDashboardScreen() {
     await loadData();
     setRefreshing(false);
   }, [loadData]);
+
+  const handleUpdateProfile = () => {
+    Alert.prompt(
+      '更新资料',
+      '输入新的简介',
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '提交',
+          onPress: async (bio) => {
+            if (!bio) return;
+            await updateProviderProfile({ bio }, {
+              onSuccess: () => {
+                Alert.alert('成功', '资料已更新');
+                loadData();
+              }
+            });
+          }
+        }
+      ],
+      'plain-text',
+      providerInfo?.bio
+    );
+  };
+
+  const handleToggleStatus = () => {
+    const isActive = providerInfo?.status === 'Active';
+    Alert.alert(
+      isActive ? '暂停服务' : '恢复服务',
+      isActive ? '暂停后您的套餐将不再出现在搜索结果中' : '恢复后用户可以继续下单',
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '确定',
+          onPress: async () => {
+            if (isActive) {
+              await pauseProvider({
+                onSuccess: () => {
+                  Alert.alert('成功', '已暂停服务');
+                  loadData();
+                }
+              });
+            } else {
+              await resumeProvider({
+                onSuccess: () => {
+                  Alert.alert('成功', '已恢复服务');
+                  loadData();
+                }
+              });
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleWithdraw = async () => {
+    if (!dashboard?.balance || dashboard.balance <= 0n) {
+      Alert.alert('提示', '当前没有可提现余额');
+      return;
+    }
+
+    Alert.prompt(
+      '申请提现',
+      `当前余额: ${formatBalance(dashboard.balance)} DUST。请输入提现金额 (输入 0 提取全部)`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '确认提现',
+          onPress: async (amountStr) => {
+            const amount = parseFloat(amountStr || '0');
+            const amountBigInt = amount === 0 ? undefined : BigInt(Math.floor(amount * 1000000));
+            
+            await withdraw(amountBigInt, {
+              onSuccess: () => {
+                Alert.alert('成功', '提现申请已提交');
+                loadData();
+              }
+            });
+          }
+        }
+      ],
+      'plain-text',
+      '0'
+    );
+  };
 
   if (!address) {
     return (
@@ -123,7 +217,7 @@ export default function ProviderDashboardScreen() {
           <Ionicons name="arrow-back" size={24} color={THEME.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>解卦师工作台</Text>
-        <TouchableOpacity style={styles.backBtn}>
+        <TouchableOpacity style={styles.backBtn} onPress={handleUpdateProfile}>
           <Ionicons name="settings-outline" size={22} color={THEME.text} />
         </TouchableOpacity>
       </View>
@@ -152,9 +246,21 @@ export default function ProviderDashboardScreen() {
                 <Text style={styles.name}>{providerInfo.name}</Text>
                 <TierBadge tier={providerInfo.tier} size="small" />
               </View>
-              <Text style={styles.ordersInfo}>
-                已完成 {providerInfo.completedOrders} 单
-              </Text>
+              <View style={styles.statusRowSmall}>
+                <Text style={styles.ordersInfo}>
+                  已完成 {providerInfo.completedOrders} 单
+                </Text>
+                <TouchableOpacity 
+                  style={[styles.statusChip, providerInfo.status === 'Active' ? styles.activeChip : styles.pausedChip]}
+                  onPress={handleToggleStatus}
+                  disabled={isProcessing}
+                >
+                  <View style={[styles.statusDot, providerInfo.status === 'Active' ? styles.activeDot : styles.pausedDot]} />
+                  <Text style={[styles.statusText, providerInfo.status === 'Active' ? styles.activeText : styles.pausedText]}>
+                    {providerInfo.status === 'Active' ? '服务中' : '已暂停'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </View>
@@ -189,7 +295,11 @@ export default function ProviderDashboardScreen() {
         <View style={[styles.balanceCard, SHADOWS.small]}>
           <View style={styles.balanceHeader}>
             <Text style={styles.balanceLabel}>可提现余额</Text>
-            <TouchableOpacity style={styles.withdrawBtn}>
+            <TouchableOpacity 
+              style={styles.withdrawBtn} 
+              onPress={handleWithdraw}
+              disabled={isProcessing}
+            >
               <Text style={styles.withdrawBtnText}>提现</Text>
             </TouchableOpacity>
           </View>
@@ -359,7 +469,47 @@ const styles = StyleSheet.create({
   ordersInfo: {
     fontSize: 13,
     color: THEME.textSecondary,
-    marginTop: 4,
+  },
+  statusRowSmall: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 6,
+  },
+  statusChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    gap: 4,
+  },
+  activeChip: {
+    backgroundColor: THEME.success + '15',
+  },
+  pausedChip: {
+    backgroundColor: THEME.warning + '15',
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  activeDot: {
+    backgroundColor: THEME.success,
+  },
+  pausedDot: {
+    backgroundColor: THEME.warning,
+  },
+  statusText: {
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  activeText: {
+    color: THEME.success,
+  },
+  pausedText: {
+    color: THEME.warning,
   },
   statsCard: {
     backgroundColor: THEME.card,

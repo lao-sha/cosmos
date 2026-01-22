@@ -2,9 +2,9 @@
 //!
 //! 本模块包含信用分数计算相关的辅助函数
 
-use crate::pallet::*;
+use crate::*;
 use crate::types::*;
-use frame_system::pallet_prelude::*;
+use frame_system::pallet_prelude::BlockNumberFor;
 
 #[allow(dead_code)]
 impl<T: Config> Pallet<T> {

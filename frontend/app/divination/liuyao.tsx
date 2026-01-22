@@ -119,7 +119,7 @@ export default function LiuyaoPage() {
     setShowTxStatus,
   } = useDivinationSave({
     divinationType: DivinationType.Liuyao,
-    historyRoute: '/divination/liuyao-list',
+    historyRoute: '/divination/history',
   });
 
   const isComplete = currentYaos.length >= 6;

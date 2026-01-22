@@ -31,6 +31,9 @@ pub mod pallet {
 
     /// 供其他 Pallet 内部调用的托管接口
     pub trait Escrow<AccountId, Balance> {
+        /// 获取托管账户地址
+        /// 函数级详细中文注释：返回托管 Pallet 的账户地址，用于外部模块进行押金操作
+        fn escrow_account() -> AccountId;
         /// 从付款人转入托管并记录
         /// 函数级详细中文注释：安全要求
         /// - 必须确保付款人余额充足（不足则返回 Error::Insufficient）
@@ -49,6 +52,12 @@ pub mod pallet {
         fn refund_all(id: u64, to: &AccountId) -> DispatchResult;
         /// 查询当前托管余额
         fn amount_of(id: u64) -> Balance;
+        /// 按比例分账：bps/10000 给 release_to，剩余给 refund_to
+        /// 函数级详细中文注释：用于仲裁部分裁决场景
+        /// - bps: 基点（10000 = 100%），表示 release_to 获得的比例
+        /// - release_to: 获得 bps/10000 比例的账户
+        /// - refund_to: 获得剩余比例的账户
+        fn split_partial(id: u64, release_to: &AccountId, refund_to: &AccountId, bps: u16) -> DispatchResult;
     }
 
     #[pallet::config]
@@ -142,12 +151,24 @@ pub mod pallet {
         ExpiryScheduled { id: u64, at: BlockNumberFor<T> },
         /// 函数级中文注释：到期已处理（id, action: 0=Release,1=Refund,2=Noop）。
         Expired { id: u64, action: u8 },
+        /// 函数级中文注释：按比例分账完成
+        PartialSplit {
+            id: u64,
+            release_to: T::AccountId,
+            release_amount: BalanceOf<T>,
+            refund_to: T::AccountId,
+            refund_amount: BalanceOf<T>,
+        },
     }
 
     #[pallet::error]
     pub enum Error<T> {
         Insufficient,
         NoLock,
+        /// 托管处于争议状态，禁止操作
+        DisputeActive,
+        /// 托管已关闭
+        AlreadyClosed,
     }
 
     /// 函数级中文注释：到期处理策略接口（由 runtime 实现）。
@@ -189,6 +210,9 @@ pub mod pallet {
     }
 
     impl<T: Config> Escrow<T::AccountId, BalanceOf<T>> for Pallet<T> {
+        fn escrow_account() -> T::AccountId {
+            Self::account()
+        }
         fn lock_from(payer: &T::AccountId, id: u64, amount: BalanceOf<T>) -> DispatchResult {
             // 函数级详细中文注释：从指定付款人向托管账户划转指定金额，并累加到 Locked[id]
             // - 余额校验：Currency::transfer 失败即返回 Error::Insufficient
@@ -229,10 +253,21 @@ pub mod pallet {
         }
         fn release_all(id: u64, to: &T::AccountId) -> DispatchResult {
             // 函数级详细中文注释：一次性释放全部托管余额给收款人
+            // 🆕 P2修复: 检查状态 - 争议中(1)禁止操作，已关闭(3)禁止重复操作
+            let state = LockStateOf::<T>::get(id);
+            ensure!(state != 1u8, Error::<T>::DisputeActive);
+            ensure!(state != 3u8, Error::<T>::AlreadyClosed);
+            
             let amount = Locked::<T>::take(id);
+            ensure!(!amount.is_zero(), Error::<T>::NoLock);
+            
             let escrow = Self::account();
             T::Currency::transfer(&escrow, to, amount, ExistenceRequirement::KeepAlive)
                 .map_err(|_| Error::<T>::NoLock)?;
+            
+            // 🆕 P2修复: 更新状态为 Closed(3)
+            LockStateOf::<T>::insert(id, 3u8);
+            
             Self::deposit_event(Event::Released {
                 id,
                 to: to.clone(),
@@ -242,10 +277,21 @@ pub mod pallet {
         }
         fn refund_all(id: u64, to: &T::AccountId) -> DispatchResult {
             // 函数级详细中文注释：一次性退回全部托管余额给收款人
+            // 🆕 P2修复: 检查状态 - 争议中(1)禁止操作，已关闭(3)禁止重复操作
+            let state = LockStateOf::<T>::get(id);
+            ensure!(state != 1u8, Error::<T>::DisputeActive);
+            ensure!(state != 3u8, Error::<T>::AlreadyClosed);
+            
             let amount = Locked::<T>::take(id);
+            ensure!(!amount.is_zero(), Error::<T>::NoLock);
+            
             let escrow = Self::account();
             T::Currency::transfer(&escrow, to, amount, ExistenceRequirement::KeepAlive)
                 .map_err(|_| Error::<T>::NoLock)?;
+            
+            // 🆕 P2修复: 更新状态为 Closed(3)
+            LockStateOf::<T>::insert(id, 3u8);
+            
             Self::deposit_event(Event::Refunded {
                 id,
                 to: to.clone(),
@@ -255,6 +301,53 @@ pub mod pallet {
         }
         fn amount_of(id: u64) -> BalanceOf<T> {
             Locked::<T>::get(id)
+        }
+        fn split_partial(
+            id: u64,
+            release_to: &T::AccountId,
+            refund_to: &T::AccountId,
+            bps: u16,
+        ) -> DispatchResult {
+            // 函数级详细中文注释：按比例分账
+            // - bps: 基点（10000 = 100%），release_to 获得 bps/10000，refund_to 获得剩余
+            // - 使用 Permill 进行安全的比例计算
+            // 🆕 P2修复: 检查状态 - 已关闭(3)禁止重复操作（争议中允许分账裁决）
+            let state = LockStateOf::<T>::get(id);
+            ensure!(state != 3u8, Error::<T>::AlreadyClosed);
+            
+            let total = Locked::<T>::take(id);
+            ensure!(!total.is_zero(), Error::<T>::NoLock);
+            
+            let escrow = Self::account();
+            
+            // 计算 release_to 获得的金额
+            let release_amount = sp_runtime::Permill::from_parts((bps as u32) * 100)
+                .mul_floor(total);
+            let refund_amount = total.saturating_sub(release_amount);
+            
+            // 转账给 release_to
+            if !release_amount.is_zero() {
+                T::Currency::transfer(&escrow, release_to, release_amount, ExistenceRequirement::AllowDeath)
+                    .map_err(|_| Error::<T>::Insufficient)?;
+            }
+            
+            // 转账给 refund_to
+            if !refund_amount.is_zero() {
+                T::Currency::transfer(&escrow, refund_to, refund_amount, ExistenceRequirement::AllowDeath)
+                    .map_err(|_| Error::<T>::Insufficient)?;
+            }
+            
+            // 🆕 P2修复: 更新状态为 Closed(3)
+            LockStateOf::<T>::insert(id, 3u8);
+            
+            Self::deposit_event(Event::PartialSplit {
+                id,
+                release_to: release_to.clone(),
+                release_amount,
+                refund_to: refund_to.clone(),
+                refund_amount,
+            });
+            Ok(())
         }
     }
 

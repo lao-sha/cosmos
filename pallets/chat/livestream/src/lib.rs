@@ -40,7 +40,8 @@ use frame_support::{
     PalletId,
 };
 use frame_system::pallet_prelude::*;
-use sp_runtime::traits::{AccountIdConversion, Saturating, Zero};
+use sp_runtime::traits::{AccountIdConversion, Saturating, Zero, SaturatedConversion};
+use pallet_trading_common::PricingProvider;
 
 pub use pallet::*;
 pub use types::*;
@@ -98,9 +99,16 @@ pub mod pallet {
         #[pallet::constant]
         type MinWithdrawAmount: Get<BalanceOf<Self>>;
 
-        /// 创建直播间押金
+        /// 创建直播间保证金兜底值（DUST数量，pricing不可用时使用）
         #[pallet::constant]
-        type RoomDeposit: Get<BalanceOf<Self>>;
+        type RoomBond: Get<BalanceOf<Self>>;
+
+        /// 创建直播间保证金USD价值（精度10^6，100_000_000 = 100 USDT）
+        #[pallet::constant]
+        type RoomBondUsd: Get<u64>;
+
+        /// 定价接口（用于换算保证金）
+        type Pricing: PricingProvider<BalanceOf<Self>>;
 
         /// Pallet ID (用于生成模块账户)
         #[pallet::constant]
@@ -111,6 +119,10 @@ pub mod pallet {
 
         /// 权重信息
         type WeightInfo: WeightInfo;
+
+        // 注意：直播间数据是临时数据，直播结束后即废弃，不适合 IPFS PIN
+        // 原因：直播结束后封面图无用，继续 PIN 会造成存储浪费
+        // 建议：前端直接上传到公共 IPFS 网关，链上仅存 CID 引用
     }
 
     // ============ 存储 ============
@@ -140,6 +152,17 @@ pub mod pallet {
     #[pallet::storage]
     #[pallet::getter(fn next_room_id)]
     pub type NextRoomId<T: Config> = StorageValue<_, u64, ValueQuery>;
+
+    /// 直播间保证金记录
+    #[pallet::storage]
+    #[pallet::getter(fn room_deposits)]
+    pub type RoomDeposits<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64, // room_id
+        (T::AccountId, BalanceOf<T>), // (depositor, amount)
+        OptionQuery,
+    >;
 
     /// 礼物定义
     #[pallet::storage]
@@ -320,6 +343,25 @@ pub mod pallet {
             room_id: u64,
             reason: Vec<u8>,
         },
+        /// 直播间保证金被扣除（投诉裁决）
+        RoomBondSlashed {
+            room_id: u64,
+            host: T::AccountId,
+            amount: BalanceOf<T>,
+        },
+        /// 超额保证金已提取
+        ExcessBondWithdrawn {
+            room_id: u64,
+            host: T::AccountId,
+            withdrawn: BalanceOf<T>,
+            remaining: BalanceOf<T>,
+        },
+        /// 保证金被罚没（封禁）
+        BondConfiscated {
+            room_id: u64,
+            host: T::AccountId,
+            amount: BalanceOf<T>,
+        },
         /// 连麦已开始
         CoHostStarted {
             room_id: u64,
@@ -408,6 +450,8 @@ pub mod pallet {
         InvalidTicketPrice,
         /// 数量无效
         InvalidQuantity,
+        /// 没有超额保证金可提取
+        NoBondExcess,
     }
 
     // ============ 调用函数 ============
@@ -454,13 +498,31 @@ pub mod pallet {
                 );
             }
 
-            // 锁定押金
-            let deposit = T::RoomDeposit::get();
-            T::Currency::reserve(&host, deposit)?;
+            // 锁定保证金：使用pricing换算100 USDT价值的DUST
+            let min_bond = T::RoomBond::get();
+            let bond_usd = T::RoomBondUsd::get(); // 100_000_000 (100 USDT)
+            
+            let bond = if let Some(price) = T::Pricing::get_dust_to_usd_rate() {
+                let price_u128: u128 = price.saturated_into();
+                if price_u128 > 0u128 {
+                    let required_u128 = (bond_usd as u128).saturating_mul(1_000_000u128) / price_u128;
+                    let required: BalanceOf<T> = required_u128.saturated_into();
+                    if required > min_bond { required } else { min_bond }
+                } else {
+                    min_bond
+                }
+            } else {
+                min_bond
+            };
+            
+            T::Currency::reserve(&host, bond)?;
 
             // 生成直播间 ID
             let room_id = NextRoomId::<T>::get();
             NextRoomId::<T>::put(room_id.saturating_add(1));
+            
+            // 记录保证金
+            RoomDeposits::<T>::insert(room_id, (host.clone(), bond));
 
             let current_block = <frame_system::Pallet<T>>::block_number();
 
@@ -484,6 +546,10 @@ pub mod pallet {
 
             LiveRooms::<T>::insert(room_id, room);
             HostRoom::<T>::insert(&host, room_id);
+
+            // 注意：不 PIN 直播间封面到 IPFS
+            // 原因：直播间是临时数据，直播结束后封面即废弃，PIN 会造成存储浪费
+            // 前端应直接上传到公共 IPFS 网关，链上仅存 CID 引用
 
             Self::deposit_event(Event::RoomCreated {
                 host,
@@ -592,9 +658,10 @@ pub mod pallet {
                 // 移除主播的活跃直播间记录
                 HostRoom::<T>::remove(&host);
 
-                // 解锁押金
-                let deposit = T::RoomDeposit::get();
-                T::Currency::unreserve(&host, deposit);
+                // 解锁保证金
+                if let Some((depositor, amount)) = RoomDeposits::<T>::take(room_id) {
+                    T::Currency::unreserve(&depositor, amount);
+                }
 
                 Self::deposit_event(Event::LiveEnded {
                     room_id,
@@ -865,6 +932,8 @@ pub mod pallet {
         }
 
         /// 封禁直播间 (管理员)
+        /// 
+        /// 封禁时罚没全部保证金到平台国库
         #[pallet::call_index(40)]
         #[pallet::weight(T::WeightInfo::ban_room())]
         pub fn ban_room(
@@ -884,6 +953,26 @@ pub mod pallet {
 
                 // 移除主播的活跃直播间记录
                 HostRoom::<T>::remove(&room.host);
+
+                // 🆕 罚没保证金到平台国库
+                if let Some((host, bond_amount)) = RoomDeposits::<T>::take(room_id) {
+                    // 解锁保证金
+                    let actually_slashed = T::Currency::unreserve(&host, bond_amount);
+                    // 转入平台国库
+                    if !actually_slashed.is_zero() {
+                        let _ = T::Currency::transfer(
+                            &host,
+                            &Self::account_id(),
+                            actually_slashed,
+                            ExistenceRequirement::AllowDeath,
+                        );
+                    }
+                    Self::deposit_event(Event::BondConfiscated {
+                        room_id,
+                        host: host.clone(),
+                        amount: actually_slashed,
+                    });
+                }
 
                 Self::deposit_event(Event::RoomBanned {
                     room_id,
@@ -1022,6 +1111,69 @@ pub mod pallet {
 
             Ok(())
         }
+
+        // 注：举报功能已迁移到统一仲裁模块 (pallet-arbitration)
+        // 使用 arbitration.file_complaint 替代原有的 report_room 等函数
+
+        /// 提取超额保证金
+        /// 
+        /// 当 DUST 价值上涨后，主播可以提取超过所需 USD 价值的保证金部分。
+        /// 保证金将调整为当前价格下 5 USDT 对应的 DUST 数量。
+        #[pallet::call_index(62)]
+        #[pallet::weight(Weight::from_parts(10_000, 0))]
+        pub fn withdraw_excess_bond(
+            origin: OriginFor<T>,
+            room_id: u64,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            
+            // 验证直播间存在
+            let room = LiveRooms::<T>::get(room_id)
+                .ok_or(Error::<T>::RoomNotFound)?;
+            
+            // 验证调用者是主播
+            ensure!(room.host == who, Error::<T>::NotRoomHost);
+            
+            // 获取当前保证金
+            let (host, current_bond) = RoomDeposits::<T>::get(room_id)
+                .ok_or(Error::<T>::RoomNotFound)?;
+            
+            // 计算当前所需保证金（基于 USD 价值）
+            let min_bond = T::RoomBond::get();
+            let bond_usd = T::RoomBondUsd::get();
+            
+            let required_bond = if let Some(price) = T::Pricing::get_dust_to_usd_rate() {
+                let price_u128: u128 = price.saturated_into();
+                if price_u128 > 0u128 {
+                    let required_u128 = (bond_usd as u128).saturating_mul(1_000_000u128) / price_u128;
+                    let required: BalanceOf<T> = required_u128.saturated_into();
+                    if required > min_bond { required } else { min_bond }
+                } else {
+                    min_bond
+                }
+            } else {
+                min_bond
+            };
+            
+            // 计算可提取的超额部分
+            ensure!(current_bond > required_bond, Error::<T>::NoBondExcess);
+            let excess = current_bond.saturating_sub(required_bond);
+            
+            // 解锁超额保证金
+            T::Currency::unreserve(&host, excess);
+            
+            // 更新保证金记录
+            RoomDeposits::<T>::insert(room_id, (host.clone(), required_bond));
+            
+            Self::deposit_event(Event::ExcessBondWithdrawn {
+                room_id,
+                host,
+                withdrawn: excess,
+                remaining: required_bond,
+            });
+            
+            Ok(())
+        }
     }
 
     // ============ 辅助函数 ============
@@ -1126,6 +1278,67 @@ pub mod pallet {
         /// 获取直播间连麦者列表
         pub fn get_co_host_list(room_id: u64) -> Vec<T::AccountId> {
             ActiveCoHosts::<T>::get(room_id).into_inner()
+        }
+    }
+
+    // ==================== 🆕 仲裁集成：保证金扣除接口 ====================
+
+    impl<T: Config> Pallet<T> {
+        /// 投诉裁决后扣除主播保证金
+        /// 
+        /// ## 参数
+        /// - `room_id`: 直播间ID
+        /// - `slash_bps`: 扣除比例（基点，5000 = 50%）
+        /// - `to_complainant`: 赔付目标账户（投诉方）
+        /// 
+        /// ## 返回
+        /// - `Ok(slashed_amount)`: 实际扣除金额
+        pub fn slash_room_bond(
+            room_id: u64,
+            slash_bps: u16,
+            to_complainant: Option<&T::AccountId>,
+        ) -> Result<BalanceOf<T>, DispatchError> {
+            let (host, bond_amount) = RoomDeposits::<T>::get(room_id)
+                .ok_or(Error::<T>::RoomNotFound)?;
+            
+            // 计算扣除金额
+            let slash_amount = sp_runtime::Permill::from_parts((slash_bps as u32) * 100)
+                .mul_floor(bond_amount);
+            
+            if slash_amount.is_zero() {
+                return Ok(Zero::zero());
+            }
+            
+            // 从保证金中扣除（unreserve 后转移）
+            let actually_slashed = T::Currency::unreserve(&host, slash_amount);
+            
+            // 赔付给投诉方
+            if let Some(complainant) = to_complainant {
+                if !actually_slashed.is_zero() {
+                    let _ = T::Currency::transfer(
+                        &host,
+                        complainant,
+                        actually_slashed,
+                        ExistenceRequirement::AllowDeath,
+                    );
+                }
+            }
+            
+            // 更新保证金记录
+            let remaining = bond_amount.saturating_sub(actually_slashed);
+            if remaining.is_zero() {
+                RoomDeposits::<T>::remove(room_id);
+            } else {
+                RoomDeposits::<T>::insert(room_id, (host.clone(), remaining));
+            }
+            
+            Self::deposit_event(Event::RoomBondSlashed {
+                room_id,
+                host,
+                amount: actually_slashed,
+            });
+            
+            Ok(actually_slashed)
         }
     }
 }

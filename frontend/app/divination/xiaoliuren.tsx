@@ -176,7 +176,7 @@ export default function XiaoliurenPage() {
     setShowTxStatus,
   } = useDivinationSave({
     divinationType: DivinationType.Xiaoliuren,
-    historyRoute: '/divination/xiaoliuren-list',
+    historyRoute: '/divination/history',
   });
 
   // 掐算

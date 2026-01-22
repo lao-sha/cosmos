@@ -94,27 +94,38 @@ pub fn calculate_day_ganzhi(year: u16, month: u8, day: u8) -> Option<GanZhi> {
 ///
 /// # 注意
 ///
-/// 本函数使用简化的立春判断：
-/// - 立春一般在公历2月3-5日之间
-/// - 本实现简单判断：2月4日及以后视为立春后
-/// - 生产环境应使用精确的节气计算（寿星天文算法）
+/// ✅ 本函数使用寿星天文历算法精确计算立春时间：
+/// - 通过 get_month_zhi_by_jieqi 获取精确的立春时刻
+/// - 精度达到分钟级别
+/// - 正确处理立春边界日期（如 2月3日23:59 vs 2月4日00:01）
 pub fn calculate_year_ganzhi(year: u16, month: u8, day: u8) -> Option<GanZhi> {
+	calculate_year_ganzhi_with_hour(year, month, day, 12)
+}
+
+/// 计算年柱干支（带小时参数）
+///
+/// 此函数允许指定小时，用于更精确的立春边界判断。
+///
+/// # 参数
+///
+/// - `year`: 公历年份
+/// - `month`: 公历月份 (1-12)
+/// - `day`: 公历日期 (1-31)
+/// - `hour`: 小时 (0-23)
+///
+/// # 返回
+///
+/// - `Some(GanZhi)`: 成功计算的年柱干支
+/// - `None`: 参数无效或计算失败
+pub fn calculate_year_ganzhi_with_hour(year: u16, month: u8, day: u8, hour: u8) -> Option<GanZhi> {
 	// 参数验证
-	if month < 1 || month > 12 || day < 1 || day > 31 {
+	if month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 {
 		return None;
 	}
 
-	// 确定八字年份（考虑立春边界）
-	let bazi_year = if month < 2 {
-		// 1月：还在前一年
-		year.checked_sub(1)?
-	} else if month == 2 && day < 4 {
-		// 2月1-3日：可能还在前一年（简化判断）
-		year.checked_sub(1)?
-	} else {
-		// 2月4日及以后：当前年份
-		year
-	};
+	// 使用精确节气计算获取调整后的年份
+	// get_month_zhi_by_jieqi 会根据立春精确时刻判断是否属于上一年
+	let (_, bazi_year) = get_month_zhi_by_jieqi(year, month, day, hour);
 
 	// 计算年柱干支
 	// 公元4年 = 甲子年（GanZhi index 0）

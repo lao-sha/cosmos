@@ -5,7 +5,7 @@
 //! ## 版本历史
 //! - v0.1.0 (2026-01-18): 初始版本，从 OTC/Swap/Maker 模块提取
 
-use sp_runtime::DispatchResult;
+use sp_runtime::{DispatchResult, DispatchError};
 use crate::types::MakerApplicationInfo;
 
 /// 函数级详细中文注释：定价服务接口
@@ -27,6 +27,18 @@ pub trait PricingProvider<Balance> {
     /// - `Some(rate)`: 当前汇率（如 1_000_000 表示 1 DUST = 1 USD）
     /// - `None`: 价格不可用（冷启动期或无数据）
     fn get_dust_to_usd_rate() -> Option<Balance>;
+    
+    /// 上报 Swap 交易到价格聚合
+    ///
+    /// ## 参数
+    /// - `timestamp`: 交易时间戳（Unix 毫秒）
+    /// - `price_usdt`: USDT 单价（精度 10^6）
+    /// - `dust_qty`: DUST 数量（精度 10^12）
+    ///
+    /// ## 返回
+    /// - `Ok(())`: 成功
+    /// - `Err`: 失败
+    fn report_swap_order(timestamp: u64, price_usdt: u64, dust_qty: u128) -> sp_runtime::DispatchResult;
 }
 
 /// 函数级详细中文注释：Maker Pallet 接口
@@ -70,6 +82,16 @@ pub trait MakerInterface<AccountId, Balance> {
     /// - `Some(maker_id)`: 做市商ID
     /// - `None`: 该账户不是做市商
     fn get_maker_id(who: &AccountId) -> Option<u64>;
+    
+    /// 获取做市商押金的 USD 价值（精度 10^6）
+    ///
+    /// ## 参数
+    /// - `maker_id`: 做市商ID
+    ///
+    /// ## 返回
+    /// - `Ok(usd_value)`: 押金USD价值
+    /// - `Err(...)`: 做市商不存在或查询失败
+    fn get_deposit_usd_value(maker_id: u64) -> Result<u64, DispatchError>;
 }
 
 /// 函数级详细中文注释：做市商信用接口
@@ -126,6 +148,10 @@ impl<Balance> PricingProvider<Balance> for () {
     fn get_dust_to_usd_rate() -> Option<Balance> {
         None
     }
+    
+    fn report_swap_order(_timestamp: u64, _price_usdt: u64, _dust_qty: u128) -> sp_runtime::DispatchResult {
+        Ok(())
+    }
 }
 
 /// MakerInterface 的空实现
@@ -140,6 +166,10 @@ impl<AccountId, Balance> MakerInterface<AccountId, Balance> for () {
     
     fn get_maker_id(_who: &AccountId) -> Option<u64> {
         None
+    }
+    
+    fn get_deposit_usd_value(_maker_id: u64) -> Result<u64, DispatchError> {
+        Err(sp_runtime::DispatchError::Other("NotImplemented"))
     }
 }
 

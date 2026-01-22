@@ -15,7 +15,10 @@ pub mod pallet {
     use frame_support::{pallet_prelude::*, BoundedVec};
     use frame_system::pallet_prelude::*;
     use pallet_escrow::pallet::Escrow as EscrowTrait;
-    use sp_runtime::Saturating;
+    use pallet_stardust_ipfs::CidLockManager;
+    use pallet_trading_common::PricingProvider;
+    use sp_runtime::{Saturating, SaturatedConversion};
+    use pallet_storage_lifecycle::block_to_year_month;
     // 基准模块在 pallet 外部声明；此处不在 proc-macro 输入中声明子模块，避免 E0658
 
     #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen)]
@@ -24,6 +27,364 @@ pub mod pallet {
         Refund,
         Partial(u16),
     } // bps
+
+    // ============================================================================
+    // 🆕 Phase 1-4: 统一投诉系统类型定义
+    // ============================================================================
+
+    /// 业务域常量 (12个域)
+    pub mod domains {
+        /// OTC 交易投诉域
+        pub const OTC_ORDER: [u8; 8] = *b"otc_ord_";
+        /// 直播投诉域
+        pub const LIVESTREAM: [u8; 8] = *b"livstrm_";
+        /// 占卜服务投诉域
+        pub const DIVINATION: [u8; 8] = *b"divine__";
+        /// 聊天投诉域（私聊）
+        pub const CHAT: [u8; 8] = *b"chat____";
+        /// 做市商投诉域
+        pub const MAKER: [u8; 8] = *b"maker___";
+        /// NFT 交易投诉域
+        pub const NFT_TRADE: [u8; 8] = *b"nft_trd_";
+        /// 群组投诉域
+        pub const CHAT_GROUP: [u8; 8] = *b"chatgrp_";
+        /// Swap 交换投诉域
+        pub const SWAP: [u8; 8] = *b"swap____";
+        /// 联系人投诉域
+        pub const CONTACT: [u8; 8] = *b"contact_";
+        /// 会员投诉域
+        pub const MEMBER: [u8; 8] = *b"member__";
+        /// 推荐分成投诉域
+        pub const AFFILIATE: [u8; 8] = *b"affiliat";
+        /// 信用系统申诉域
+        pub const CREDIT: [u8; 8] = *b"credit__";
+        /// 其他
+        pub const OTHER: [u8; 8] = *b"other___";
+    }
+
+    /// 统一投诉类型枚举 (56种类型，覆盖12个业务域)
+    /// 
+    /// 设计原则：
+    /// - 按业务域分组，保持原有语义
+    /// - 每个类型与原模块类型一一对应
+    /// - 前端可根据域筛选显示
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    pub enum ComplaintType {
+        // ========== OTC 交易投诉 (域: otc_ord_) ==========
+        /// 卖家未放币
+        OtcSellerNotDeliver,
+        /// 买家虚假付款声明
+        OtcBuyerFalseClaim,
+        /// OTC 交易欺诈
+        OtcTradeFraud,
+        /// OTC 价格争议
+        OtcPriceDispute,
+        
+        // ========== 直播投诉 (域: livstrm_) ==========
+        /// 直播违规内容
+        LiveIllegalContent,
+        /// 直播虚假宣传
+        LiveFalseAdvertising,
+        /// 直播骚扰观众
+        LiveHarassment,
+        /// 直播诈骗
+        LiveFraud,
+        /// 礼物退款请求
+        LiveGiftRefund,
+        /// 直播其他违规
+        LiveOther,
+        
+        // ========== 占卜服务投诉 (域: divine__) ==========
+        /// 色情内容
+        DivinePornography,
+        /// 赌博相关
+        DivineGambling,
+        /// 毒品/违禁品
+        DivineDrugs,
+        /// 诈骗行为
+        DivineFraud,
+        /// 虚假宣传
+        DivineFalseAdvertising,
+        /// 辱骂/人身攻击
+        DivineAbuse,
+        /// 泄露用户隐私
+        DivinePrivacyBreach,
+        /// 政治敏感内容
+        DivinePoliticalContent,
+        /// 封建迷信/过度恐吓
+        DivineSuperstition,
+        /// 服务未完成
+        DivineServiceNotCompleted,
+        /// 占卜服务其他
+        DivineOther,
+        
+        // ========== 聊天投诉 (域: chat____) ==========
+        /// 聊天骚扰
+        ChatHarassment,
+        /// 聊天诈骗
+        ChatFraud,
+        /// 聊天违规内容
+        ChatIllegalContent,
+        /// 私聊骚扰消息
+        ChatPrivateHarassment,
+        /// 被拉黑申诉
+        ChatBlockAppeal,
+        /// 聊天其他
+        ChatOther,
+        
+        // ========== 群组投诉 (域: chatgrp_) ==========
+        /// 群组违规内容
+        GroupIllegalContent,
+        /// 群组骚扰成员
+        GroupHarassment,
+        /// 群组诈骗
+        GroupFraud,
+        /// 群组垃圾信息
+        GroupSpam,
+        /// 群组仇恨言论
+        GroupHateSpeech,
+        /// 群主滥权
+        GroupAdminAbuse,
+        /// 群组其他
+        GroupOther,
+        
+        // ========== 做市商投诉 (域: maker___) ==========
+        /// 做市商信用违约
+        MakerCreditDefault,
+        /// 做市商恶意操作
+        MakerMaliciousOperation,
+        /// 做市商虚假报价
+        MakerFalseQuote,
+        
+        // ========== NFT 交易投诉 (域: nft_trd_) ==========
+        /// NFT 卖家未交付
+        NftSellerNotDeliver,
+        /// NFT 假冒/盗版
+        NftCounterfeit,
+        /// NFT 交易欺诈
+        NftTradeFraud,
+        /// NFT 拍卖/出价争议
+        NftAuctionDispute,
+        
+        // ========== Swap 交换投诉 (域: swap____) ==========
+        /// Swap 做市商未完成交换
+        SwapMakerNotComplete,
+        /// Swap 验证超时
+        SwapVerificationTimeout,
+        /// Swap 交换欺诈
+        SwapFraud,
+        
+        // ========== 联系人投诉 (域: contact_) ==========
+        /// 好友请求骚扰
+        ContactRequestHarassment,
+        /// 被误拉黑申诉
+        ContactBlockAppeal,
+        
+        // ========== 会员投诉 (域: member__) ==========
+        /// 会员权益未兑现
+        MemberBenefitNotProvided,
+        /// 会员服务质量问题
+        MemberServiceQuality,
+        
+        // ========== 推荐分成投诉 (域: affiliat) ==========
+        /// 佣金分配争议
+        AffiliateCommissionDispute,
+        /// 推荐关系争议
+        AffiliateRelationDispute,
+        
+        // ========== 信用系统申诉 (域: credit__) ==========
+        /// 信用评分争议
+        CreditScoreDispute,
+        /// 被错误惩罚申诉
+        CreditPenaltyAppeal,
+        
+        // ========== 其他 ==========
+        /// 其他投诉
+        Other,
+    }
+
+    impl ComplaintType {
+        /// 获取所属业务域
+        pub fn domain(&self) -> [u8; 8] {
+            match self {
+                // OTC 交易
+                Self::OtcSellerNotDeliver | Self::OtcBuyerFalseClaim | 
+                Self::OtcTradeFraud | Self::OtcPriceDispute => domains::OTC_ORDER,
+                
+                // 直播
+                Self::LiveIllegalContent | Self::LiveFalseAdvertising | 
+                Self::LiveHarassment | Self::LiveFraud | 
+                Self::LiveGiftRefund | Self::LiveOther => domains::LIVESTREAM,
+                
+                // 占卜服务
+                Self::DivinePornography | Self::DivineGambling | Self::DivineDrugs |
+                Self::DivineFraud | Self::DivineFalseAdvertising | Self::DivineAbuse |
+                Self::DivinePrivacyBreach | Self::DivinePoliticalContent |
+                Self::DivineSuperstition | Self::DivineServiceNotCompleted |
+                Self::DivineOther => domains::DIVINATION,
+                
+                // 聊天
+                Self::ChatHarassment | Self::ChatFraud | Self::ChatIllegalContent |
+                Self::ChatPrivateHarassment | Self::ChatBlockAppeal |
+                Self::ChatOther => domains::CHAT,
+                
+                // 群组
+                Self::GroupIllegalContent | Self::GroupHarassment | Self::GroupFraud |
+                Self::GroupSpam | Self::GroupHateSpeech | Self::GroupAdminAbuse |
+                Self::GroupOther => domains::CHAT_GROUP,
+                
+                // 做市商
+                Self::MakerCreditDefault | Self::MakerMaliciousOperation |
+                Self::MakerFalseQuote => domains::MAKER,
+                
+                // NFT 交易
+                Self::NftSellerNotDeliver | Self::NftCounterfeit |
+                Self::NftTradeFraud | Self::NftAuctionDispute => domains::NFT_TRADE,
+                
+                // Swap 交换
+                Self::SwapMakerNotComplete | Self::SwapVerificationTimeout |
+                Self::SwapFraud => domains::SWAP,
+                
+                // 联系人
+                Self::ContactRequestHarassment | Self::ContactBlockAppeal => domains::CONTACT,
+                
+                // 会员
+                Self::MemberBenefitNotProvided | Self::MemberServiceQuality => domains::MEMBER,
+                
+                // 推荐分成
+                Self::AffiliateCommissionDispute | Self::AffiliateRelationDispute => domains::AFFILIATE,
+                
+                // 信用系统
+                Self::CreditScoreDispute | Self::CreditPenaltyAppeal => domains::CREDIT,
+                
+                // 其他
+                Self::Other => domains::OTHER,
+            }
+        }
+        
+        /// 获取惩罚比例（基点，10000 = 100%）
+        pub fn penalty_rate(&self) -> u16 {
+            match self {
+                // 严重违规，全额罚没
+                Self::DivineDrugs => 10000,
+                // 重度违规，80%罚没
+                Self::DivinePornography | Self::DivineGambling | 
+                Self::OtcTradeFraud | Self::DivineFraud => 8000,
+                // 中度违规，50%罚没
+                Self::LiveIllegalContent | Self::GroupIllegalContent |
+                Self::MakerMaliciousOperation => 5000,
+                // 轻度违规，30%罚没
+                _ => 3000,
+            }
+        }
+        
+        /// 是否触发永久封禁
+        pub fn triggers_permanent_ban(&self) -> bool {
+            matches!(self, Self::DivineDrugs | Self::OtcTradeFraud | Self::DivineFraud)
+        }
+    }
+
+    /// 投诉状态枚举（精简版）
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    pub enum ComplaintStatus {
+        /// 已提交，等待响应
+        #[default]
+        Submitted,
+        /// 已响应/申诉
+        Responded,
+        /// 调解中
+        Mediating,
+        /// 仲裁中
+        Arbitrating,
+        /// 已解决 - 投诉方胜诉
+        ResolvedComplainantWin,
+        /// 已解决 - 被投诉方胜诉
+        ResolvedRespondentWin,
+        /// 已解决 - 和解
+        ResolvedSettlement,
+        /// 已撤销
+        Withdrawn,
+        /// 已过期
+        Expired,
+    }
+
+    impl ComplaintStatus {
+        pub fn is_resolved(&self) -> bool {
+            matches!(self, 
+                Self::ResolvedComplainantWin | 
+                Self::ResolvedRespondentWin | 
+                Self::ResolvedSettlement |
+                Self::Withdrawn |
+                Self::Expired
+            )
+        }
+    }
+
+    /// 投诉记录（精简版，链上存储优化）
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    #[scale_info(skip_type_params(T))]
+    pub struct Complaint<T: Config> {
+        /// 投诉唯一ID
+        pub id: u64,
+        /// 业务域标识
+        pub domain: [u8; 8],
+        /// 业务对象ID
+        pub object_id: u64,
+        /// 投诉类型
+        pub complaint_type: ComplaintType,
+        /// 投诉发起人
+        pub complainant: T::AccountId,
+        /// 被投诉人
+        pub respondent: T::AccountId,
+        /// 详情CID（指向IPFS完整内容）
+        pub details_cid: BoundedVec<u8, T::MaxCidLen>,
+        /// 涉及金额
+        pub amount: Option<BalanceOf<T>>,
+        /// 当前状态
+        pub status: ComplaintStatus,
+        /// 创建时间
+        pub created_at: BlockNumberFor<T>,
+        /// 响应截止时间
+        pub response_deadline: BlockNumberFor<T>,
+        /// 最后更新时间
+        pub updated_at: BlockNumberFor<T>,
+    }
+
+    /// 归档投诉摘要（超精简，~38字节）
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    pub struct ArchivedComplaint {
+        /// 投诉ID
+        pub id: u64,
+        /// 业务域
+        pub domain: [u8; 8],
+        /// 业务对象ID
+        pub object_id: u64,
+        /// 裁决结果 (0=投诉方胜, 1=被投诉方胜, 2=和解, 3=撤销, 4=过期)
+        pub decision: u8,
+        /// 解决时间（区块号）
+        pub resolved_at: u32,
+        /// 年月（YYMM格式）
+        pub year_month: u16,
+    }
+
+    /// 域统计信息
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    pub struct DomainStatistics {
+        /// 总投诉数
+        pub total_complaints: u64,
+        /// 已解决数
+        pub resolved_count: u64,
+        /// 投诉方胜诉数
+        pub complainant_wins: u64,
+        /// 被投诉方胜诉数
+        pub respondent_wins: u64,
+        /// 和解数
+        pub settlements: u64,
+        /// 过期数
+        pub expired_count: u64,
+    }
+
+    // ============================================================================
 
     /// 仲裁域路由接口：由 runtime 实现，根据域将仲裁请求路由到对应业务 pallet
     ///
@@ -42,6 +403,8 @@ pub mod pallet {
         fn get_counterparty(domain: [u8; 8], initiator: &AccountId, id: u64) -> Result<AccountId, DispatchError>;
         /// 🆕 获取订单/交易金额（用于计算押金）
         fn get_order_amount(domain: [u8; 8], id: u64) -> Result<Balance, DispatchError>;
+        /// 🆕 获取做市商ID（用于信用分更新，仅OTC域有效）
+        fn get_maker_id(_domain: [u8; 8], _id: u64) -> Option<u64> { None }
     }
 
     #[pallet::config]
@@ -75,8 +438,48 @@ pub mod pallet {
         type RejectedSlashBps: Get<u16>;
         /// 部分胜诉罚没比例（基点，5000 = 50%）
         type PartialSlashBps: Get<u16>;
+        /// 投诉押金兜底金额（DUST数量，pricing不可用时使用）
+        #[pallet::constant]
+        type ComplaintDeposit: Get<BalanceOf<Self>>;
+        /// 投诉押金USD价值（精度10^6，1_000_000 = 1 USDT）
+        #[pallet::constant]
+        type ComplaintDepositUsd: Get<u64>;
+        /// 定价接口（用于换算投诉押金）
+        type Pricing: pallet_trading_common::PricingProvider<BalanceOf<Self>>;
+        /// 投诉败诉罚没比例（基点，5000 = 50%）
+        #[pallet::constant]
+        type ComplaintSlashBps: Get<u16>;
         /// 国库账户
         type TreasuryAccount: Get<Self::AccountId>;
+        
+        /// 🆕 P2: CID 锁定管理器（仲裁期间锁定证据 CID）
+        /// 
+        /// 功能：
+        /// - 发起仲裁时自动锁定相关证据 CID
+        /// - 仲裁完成后自动解锁
+        /// - 防止仲裁期间证据被删除
+        type CidLockManager: pallet_stardust_ipfs::CidLockManager<Self::Hash, BlockNumberFor<Self>>;
+        
+        /// 🆕 信用分更新器（仲裁结果反馈到信用系统）
+        /// 
+        /// 功能：
+        /// - 做市商败诉时扣除信用分
+        /// - 做市商胜诉时可选加分
+        type CreditUpdater: CreditUpdater;
+    }
+    
+    /// 信用分更新接口
+    pub trait CreditUpdater {
+        /// 记录做市商争议结果
+        /// - maker_id: 做市商ID
+        /// - order_id: 订单ID
+        /// - maker_win: 做市商是否胜诉
+        fn record_maker_dispute_result(maker_id: u64, order_id: u64, maker_win: bool) -> DispatchResult;
+    }
+    
+    /// 空实现（用于不需要信用集成的场景）
+    impl CreditUpdater for () {
+        fn record_maker_dispute_result(_: u64, _: u64, _: bool) -> DispatchResult { Ok(()) }
     }
 
     pub type BalanceOf<T> =
@@ -91,6 +494,38 @@ pub mod pallet {
         DisputeInitiator,
         /// 应诉方押金
         DisputeRespondent,
+        /// 投诉押金（防止恶意投诉）
+        ComplaintDeposit,
+    }
+
+    /// 🆕 存储膨胀防护：归档仲裁记录（精简版）
+    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    pub struct ArchivedDispute {
+        /// 域（业务类型）
+        pub domain: [u8; 8],
+        /// 对象ID
+        pub object_id: u64,
+        /// 裁决结果 (0=Release, 1=Refund, 2=Partial)
+        pub decision: u8,
+        /// 部分裁决比例（基点）
+        pub partial_bps: u16,
+        /// 完成区块
+        pub completed_at: u32,
+        /// 年月 (YYMM格式)
+        pub year_month: u16,
+    }
+
+    /// 🆕 存储膨胀防护：仲裁永久统计
+    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    pub struct ArbitrationPermanentStats {
+        /// 总仲裁数
+        pub total_disputes: u64,
+        /// Release裁决数
+        pub release_count: u64,
+        /// Refund裁决数
+        pub refund_count: u64,
+        /// Partial裁决数
+        pub partial_count: u64,
     }
 
     /// 🆕 双向押金记录
@@ -131,6 +566,21 @@ pub mod pallet {
         ValueQuery,
     >;
 
+    /// 🆕 P2: 仲裁案件关联的 CID 哈希列表（用于锁定/解锁）
+    /// 
+    /// 存储结构：(domain, object_id) => Vec<CidHash>
+    /// 由 dispute 时传入或从 Evidence 模块解析
+    #[pallet::storage]
+    pub type LockedCidHashes<T: Config> = StorageDoubleMap<
+        _,
+        Blake2_128Concat,
+        [u8; 8],
+        Blake2_128Concat,
+        u64,
+        BoundedVec<T::Hash, T::MaxEvidence>,
+        ValueQuery,
+    >;
+
     /// 🆕 双向押金记录存储：(domain, object_id) => TwoWayDepositRecord
     #[pallet::storage]
     pub type TwoWayDeposits<T: Config> = StorageDoubleMap<
@@ -142,6 +592,93 @@ pub mod pallet {
         TwoWayDepositRecord<T::AccountId, BalanceOf<T>, BlockNumberFor<T>>,
         OptionQuery,
     >;
+
+    // ==================== 🆕 存储膨胀防护：归档存储 ====================
+
+    /// 下一个归档ID
+    #[pallet::storage]
+    pub type NextArchivedId<T: Config> = StorageValue<_, u64, ValueQuery>;
+
+    /// 归档仲裁记录
+    #[pallet::storage]
+    #[pallet::getter(fn archived_disputes)]
+    pub type ArchivedDisputes<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,  // archived_id
+        ArchivedDispute,
+        OptionQuery,
+    >;
+
+    /// 仲裁永久统计
+    #[pallet::storage]
+    #[pallet::getter(fn arbitration_stats)]
+    pub type ArbitrationStats<T: Config> = StorageValue<_, ArbitrationPermanentStats, ValueQuery>;
+
+    // ==================== 🆕 Phase 1-4: 统一投诉系统存储 ====================
+
+    /// 投诉ID计数器
+    #[pallet::storage]
+    pub type NextComplaintId<T: Config> = StorageValue<_, u64, ValueQuery>;
+
+    /// 活跃投诉主存储
+    #[pallet::storage]
+    #[pallet::getter(fn complaints)]
+    pub type Complaints<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64, // complaint_id
+        Complaint<T>,
+        OptionQuery,
+    >;
+
+    /// 归档投诉存储
+    #[pallet::storage]
+    #[pallet::getter(fn archived_complaints)]
+    pub type ArchivedComplaints<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64, // complaint_id
+        ArchivedComplaint,
+        OptionQuery,
+    >;
+
+    /// 用户活跃投诉索引（作为投诉人）
+    #[pallet::storage]
+    pub type UserActiveComplaints<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        T::AccountId,
+        BoundedVec<u64, ConstU32<50>>, // 每用户最多50个活跃投诉
+        ValueQuery,
+    >;
+
+    /// 投诉押金记录（complaint_id -> 押金金额）
+    #[pallet::storage]
+    pub type ComplaintDeposits<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,  // complaint_id
+        BalanceOf<T>,
+        OptionQuery,
+    >;
+
+    /// 域统计信息
+    #[pallet::storage]
+    #[pallet::getter(fn domain_stats)]
+    pub type DomainStats<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        [u8; 8], // domain
+        DomainStatistics,
+        ValueQuery,
+    >;
+
+    /// 投诉归档游标
+    #[pallet::storage]
+    pub type ComplaintArchiveCursor<T: Config> = StorageValue<_, u64, ValueQuery>;
+
+    // ============================================================================
 
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
@@ -179,6 +716,48 @@ pub mod pallet {
             released: BalanceOf<T>,
             slashed: BalanceOf<T>,
         },
+        
+        // ==================== 🆕 Phase 1-4: 统一投诉系统事件 ====================
+        
+        /// 投诉已提交
+        ComplaintFiled {
+            complaint_id: u64,
+            domain: [u8; 8],
+            object_id: u64,
+            complainant: T::AccountId,
+            respondent: T::AccountId,
+            complaint_type: ComplaintType,
+        },
+        /// 投诉已响应/申诉
+        ComplaintResponded {
+            complaint_id: u64,
+            respondent: T::AccountId,
+        },
+        /// 投诉已撤销
+        ComplaintWithdrawn {
+            complaint_id: u64,
+        },
+        /// 投诉已和解
+        ComplaintSettled {
+            complaint_id: u64,
+        },
+        /// 投诉已升级到仲裁
+        ComplaintEscalated {
+            complaint_id: u64,
+        },
+        /// 投诉已裁决
+        ComplaintResolved {
+            complaint_id: u64,
+            decision: u8,
+        },
+        /// 投诉已过期
+        ComplaintExpired {
+            complaint_id: u64,
+        },
+        /// 投诉已归档
+        ComplaintArchived {
+            complaint_id: u64,
+        },
     }
 
     #[pallet::error]
@@ -193,6 +772,21 @@ pub mod pallet {
         ResponseDeadlinePassed,
         /// 🆕 无法获取对方账户
         CounterpartyNotFound,
+        
+        // ==================== 🆕 Phase 1-4: 统一投诉系统错误 ====================
+        
+        /// 投诉不存在
+        ComplaintNotFound,
+        /// 无权操作
+        NotAuthorized,
+        /// 无效的投诉类型（与域不匹配）
+        InvalidComplaintType,
+        /// 无效的状态转换
+        InvalidState,
+        /// 该对象投诉数量过多
+        TooManyComplaints,
+        /// 用户活跃投诉数量已达上限
+        TooManyActiveComplaints,
     }
 
     #[pallet::call]
@@ -254,17 +848,27 @@ pub mod pallet {
             // 🆕 处理双向押金
             Self::handle_deposits_on_arbitration(domain, id, &decision)?;
 
-            // 🆕 2025-10-22：TODO - 根据裁决结果更新做市商信用分
-            // 函数级详细中文注释：如果裁决为Release（做市商胜诉），无变化
-            // 如果裁决为Refund/Partial（做市商败诉），应扣除信用分
-            // 需要通过 Router 获取 maker_id，然后调用：
-            // pallet_credit::Pallet::<T>::record_maker_dispute_result(maker_id, id, maker_win)?;
+            // 🆕 P2: 解锁仲裁期间锁定的证据 CID
+            Self::unlock_all_evidence_cids(domain, id)?;
+
+            // 🆕 信用分集成：根据裁决结果更新做市商信用分
+            // - Release（做市商胜诉）：maker_win = true
+            // - Refund/Partial（做市商败诉）：maker_win = false，扣除信用分
+            if let Some(maker_id) = T::Router::get_maker_id(domain, id) {
+                let maker_win = matches!(decision, Decision::Release);
+                // 忽略错误，信用更新失败不影响主流程
+                let _ = T::CreditUpdater::record_maker_dispute_result(maker_id, id, maker_win);
+            }
             
             let out = match decision {
                 Decision::Release => (0, None),
                 Decision::Refund => (1, None),
                 Decision::Partial(p) => (2, Some(p)),
             };
+
+            // 🆕 归档已完成的仲裁并清理存储
+            Self::archive_and_cleanup(domain, id, out.0, out.1.unwrap_or(0));
+
             Self::deposit_event(Event::Arbitrated {
                 domain,
                 id,
@@ -369,8 +973,10 @@ pub mod pallet {
                 .map_err(|_| Error::<T>::CounterpartyNotFound)?;
 
             // 4. 计算押金金额（订单金额的15%）
+            // 修复 C-4: 使用 Permill 而非 Perbill，确保 bps * 100 = 百万分比
+            // 例如: 1500 bps = 15%, Permill::from_parts(150000) = 15%
             let deposit_ratio_bps = T::DepositRatioBps::get();
-            let deposit_amount = sp_runtime::Perbill::from_parts((deposit_ratio_bps as u32) * 100)
+            let deposit_amount = sp_runtime::Permill::from_parts((deposit_ratio_bps as u32) * 100)
                 .mul_floor(order_amount);
 
             // 5. 检查托管余额是否足够
@@ -504,16 +1110,383 @@ pub mod pallet {
 
             Ok(())
         }
+
+        // ==================== 🆕 Phase 1-4: 统一投诉系统 Extrinsics ====================
+
+        /// 发起投诉（需缴纳押金防止恶意投诉）
+        #[pallet::call_index(10)]
+        #[pallet::weight(T::WeightInfo::dispute(1))]
+        pub fn file_complaint(
+            origin: OriginFor<T>,
+            domain: [u8; 8],
+            object_id: u64,
+            complaint_type: ComplaintType,
+            details_cid: BoundedVec<u8, T::MaxCidLen>,
+            amount: Option<BalanceOf<T>>,
+        ) -> DispatchResult {
+            let complainant = ensure_signed(origin)?;
+
+            // 1. 验证投诉权限
+            #[cfg(not(feature = "runtime-benchmarks"))]
+            ensure!(
+                T::Router::can_dispute(domain, &complainant, object_id),
+                Error::<T>::NotAuthorized
+            );
+
+            // 2. 获取被投诉人
+            let respondent = T::Router::get_counterparty(domain, &complainant, object_id)
+                .map_err(|_| Error::<T>::CounterpartyNotFound)?;
+
+            // 3. 验证投诉类型与域匹配
+            ensure!(
+                complaint_type.domain() == domain || matches!(complaint_type, ComplaintType::Other),
+                Error::<T>::InvalidComplaintType
+            );
+
+            // 3.5 锁定投诉押金（使用pricing换算1 USDT价值的DUST）
+            let min_deposit = T::ComplaintDeposit::get();
+            let deposit_usd = T::ComplaintDepositUsd::get(); // 1_000_000 (1 USDT)
+            
+            let deposit_amount = if let Some(price) = T::Pricing::get_dust_to_usd_rate() {
+                let price_u128: u128 = price.saturated_into();
+                if price_u128 > 0u128 {
+                    // DUST数量 = USD金额 * 精度 / 价格
+                    let required_u128 = (deposit_usd as u128).saturating_mul(1_000_000u128) / price_u128;
+                    let required: BalanceOf<T> = required_u128.saturated_into();
+                    // 取换算值和兜底值中的较大者
+                    if required > min_deposit { required } else { min_deposit }
+                } else {
+                    min_deposit
+                }
+            } else {
+                min_deposit
+            };
+            
+            T::Fungible::hold(
+                &T::RuntimeHoldReason::from(HoldReason::ComplaintDeposit),
+                &complainant,
+                deposit_amount,
+            ).map_err(|_| Error::<T>::InsufficientDeposit)?;
+
+            // 4. 生成投诉ID
+            let complaint_id = NextComplaintId::<T>::mutate(|id| {
+                let current = *id;
+                *id = id.saturating_add(1);
+                current
+            });
+
+            // 4.5 记录押金
+            ComplaintDeposits::<T>::insert(complaint_id, deposit_amount);
+
+            // 5. 计算响应截止时间
+            let now = frame_system::Pallet::<T>::block_number();
+            let deadline = now + T::ResponseDeadline::get();
+
+            // 6. 创建投诉记录
+            let complaint = Complaint {
+                id: complaint_id,
+                domain,
+                object_id,
+                complaint_type: complaint_type.clone(),
+                complainant: complainant.clone(),
+                respondent: respondent.clone(),
+                details_cid,
+                amount,
+                status: ComplaintStatus::Submitted,
+                created_at: now,
+                response_deadline: deadline,
+                updated_at: now,
+            };
+
+            // 7. 存储
+            Complaints::<T>::insert(complaint_id, &complaint);
+
+            // 8. 更新用户索引
+            UserActiveComplaints::<T>::try_mutate(&complainant, |list| {
+                list.try_push(complaint_id)
+            }).map_err(|_| Error::<T>::TooManyActiveComplaints)?;
+
+            // 9. 更新域统计
+            DomainStats::<T>::mutate(domain, |stats| {
+                stats.total_complaints = stats.total_complaints.saturating_add(1);
+            });
+
+            // 10. 触发事件
+            Self::deposit_event(Event::ComplaintFiled {
+                complaint_id,
+                domain,
+                object_id,
+                complainant,
+                respondent,
+                complaint_type,
+            });
+
+            Ok(())
+        }
+
+        /// 响应/申诉投诉
+        #[pallet::call_index(11)]
+        #[pallet::weight(T::WeightInfo::dispute(1))]
+        pub fn respond_to_complaint(
+            origin: OriginFor<T>,
+            complaint_id: u64,
+            response_cid: BoundedVec<u8, T::MaxCidLen>,
+        ) -> DispatchResult {
+            let respondent = ensure_signed(origin)?;
+
+            Complaints::<T>::try_mutate(complaint_id, |maybe_complaint| -> DispatchResult {
+                let complaint = maybe_complaint.as_mut().ok_or(Error::<T>::ComplaintNotFound)?;
+
+                // 验证身份
+                ensure!(complaint.respondent == respondent, Error::<T>::NotAuthorized);
+
+                // 验证状态
+                ensure!(
+                    complaint.status == ComplaintStatus::Submitted,
+                    Error::<T>::InvalidState
+                );
+
+                // 验证未过期
+                let now = frame_system::Pallet::<T>::block_number();
+                ensure!(
+                    now <= complaint.response_deadline,
+                    Error::<T>::ResponseDeadlinePassed
+                );
+
+                // 更新详情CID（包含申诉内容）
+                complaint.details_cid = response_cid;
+                complaint.status = ComplaintStatus::Responded;
+                complaint.updated_at = now;
+
+                Self::deposit_event(Event::ComplaintResponded {
+                    complaint_id,
+                    respondent,
+                });
+
+                Ok(())
+            })
+        }
+
+        /// 撤销投诉
+        #[pallet::call_index(12)]
+        #[pallet::weight(T::WeightInfo::dispute(0))]
+        pub fn withdraw_complaint(
+            origin: OriginFor<T>,
+            complaint_id: u64,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            Complaints::<T>::try_mutate(complaint_id, |maybe_complaint| -> DispatchResult {
+                let complaint = maybe_complaint.as_mut().ok_or(Error::<T>::ComplaintNotFound)?;
+
+                ensure!(complaint.complainant == who, Error::<T>::NotAuthorized);
+
+                ensure!(
+                    matches!(complaint.status, ComplaintStatus::Submitted | ComplaintStatus::Responded),
+                    Error::<T>::InvalidState
+                );
+
+                let now = frame_system::Pallet::<T>::block_number();
+                complaint.status = ComplaintStatus::Withdrawn;
+                complaint.updated_at = now;
+
+                Self::deposit_event(Event::ComplaintWithdrawn { complaint_id });
+
+                Ok(())
+            })
+        }
+
+        /// 达成和解
+        #[pallet::call_index(13)]
+        #[pallet::weight(T::WeightInfo::dispute(0))]
+        pub fn settle_complaint(
+            origin: OriginFor<T>,
+            complaint_id: u64,
+            settlement_cid: BoundedVec<u8, T::MaxCidLen>,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            Complaints::<T>::try_mutate(complaint_id, |maybe_complaint| -> DispatchResult {
+                let complaint = maybe_complaint.as_mut().ok_or(Error::<T>::ComplaintNotFound)?;
+
+                // 验证是当事人
+                ensure!(
+                    complaint.complainant == who || complaint.respondent == who,
+                    Error::<T>::NotAuthorized
+                );
+
+                // 验证状态
+                ensure!(
+                    matches!(complaint.status, ComplaintStatus::Responded | ComplaintStatus::Mediating),
+                    Error::<T>::InvalidState
+                );
+
+                // 更新
+                let now = frame_system::Pallet::<T>::block_number();
+                complaint.details_cid = settlement_cid;
+                complaint.status = ComplaintStatus::ResolvedSettlement;
+                complaint.updated_at = now;
+
+                // 更新统计
+                DomainStats::<T>::mutate(complaint.domain, |stats| {
+                    stats.resolved_count = stats.resolved_count.saturating_add(1);
+                    stats.settlements = stats.settlements.saturating_add(1);
+                });
+
+                Self::deposit_event(Event::ComplaintSettled { complaint_id });
+
+                Ok(())
+            })
+        }
+
+        /// 提交仲裁（升级到仲裁委员会）
+        #[pallet::call_index(14)]
+        #[pallet::weight(T::WeightInfo::dispute(0))]
+        pub fn escalate_to_arbitration(
+            origin: OriginFor<T>,
+            complaint_id: u64,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            Complaints::<T>::try_mutate(complaint_id, |maybe_complaint| -> DispatchResult {
+                let complaint = maybe_complaint.as_mut().ok_or(Error::<T>::ComplaintNotFound)?;
+
+                ensure!(
+                    complaint.complainant == who || complaint.respondent == who,
+                    Error::<T>::NotAuthorized
+                );
+
+                ensure!(
+                    matches!(complaint.status, ComplaintStatus::Responded | ComplaintStatus::Mediating),
+                    Error::<T>::InvalidState
+                );
+
+                let now = frame_system::Pallet::<T>::block_number();
+                complaint.status = ComplaintStatus::Arbitrating;
+                complaint.updated_at = now;
+
+                Self::deposit_event(Event::ComplaintEscalated { complaint_id });
+
+                Ok(())
+            })
+        }
+
+        /// 仲裁裁决（仅仲裁委员会/Root）
+        #[pallet::call_index(15)]
+        #[pallet::weight(T::WeightInfo::arbitrate())]
+        pub fn resolve_complaint(
+            origin: OriginFor<T>,
+            complaint_id: u64,
+            decision: u8, // 0=投诉方胜, 1=被投诉方胜, 2=和解
+            reason_cid: BoundedVec<u8, T::MaxCidLen>,
+        ) -> DispatchResult {
+            T::DecisionOrigin::ensure_origin(origin)?;
+
+            Complaints::<T>::try_mutate(complaint_id, |maybe_complaint| -> DispatchResult {
+                let complaint = maybe_complaint.as_mut().ok_or(Error::<T>::ComplaintNotFound)?;
+
+                ensure!(
+                    complaint.status == ComplaintStatus::Arbitrating,
+                    Error::<T>::InvalidState
+                );
+
+                // 应用裁决到业务模块
+                let router_decision = match decision {
+                    0 => Decision::Refund,      // 投诉方胜诉 = 退款
+                    1 => Decision::Release,     // 被投诉方胜诉 = 释放
+                    _ => Decision::Partial(5000), // 和解 = 50-50
+                };
+                T::Router::apply_decision(complaint.domain, complaint.object_id, router_decision)?;
+
+                // 更新状态
+                let now = frame_system::Pallet::<T>::block_number();
+                complaint.details_cid = reason_cid;
+                complaint.status = match decision {
+                    0 => ComplaintStatus::ResolvedComplainantWin,
+                    1 => ComplaintStatus::ResolvedRespondentWin,
+                    _ => ComplaintStatus::ResolvedSettlement,
+                };
+                complaint.updated_at = now;
+
+                // 处理投诉押金
+                if let Some(deposit_amount) = ComplaintDeposits::<T>::take(complaint_id) {
+                    match decision {
+                        0 => {
+                            // 投诉方胜诉：全额退还押金
+                            let _ = T::Fungible::release(
+                                &T::RuntimeHoldReason::from(HoldReason::ComplaintDeposit),
+                                &complaint.complainant,
+                                deposit_amount,
+                                frame_support::traits::tokens::Precision::BestEffort,
+                            );
+                        },
+                        1 => {
+                            // 被投诉方胜诉：罚没部分押金给被投诉方
+                            let slash_bps = T::ComplaintSlashBps::get();
+                            let slash_amount = sp_runtime::Permill::from_parts((slash_bps as u32) * 100)
+                                .mul_floor(deposit_amount);
+                            let return_amount = deposit_amount.saturating_sub(slash_amount);
+                            
+                            // 罚没部分转给被投诉方
+                            if !slash_amount.is_zero() {
+                                let _ = T::Fungible::transfer_on_hold(
+                                    &T::RuntimeHoldReason::from(HoldReason::ComplaintDeposit),
+                                    &complaint.complainant,
+                                    &complaint.respondent,
+                                    slash_amount,
+                                    frame_support::traits::tokens::Precision::BestEffort,
+                                    frame_support::traits::tokens::Restriction::Free,
+                                    frame_support::traits::tokens::Fortitude::Polite,
+                                );
+                            }
+                            // 退还剩余部分
+                            if !return_amount.is_zero() {
+                                let _ = T::Fungible::release(
+                                    &T::RuntimeHoldReason::from(HoldReason::ComplaintDeposit),
+                                    &complaint.complainant,
+                                    return_amount,
+                                    frame_support::traits::tokens::Precision::BestEffort,
+                                );
+                            }
+                        },
+                        _ => {
+                            // 和解：全额退还押金
+                            let _ = T::Fungible::release(
+                                &T::RuntimeHoldReason::from(HoldReason::ComplaintDeposit),
+                                &complaint.complainant,
+                                deposit_amount,
+                                frame_support::traits::tokens::Precision::BestEffort,
+                            );
+                        }
+                    }
+                }
+
+                // 更新统计
+                DomainStats::<T>::mutate(complaint.domain, |stats| {
+                    stats.resolved_count = stats.resolved_count.saturating_add(1);
+                    match decision {
+                        0 => stats.complainant_wins = stats.complainant_wins.saturating_add(1),
+                        1 => stats.respondent_wins = stats.respondent_wins.saturating_add(1),
+                        _ => stats.settlements = stats.settlements.saturating_add(1),
+                    }
+                });
+
+                Self::deposit_event(Event::ComplaintResolved {
+                    complaint_id,
+                    decision,
+                });
+
+                Ok(())
+            })
+        }
     }
 
     /// 🆕 辅助函数实现
     impl<T: Config> Pallet<T> {
         /// 函数级中文注释：获取托管账户
-        /// - 使用 pallet-escrow 的 PalletId 派生
+        /// - 通过 Escrow trait 获取，解耦对 pallet_escrow::Config 的依赖
         fn get_escrow_account() -> T::AccountId {
-            use sp_runtime::traits::AccountIdConversion;
-            <<T as pallet_escrow::pallet::Config>::EscrowPalletId as Get<frame_support::PalletId>>::get()
-                .into_account_truncating()
+            T::Escrow::escrow_account()
         }
         /// 函数级中文注释：仲裁时处理双向押金
         /// - Release: 买家败诉，罚没买家押金30%，卖家押金全额返还到托管
@@ -603,7 +1576,8 @@ pub mod pallet {
         ) -> DispatchResult {
             use sp_runtime::traits::Zero;
 
-            let slash_amount = sp_runtime::Perbill::from_parts((slash_bps as u32) * 100)
+            // 修复 C-4: 使用 Permill 而非 Perbill
+            let slash_amount = sp_runtime::Permill::from_parts((slash_bps as u32) * 100)
                 .mul_floor(amount);
             let release_amount = amount.saturating_sub(slash_amount);
 
@@ -665,6 +1639,231 @@ pub mod pallet {
             });
 
             Ok(())
+        }
+
+        // ============================================================================
+        // 🆕 P2: CID 锁定管理辅助函数
+        // ============================================================================
+
+        /// 函数级中文注释：锁定仲裁案件相关的 CID
+        /// 
+        /// 参数：
+        /// - domain: 业务域
+        /// - id: 案件ID
+        /// - cid_hash: 要锁定的 CID 哈希
+        /// 
+        /// 说明：
+        /// - 锁定原因格式为 "arb:{domain_hex}:{id}"
+        /// - 锁定时间为永久（直到仲裁完成）
+        pub fn lock_evidence_cid(
+            domain: [u8; 8],
+            id: u64,
+            cid_hash: T::Hash,
+        ) -> DispatchResult {
+            // 构建锁定原因
+            let reason = Self::build_lock_reason(domain, id);
+            
+            // 调用 CidLockManager 锁定
+            T::CidLockManager::lock_cid(cid_hash, reason, None)?;
+            
+            // 记录到本地存储
+            LockedCidHashes::<T>::try_mutate(domain, id, |hashes| -> Result<(), DispatchError> {
+                hashes.try_push(cid_hash)
+                    .map_err(|_| Error::<T>::AlreadyDisputed)?;
+                Ok(())
+            })?;
+            
+            Ok(())
+        }
+
+        /// 函数级中文注释：解锁仲裁案件相关的所有 CID
+        /// 
+        /// 参数：
+        /// - domain: 业务域
+        /// - id: 案件ID
+        /// 
+        /// 说明：
+        /// - 仲裁完成后自动调用
+        /// - 解锁所有在 LockedCidHashes 中记录的 CID
+        pub fn unlock_all_evidence_cids(domain: [u8; 8], id: u64) -> DispatchResult {
+            let reason = Self::build_lock_reason(domain, id);
+            let locked_hashes = LockedCidHashes::<T>::take(domain, id);
+            
+            for cid_hash in locked_hashes.iter() {
+                // 忽略解锁失败（可能已被其他原因解锁或不存在）
+                let _ = T::CidLockManager::unlock_cid(*cid_hash, reason.clone());
+            }
+            
+            Ok(())
+        }
+
+        /// 函数级中文注释：构建锁定原因字符串
+        fn build_lock_reason(domain: [u8; 8], id: u64) -> alloc::vec::Vec<u8> {
+            // 格式: "arb:{domain_hex}:{id}"
+            let mut reason = b"arb:".to_vec();
+            reason.extend_from_slice(&domain);
+            reason.push(b':');
+            reason.extend_from_slice(&id.to_le_bytes());
+            reason
+        }
+
+        /// 🆕 存储膨胀防护：归档仲裁并清理存储
+        fn archive_and_cleanup(domain: [u8; 8], id: u64, decision: u8, partial_bps: u16) {
+            let current_block: u32 = frame_system::Pallet::<T>::block_number().saturated_into();
+            
+            // 创建归档记录
+            let archived = ArchivedDispute {
+                domain,
+                object_id: id,
+                decision,
+                partial_bps,
+                completed_at: current_block,
+                year_month: block_to_year_month(current_block, 14400),
+            };
+
+            // 保存归档记录
+            let archived_id = NextArchivedId::<T>::get();
+            ArchivedDisputes::<T>::insert(archived_id, archived);
+            NextArchivedId::<T>::put(archived_id.saturating_add(1));
+
+            // 更新统计
+            ArbitrationStats::<T>::mutate(|stats| {
+                stats.total_disputes = stats.total_disputes.saturating_add(1);
+                match decision {
+                    0 => stats.release_count = stats.release_count.saturating_add(1),
+                    1 => stats.refund_count = stats.refund_count.saturating_add(1),
+                    _ => stats.partial_count = stats.partial_count.saturating_add(1),
+                }
+            });
+
+            // 清理原始存储
+            Disputed::<T>::remove(domain, id);
+            EvidenceIds::<T>::remove(domain, id);
+            TwoWayDeposits::<T>::remove(domain, id);
+        }
+
+        // ==================== 🆕 Phase 4: 投诉归档辅助函数 ====================
+
+        /// 归档已解决的投诉
+        /// 在 on_idle 中调用，每次最多处理 max_count 个
+        pub fn archive_old_complaints(max_count: u32) -> u32 {
+            let now = frame_system::Pallet::<T>::block_number();
+            // 归档延迟：30天 = 432000 区块（6秒/块）
+            let archive_delay: BlockNumberFor<T> = 432000u32.into();
+            let mut archived_count = 0u32;
+            let mut cursor = ComplaintArchiveCursor::<T>::get();
+            let max_id = NextComplaintId::<T>::get();
+
+            while archived_count < max_count && cursor < max_id {
+                if let Some(complaint) = Complaints::<T>::get(cursor) {
+                    // 检查是否可归档
+                    let can_archive = complaint.status.is_resolved() 
+                        && now.saturating_sub(complaint.updated_at) >= archive_delay;
+
+                    if can_archive {
+                        // 创建归档记录
+                        let decision = match complaint.status {
+                            ComplaintStatus::ResolvedComplainantWin => 0,
+                            ComplaintStatus::ResolvedRespondentWin => 1,
+                            ComplaintStatus::ResolvedSettlement => 2,
+                            ComplaintStatus::Withdrawn => 3,
+                            ComplaintStatus::Expired => 4,
+                            _ => 2,
+                        };
+
+                        let current_block: u32 = now.saturated_into();
+                        let archived = ArchivedComplaint {
+                            id: cursor,
+                            domain: complaint.domain,
+                            object_id: complaint.object_id,
+                            decision,
+                            resolved_at: current_block,
+                            year_month: block_to_year_month(current_block, 14400),
+                        };
+
+                        // 存储归档记录
+                        ArchivedComplaints::<T>::insert(cursor, archived);
+
+                        // 移除活跃记录
+                        Complaints::<T>::remove(cursor);
+
+                        // 更新用户索引
+                        Self::remove_from_user_complaint_index(&complaint.complainant, cursor);
+
+                        archived_count = archived_count.saturating_add(1);
+
+                        Self::deposit_event(Event::ComplaintArchived { complaint_id: cursor });
+                    }
+                }
+                cursor = cursor.saturating_add(1);
+            }
+
+            ComplaintArchiveCursor::<T>::put(cursor);
+            archived_count
+        }
+
+        /// 从用户投诉索引中移除
+        fn remove_from_user_complaint_index(user: &T::AccountId, complaint_id: u64) {
+            UserActiveComplaints::<T>::mutate(user, |list| {
+                list.retain(|&id| id != complaint_id);
+            });
+        }
+
+        /// 处理过期投诉（未响应的投诉自动过期）
+        pub fn expire_old_complaints(max_count: u32) -> u32 {
+            let now = frame_system::Pallet::<T>::block_number();
+            let mut expired_count = 0u32;
+
+            for (complaint_id, mut complaint) in Complaints::<T>::iter() {
+                if expired_count >= max_count {
+                    break;
+                }
+
+                // 检查是否过期：状态为 Submitted 且已过响应截止时间
+                if complaint.status == ComplaintStatus::Submitted 
+                    && now > complaint.response_deadline 
+                {
+                    complaint.status = ComplaintStatus::Expired;
+                    complaint.updated_at = now;
+                    Complaints::<T>::insert(complaint_id, &complaint);
+
+                    // 更新统计
+                    DomainStats::<T>::mutate(complaint.domain, |stats| {
+                        stats.resolved_count = stats.resolved_count.saturating_add(1);
+                        stats.expired_count = stats.expired_count.saturating_add(1);
+                    });
+
+                    Self::deposit_event(Event::ComplaintExpired { complaint_id });
+                    expired_count = expired_count.saturating_add(1);
+                }
+            }
+
+            expired_count
+        }
+    }
+
+    // ==================== 🆕 Phase 4: Hooks 实现 ====================
+
+    #[pallet::hooks]
+    impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+        fn on_idle(_now: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
+            let mut weight_used = Weight::zero();
+            let base_weight = Weight::from_parts(10_000, 0);
+
+            // 阶段1：处理过期投诉（每次最多5个）
+            if remaining_weight.ref_time() > base_weight.ref_time() * 5 {
+                let expired = Self::expire_old_complaints(5);
+                weight_used = weight_used.saturating_add(base_weight.saturating_mul(expired as u64));
+            }
+
+            // 阶段2：归档已解决投诉（每次最多10个）
+            let remaining = remaining_weight.saturating_sub(weight_used);
+            if remaining.ref_time() > base_weight.ref_time() * 10 {
+                let archived = Self::archive_old_complaints(10);
+                weight_used = weight_used.saturating_add(base_weight.saturating_mul(archived as u64));
+            }
+
+            weight_used
         }
     }
 }

@@ -43,7 +43,7 @@ use sp_version::RuntimeVersion;
 
 // Local module imports
 use super::{
-	AccountId, Aura, Balance, Block, BlockNumber, Executive, Grandpa, InherentDataExt, Livestream, Nonce, Runtime,
+	AccountId, Aura, Balance, Bazi, Block, BlockNumber, Executive, Grandpa, InherentDataExt, Livestream, Nonce, Runtime,
 	RuntimeCall, RuntimeGenesisConfig, SessionKeys, System, TransactionPayment, TeePrivacy, VERSION,
 };
 
@@ -517,6 +517,105 @@ impl_runtime_apis! {
 
 		fn get_co_hosts(room_id: u64) -> Vec<AccountId> {
 			Livestream::get_co_host_list(room_id)
+		}
+	}
+
+	// ============================================================================
+	// Bazi Chart Runtime API (八字命盘)
+	// ============================================================================
+
+	impl pallet_bazi_chart::runtime_api::BaziChartApi<Block, AccountId> for Runtime {
+		fn get_interpretation(chart_id: u64) -> Option<pallet_bazi_chart::interpretation::FullInterpretation> {
+			Bazi::get_full_interpretation(chart_id)
+		}
+
+		fn get_full_bazi_chart(chart_id: u64) -> Option<alloc::string::String> {
+			Bazi::get_full_bazi_chart_for_api(chart_id).map(|chart| chart.to_debug_json())
+		}
+
+		fn chart_exists(chart_id: u64) -> bool {
+			pallet_bazi_chart::ChartById::<Runtime>::contains_key(chart_id)
+		}
+
+		fn get_chart_owner(chart_id: u64) -> Option<AccountId> {
+			pallet_bazi_chart::ChartById::<Runtime>::get(chart_id).map(|chart| chart.owner)
+		}
+
+		fn get_encrypted_chart_interpretation(chart_id: u64) -> Option<pallet_bazi_chart::interpretation::FullInterpretation> {
+			Bazi::get_encrypted_chart_interpretation(chart_id)
+		}
+
+		fn encrypted_chart_exists(chart_id: u64) -> bool {
+			Bazi::encrypted_chart_exists(chart_id)
+		}
+
+		fn get_encrypted_chart_owner(chart_id: u64) -> Option<AccountId> {
+			Bazi::get_encrypted_chart_owner(chart_id)
+		}
+
+		fn calculate_bazi_temp_unified(
+			input_type: u8,
+			params: Vec<u16>,
+			gender: u8,
+			zishi_mode: u8,
+		) -> Option<alloc::string::String> {
+			Bazi::calculate_bazi_temp_unified(input_type, params, gender, zishi_mode)
+				.map(|chart| chart.to_debug_json())
+		}
+
+		fn get_user_encryption_key(account: AccountId) -> Option<[u8; 32]> {
+			use pallet_divination_privacy::UserEncryptionKeys;
+			UserEncryptionKeys::<Runtime>::get(&account).map(|info| info.public_key)
+		}
+
+		fn get_service_provider(account: AccountId) -> Option<alloc::string::String> {
+			use pallet_divination_privacy::ServiceProviders;
+			ServiceProviders::<Runtime>::get(&account).map(|provider| {
+				alloc::format!(
+					r#"{{"provider_type":{},"public_key":"{}","reputation":{},"registered_at":{},"is_active":{}}}"#,
+					provider.provider_type as u8,
+					sp_core::hexdisplay::HexDisplay::from(&provider.public_key),
+					provider.reputation,
+					provider.registered_at,
+					provider.is_active
+				)
+			})
+		}
+
+		fn get_providers_by_type(provider_type: u8) -> Vec<AccountId> {
+			use pallet_divination_privacy::{ServiceProviders, types::ServiceProviderType};
+			let provider_type_enum = match provider_type {
+				0 => ServiceProviderType::MingLiShi,
+				1 => ServiceProviderType::AiService,
+				2 => ServiceProviderType::FamilyMember,
+				3 => ServiceProviderType::Research,
+				_ => return Vec::new(),
+			};
+			ServiceProviders::<Runtime>::iter()
+				.filter(|(_, provider)| provider.provider_type == provider_type_enum && provider.is_active)
+				.map(|(account, _)| account)
+				.collect()
+		}
+
+		fn get_provider_grants(account: AccountId) -> Vec<u64> {
+			use pallet_divination_privacy::ProviderGrants;
+			// ProviderGrants stores RecordKey which contains (DivinationType, u64)
+			// Extract just the u64 result_id from each RecordKey
+			ProviderGrants::<Runtime>::get(&account)
+				.into_inner()
+				.into_iter()
+				.map(|key| key.result_id)
+				.collect()
+		}
+
+		fn get_multi_key_encrypted_chart_info(_chart_id: u64) -> Option<alloc::string::String> {
+			// Multi-key encryption is not yet implemented, return None for now
+			None
+		}
+
+		fn get_multi_key_encrypted_chart_interpretation(chart_id: u64) -> Option<pallet_bazi_chart::interpretation::FullInterpretation> {
+			// Multi-key encryption is not yet implemented, use regular encrypted chart interpretation
+			Bazi::get_encrypted_chart_interpretation(chart_id)
 		}
 	}
 }

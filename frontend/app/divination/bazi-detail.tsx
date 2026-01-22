@@ -3,17 +3,20 @@
  * 展示完整的八字分析信息 + 8 个可扩展功能
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
   ScrollView,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { BottomNavBar } from '@/components/BottomNavBar';
+import { divinationService } from '@/services/divination.service';
 import {
   calculateDaYun,
   calculateLiuNian,
@@ -108,6 +111,37 @@ export default function BaziDetailPage() {
     }
     return null;
   });
+
+  const [fullInterpretation, setFullInterpretation] = useState<any>(null);
+  const [loadingFull, setLoadingFull] = useState(false);
+
+  // 获取完整解盘
+  useEffect(() => {
+    const fetchFull = async () => {
+      if (result?.id && result.id > 1000000000) { // 简单判断是否为本地临时 ID
+        return;
+      }
+      
+      if (result?.id) {
+        setLoadingFull(true);
+        try {
+          // 1. 尝试从链上获取完整解盘 (Runtime API)
+          const data = await divinationService.getFullInterpretation(result.id);
+          if (data) {
+            setFullInterpretation(data);
+            // 2. 异步缓存到链上 (Extrinsic)
+            // 注意：这需要签名，通常建议在详情页由用户手动触发或仅显示
+            // 这里我们先只显示
+          }
+        } catch (error) {
+          console.error('获取完整解盘失败:', error);
+        } finally {
+          setLoadingFull(false);
+        }
+      }
+    };
+    fetchFull();
+  }, [result?.id]);
 
   if (!result) {
     return (
@@ -764,6 +798,43 @@ export default function BaziDetailPage() {
     );
   };
 
+  // 9. 渲染链端完整解盘
+  const renderChainInterpretation = () => {
+    if (loadingFull) {
+      return (
+        <View style={styles.loadingCard}>
+          <ActivityIndicator color={THEME_COLOR} />
+          <Text style={styles.loadingText}>正在从链上获取深度解析...</Text>
+        </View>
+      );
+    }
+
+    if (!fullInterpretation) return null;
+
+    return (
+      <View style={[styles.card, { borderColor: THEME_COLOR, borderWeight: 1 }]}>
+        <View style={styles.chainHeader}>
+          <Ionicons name="shield-checkmark" size={18} color={THEME_COLOR} />
+          <Text style={styles.chainTitle}>链上深度解析</Text>
+        </View>
+        
+        {/* 这里展示链端返回的复杂解析数据，可以根据实际数据结构扩展 */}
+        <View style={styles.interpretationBox}>
+          <Text style={styles.interpretationText}>
+            该命盘已在区块链上完成完整校验。{fullInterpretation.summary || '暂无概要'}
+          </Text>
+          
+          {fullInterpretation.analysis && (
+            <View style={styles.analysisSection}>
+              <Text style={styles.analysisSectionTitle}>命理建议</Text>
+              <Text style={styles.analysisSectionContent}>{fullInterpretation.analysis}</Text>
+            </View>
+          )}
+        </View>
+      </View>
+    );
+  };
+
   return (
     <View style={styles.container}>
       {/* 顶部导航 */}
@@ -812,6 +883,7 @@ export default function BaziDetailPage() {
           <>
             {renderBasicInfo()}
             {renderSiZhuDetail()}
+            {renderChainInterpretation()}
             {renderWuXingAnalysis()}
             {renderDayMasterAnalysis()}
             {renderShiShenAnalysis()}
@@ -1518,5 +1590,52 @@ const styles = StyleSheet.create({
   mingGongCharText: {
     fontSize: 11,
     color: '#666',
+  },
+  loadingCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 8,
+    padding: 24,
+    marginBottom: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  chainHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  chainTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: THEME_COLOR,
+  },
+  interpretationBox: {
+    gap: 12,
+  },
+  interpretationText: {
+    fontSize: 13,
+    color: '#333',
+    lineHeight: 20,
+  },
+  analysisSection: {
+    backgroundColor: '#F9F9F9',
+    padding: 12,
+    borderRadius: 6,
+  },
+  analysisSectionTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 4,
+  },
+  analysisSectionContent: {
+    fontSize: 13,
+    color: '#333',
+    lineHeight: 18,
   },
 });

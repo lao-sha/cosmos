@@ -182,3 +182,15 @@ export async function deleteAllWallets(): Promise<void> {
     SecureStore.deleteItemAsync(STORAGE_KEYS.ALIASES),
   ]);
 }
+
+export async function getSecureValue(key: string): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(key);
+  } catch {
+    return null;
+  }
+}
+
+export async function setSecureValue(key: string, value: string): Promise<void> {
+  await SecureStore.setItemAsync(key, value);
+}

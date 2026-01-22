@@ -15,7 +15,7 @@ use crate::error::MediaError;
 /// 共享的媒体类型枚举
 ///
 /// 用途:
-/// - Deceased: Photo/Video/Audio(生平媒体)
+/// - General: Photo/Video/Audio(通用媒体)
 /// - GroupChat: Image/Video/Audio(聊天媒体)
 /// - Evidence: Image/Video/Document(证据媒体)
 #[derive(Clone, Copy, Encode, Decode, PartialEq, Eq, TypeInfo, MaxEncodedLen, Debug)]

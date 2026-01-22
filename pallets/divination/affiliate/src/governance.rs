@@ -111,7 +111,7 @@ impl Conviction {
 }
 
 /// 分成比例调整提案
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 #[scale_info(skip_type_params(T))]
 pub struct PercentageAdjustmentProposal<T: Config> {
     /// 提案ID
@@ -210,7 +210,7 @@ impl VoteTally {
 }
 
 /// 比例变更历史记录
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 #[scale_info(skip_type_params(T))]
 pub struct PercentageChangeRecord<T: Config> {
     /// 提案ID
@@ -445,10 +445,16 @@ impl<T: Config> Pallet<T> {
     }
 
     /// 统计成功推荐数量
-    fn count_successful_referrals(_account: &T::AccountId) -> u128 {
-        // TODO: 实现推荐统计逻辑
-        // 遍历 Sponsors 存储，统计 sponsor == account 的数量
-        0
+    /// 通过遍历 Sponsors 存储，统计 sponsor == account 的数量
+    fn count_successful_referrals(account: &T::AccountId) -> u128 {
+        // 遍历 Sponsors 存储，统计该账户作为推荐人的次数
+        let mut count = 0u128;
+        for (_who, sponsor) in pallet_affiliate_referral::Sponsors::<T>::iter() {
+            if &sponsor == account {
+                count = count.saturating_add(1);
+            }
+        }
+        count
     }
 
     // ========================================
@@ -464,8 +470,10 @@ impl<T: Config> Pallet<T> {
         // 所有分成比例提案现在都必须通过全民投票，技术委员会无法否决
 
         // 全民投票机制：最低参与率要求
-        // TODO: 获取总投票权（这里需要实现真实的投票权计算）
-        let total_power = 100000u128; // 临时值
+        // 总投票权 = 总发行量的平方根（归一化处理，避免巨鲸主导）
+        // 使用 pallet-balances 总发行量作为基准
+        let total_issuance: u128 = T::Currency::total_issuance().saturated_into();
+        let total_power = Self::integer_sqrt(total_issuance).max(100000u128);
         let participation = tally.participation_rate(total_power);
 
         // 最低参与率门槛：15%
@@ -533,7 +541,7 @@ impl MembershipLevel {
 }
 
 /// 年费价格调整提案
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 #[scale_info(skip_type_params(T))]
 pub struct MembershipPriceProposal<T: Config> {
     /// 提案ID
@@ -675,7 +683,7 @@ impl<T: Config> MembershipPriceProposal<T> {
 }
 
 /// 年费价格变更历史记录
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 #[scale_info(skip_type_params(T))]
 pub struct MembershipPriceChangeRecord<T: Config> {
     /// 提案ID

@@ -25,6 +25,11 @@ frontend/web-build/
 frontend/*.log
 media-utils/node_modules/
 
+# =========================
+# Script 测试脚本
+# =========================
+script/node_modules/
+
 # Expo build artifacts
 *.jks
 *.p8

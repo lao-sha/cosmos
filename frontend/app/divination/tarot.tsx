@@ -118,7 +118,7 @@ export default function TarotPage() {
     setShowTxStatus,
   } = useDivinationSave({
     divinationType: DivinationType.Tarot,
-    historyRoute: '/divination/tarot-list',
+    historyRoute: '/divination/history',
   });
 
   // 抽牌

@@ -23,8 +23,9 @@ use crate::types::*;
 // ================================
 
 /// 格局类型
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Encode, Decode, TypeInfo, MaxEncodedLen)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Encode, Decode, TypeInfo, MaxEncodedLen, Default)]
 pub enum GeJuType {
+    #[default]
     /// 正格 - 身旺财官
     ZhengGe,
     /// 从强格 - 身旺无制
@@ -44,12 +45,13 @@ pub enum GeJuType {
 }
 
 /// 命局强弱
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Encode, Decode, TypeInfo, MaxEncodedLen)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Encode, Decode, TypeInfo, MaxEncodedLen, Default)]
 pub enum MingJuQiangRuo {
     /// 身旺
     ShenWang,
     /// 身弱
     ShenRuo,
+    #[default]
     /// 中和
     ZhongHe,
     /// 太旺
@@ -59,8 +61,9 @@ pub enum MingJuQiangRuo {
 }
 
 /// 用神类型
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Encode, Decode, TypeInfo, MaxEncodedLen)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Encode, Decode, TypeInfo, MaxEncodedLen, Default)]
 pub enum YongShenType {
+    #[default]
     /// 扶抑用神 - 扶弱抑强
     FuYi,
     /// 调候用神 - 调节寒暖
@@ -1165,10 +1168,96 @@ pub struct FullBaziChartForApi {
     pub kongwang: KongWangInfo,
     /// 星运信息（十二长生）
     pub xingyun: XingYunInfo,
-    /// 神煞列表
+    /// 神煽列表
     pub shensha_list: sp_std::vec::Vec<ShenShaEntry>,
     /// 五行强度
     pub wuxing_strength: WuXingStrength,
+    /// 大运列表（12步）
+    pub dayun_list: sp_std::vec::Vec<DaYunForApi>,
+    /// 起运信息
+    pub qiyun: QiYunForApi,
+    /// 命盘分析（用神、喜神、忌神等）
+    pub analysis: AnalysisForApi,
+}
+
+/// 大运信息（用于 API）
+#[derive(Clone, Debug, Default)]
+pub struct DaYunForApi {
+    /// 大运干支
+    pub ganzhi: GanZhi,
+    /// 天干十神
+    pub tiangan_shishen: ShiShen,
+    /// 地支本气十神
+    pub dizhi_benqi_shishen: ShiShen,
+    /// 起始年龄
+    pub start_age: u8,
+    /// 起始年份
+    pub start_year: u16,
+    /// 交运月份
+    pub start_month: u8,
+    /// 交运日期
+    pub start_day: u8,
+    /// 结束年龄
+    pub end_age: u8,
+    /// 结束年份
+    pub end_year: u16,
+    /// 十二长生
+    pub changsheng: ShiErChangSheng,
+    /// 流年列表（10年）
+    pub liunian_list: sp_std::vec::Vec<LiuNianForApi>,
+}
+
+/// 流年信息（用于 API）
+#[derive(Clone, Debug, Default)]
+pub struct LiuNianForApi {
+    /// 流年干支
+    pub ganzhi: GanZhi,
+    /// 天干十神
+    pub tiangan_shishen: ShiShen,
+    /// 地支本气十神
+    pub dizhi_benqi_shishen: ShiShen,
+    /// 年份
+    pub year: u16,
+    /// 年龄
+    pub age: u8,
+}
+
+/// 起运信息（用于 API）
+#[derive(Clone, Debug, Default)]
+pub struct QiYunForApi {
+    /// 起运年龄（岁）
+    pub age_years: u8,
+    /// 起运月数
+    pub age_months: u8,
+    /// 起运天数
+    pub age_days: u8,
+    /// 是否顺排
+    pub is_shun: bool,
+    /// 交运年份
+    pub jiaoyun_year: u16,
+    /// 交运月份
+    pub jiaoyun_month: u8,
+    /// 交运日期
+    pub jiaoyun_day: u8,
+}
+
+/// 命盘分析（用于 API）
+#[derive(Clone, Debug, Default)]
+pub struct AnalysisForApi {
+    /// 格局类型
+    pub ge_ju: GeJuType,
+    /// 命局强弱
+    pub qiang_ruo: MingJuQiangRuo,
+    /// 用神五行
+    pub yong_shen: WuXing,
+    /// 用神类型
+    pub yong_shen_type: YongShenType,
+    /// 喜神五行
+    pub xi_shen: WuXing,
+    /// 忌神五行
+    pub ji_shen: WuXing,
+    /// 综合评分 (0-100)
+    pub score: u8,
 }
 
 /// 四柱信息（用于 API）
@@ -1201,6 +1290,8 @@ pub struct ZhuForApi {
     pub nayin: NaYin,
     /// 十二长生
     pub changsheng: ShiErChangSheng,
+    /// 自坐（本柱天干与地支本气的十神关系）
+    pub zizuo: ShiShen,
 }
 
 /// 藏干信息（用于 API）
@@ -1259,24 +1350,88 @@ impl FullBaziChartForApi {
         json.push_str("\"shenshaList\":[");
         for (i, shensha) in self.shensha_list.iter().enumerate() {
             if i > 0 { json.push_str(","); }
+            let nature_str = match shensha.nature {
+                crate::types::ShenShaNature::JiShen => "Ji",
+                crate::types::ShenShaNature::XiongShen => "Xiong",
+                crate::types::ShenShaNature::Neutral => "Neutral",
+            };
             json.push_str(&format!(
-                "{{\"shensha\":\"{:?}\",\"position\":\"{}\",\"nature\":\"{:?}\"}}",
-                shensha.shensha,
+                "{{\"shensha\":\"{}\",\"position\":\"{}\",\"nature\":\"{}\"}}",
+                shensha.shensha.name(),
                 shensha.position.name(),
-                shensha.nature
+                nature_str
             ));
         }
         json.push_str("],");
 
         // 五行强度
         json.push_str(&format!(
-            "\"wuxingStrength\":{{\"jin\":{},\"mu\":{},\"shui\":{},\"huo\":{},\"tu\":{}}}",
+            "\"wuxingStrength\":{{\"jin\":{},\"mu\":{},\"shui\":{},\"huo\":{},\"tu\":{}}},",
             self.wuxing_strength.jin,
             self.wuxing_strength.mu,
             self.wuxing_strength.shui,
             self.wuxing_strength.huo,
             self.wuxing_strength.tu
         ));
+
+        // 起运信息
+        json.push_str(&format!(
+            "\"qiyun\":{{\"ageYears\":{},\"ageMonths\":{},\"ageDays\":{},\"isShun\":{},\"jiaoyunYear\":{},\"jiaoyunMonth\":{},\"jiaoyunDay\":{}}},",
+            self.qiyun.age_years,
+            self.qiyun.age_months,
+            self.qiyun.age_days,
+            self.qiyun.is_shun,
+            self.qiyun.jiaoyun_year,
+            self.qiyun.jiaoyun_month,
+            self.qiyun.jiaoyun_day
+        ));
+
+        // 命盘分析
+        json.push_str(&format!(
+            "\"analysis\":{{\"geJu\":\"{:?}\",\"qiangRuo\":\"{:?}\",\"yongShen\":\"{:?}\",\"yongShenType\":\"{:?}\",\"xiShen\":\"{:?}\",\"jiShen\":\"{:?}\",\"score\":{}}},",
+            self.analysis.ge_ju,
+            self.analysis.qiang_ruo,
+            self.analysis.yong_shen,
+            self.analysis.yong_shen_type,
+            self.analysis.xi_shen,
+            self.analysis.ji_shen,
+            self.analysis.score
+        ));
+
+        // 大运列表
+        json.push_str("\"dayunList\":[");
+        for (i, dayun) in self.dayun_list.iter().enumerate() {
+            if i > 0 { json.push_str(","); }
+            json.push_str(&format!(
+                "{{\"ganzhi\":\"{}{}\",\"tianganShishen\":\"{}\",\"dizhiBenqiShishen\":\"{}\",\"startAge\":{},\"startYear\":{},\"startMonth\":{},\"startDay\":{},\"endAge\":{},\"endYear\":{},\"changsheng\":\"{}\",\"liunianList\":[",
+                dayun.ganzhi.gan.name(),
+                dayun.ganzhi.zhi.name(),
+                dayun.tiangan_shishen.name(),
+                dayun.dizhi_benqi_shishen.name(),
+                dayun.start_age,
+                dayun.start_year,
+                dayun.start_month,
+                dayun.start_day,
+                dayun.end_age,
+                dayun.end_year,
+                dayun.changsheng.name()
+            ));
+            // 流年列表
+            for (j, liunian) in dayun.liunian_list.iter().enumerate() {
+                if j > 0 { json.push_str(","); }
+                json.push_str(&format!(
+                    "{{\"ganzhi\":\"{}{}\",\"tianganShishen\":\"{}\",\"dizhiBenqiShishen\":\"{}\",\"year\":{},\"age\":{}}}",
+                    liunian.ganzhi.gan.name(),
+                    liunian.ganzhi.zhi.name(),
+                    liunian.tiangan_shishen.name(),
+                    liunian.dizhi_benqi_shishen.name(),
+                    liunian.year,
+                    liunian.age
+                ));
+            }
+            json.push_str("]}");
+        }
+        json.push_str("]");
 
         json.push_str("}");
         json
@@ -1294,6 +1449,7 @@ impl ZhuForApi {
         json.push_str(&format!(",\"dizhiBenqiShishen\":\"{}\"", self.dizhi_benqi_shishen.name()));
         json.push_str(&format!(",\"nayin\":\"{}\"", self.nayin.name()));
         json.push_str(&format!(",\"changsheng\":\"{}\"", self.changsheng.name()));
+        json.push_str(&format!(",\"zizuo\":\"{}\"", self.zizuo.name()));
 
         // 藏干列表
         json.push_str(",\"cangganList\":[");
@@ -1369,15 +1525,130 @@ pub fn build_full_bazi_chart_for_api<T: crate::pallet::Config>(
         rizhu,
     };
 
+    // 获取基本信息
+    let gender = chart.gender.unwrap_or(Gender::Male);
+    let birth_year = chart.birth_time.map(|bt| bt.year).unwrap_or(0);
+    let wuxing_strength = chart.wuxing_strength.unwrap_or_default();
+
+    // 计算起运和大运（复用 temp 函数的逻辑）
+    use crate::calculations::dayun;
+    let qiyun_info = dayun::calculate_qiyun_precise(sizhu.year_zhu.ganzhi.gan.0, gender, 15, 0);
+    // 计算首次交运日期
+    let jiaoyun_year = birth_year + qiyun_info.age_years as u16;
+    let total_months = qiyun_info.age_months;
+    let jiaoyun_month = if total_months == 0 { 1 } else { ((total_months - 1) % 12) + 1 };
+    let jiaoyun_day = if qiyun_info.age_days == 0 { 1 } else { qiyun_info.age_days.min(28) };
+    
+    let qiyun = QiYunForApi {
+        age_years: qiyun_info.age_years,
+        age_months: qiyun_info.age_months,
+        age_days: qiyun_info.age_days,
+        is_shun: qiyun_info.is_shun,
+        jiaoyun_year,
+        jiaoyun_month,
+        jiaoyun_day,
+    };
+
+    let dayun_raw = dayun::calculate_dayun_list(
+        sizhu.month_zhu.ganzhi,
+        birth_year,
+        qiyun_info.age_years,
+        qiyun_info.is_shun,
+        12,
+    );
+
+    // 构建大运列表
+    use crate::constants::{calculate_shishen, get_hidden_stems, is_valid_canggan};
+    let mut dayun_list = sp_std::vec::Vec::new();
+    for (ganzhi, start_age, start_year) in dayun_raw.iter() {
+        let tiangan_shishen = calculate_shishen(rizhu, ganzhi.gan);
+        let hidden_stems = get_hidden_stems(ganzhi.zhi);
+        let dizhi_benqi_shishen = if is_valid_canggan(hidden_stems[0].0.0) {
+            calculate_shishen(rizhu, hidden_stems[0].0)
+        } else {
+            ShiShen::BiJian
+        };
+        let changsheng = xingyun::get_changsheng(rizhu, ganzhi.zhi);
+
+        // 流年列表
+        let mut liunian_list = sp_std::vec::Vec::new();
+        for i in 0..10u8 {
+            let ln_year = start_year + i as u16;
+            let ln_age = start_age + i;
+            let ln_ganzhi_index = ((ln_year as i32 - 4) % 60) as u8;
+            if let Some(ln_ganzhi) = GanZhi::from_index(ln_ganzhi_index) {
+                let ln_tiangan_shishen = calculate_shishen(rizhu, ln_ganzhi.gan);
+                let ln_hidden = get_hidden_stems(ln_ganzhi.zhi);
+                let ln_dizhi_shishen = if is_valid_canggan(ln_hidden[0].0.0) {
+                    calculate_shishen(rizhu, ln_hidden[0].0)
+                } else {
+                    ShiShen::BiJian
+                };
+                liunian_list.push(LiuNianForApi {
+                    ganzhi: ln_ganzhi,
+                    tiangan_shishen: ln_tiangan_shishen,
+                    dizhi_benqi_shishen: ln_dizhi_shishen,
+                    year: ln_year,
+                    age: ln_age,
+                });
+            }
+        }
+
+        dayun_list.push(DaYunForApi {
+            ganzhi: *ganzhi,
+            tiangan_shishen,
+            dizhi_benqi_shishen,
+            start_age: *start_age,
+            start_year: *start_year,
+            start_month: jiaoyun_month,
+            start_day: jiaoyun_day,
+            end_age: start_age + 9,
+            end_year: start_year + 9,
+            changsheng,
+            liunian_list,
+        });
+    }
+
+    // 计算命盘分析
+    let sizhu_index = SiZhuIndex {
+        year_gan: sizhu.year_zhu.ganzhi.gan.0,
+        year_zhi: sizhu.year_zhu.ganzhi.zhi.0,
+        month_gan: sizhu.month_zhu.ganzhi.gan.0,
+        month_zhi: sizhu.month_zhu.ganzhi.zhi.0,
+        day_gan: sizhu.day_zhu.ganzhi.gan.0,
+        day_zhi: sizhu.day_zhu.ganzhi.zhi.0,
+        hour_gan: sizhu.hour_zhu.ganzhi.gan.0,
+        hour_zhi: sizhu.hour_zhu.ganzhi.zhi.0,
+    };
+    let ge_ju = analyze_ge_ju_from_index(&sizhu_index, &wuxing_strength);
+    let qiang_ruo = analyze_qiang_ruo(&wuxing_strength, rizhu);
+    let (yong_shen, yong_shen_type) = analyze_yong_shen_from_index(ge_ju, qiang_ruo, &sizhu_index, &wuxing_strength);
+    let xi_shen = derive_xi_shen(yong_shen);
+    let ji_shen = derive_ji_shen(yong_shen, qiang_ruo, rizhu);
+    let score = calculate_comprehensive_score(ge_ju, qiang_ruo, &wuxing_strength);
+
+    let analysis = AnalysisForApi {
+        ge_ju,
+        qiang_ruo,
+        yong_shen,
+        yong_shen_type,
+        xi_shen,
+        ji_shen,
+        score,
+    };
+
     FullBaziChartForApi {
-        gender: chart.gender.unwrap_or(Gender::Male),
-        birth_year: chart.birth_time.map(|bt| bt.year).unwrap_or(0),
+        gender,
+        birth_year,
         input_calendar_type: chart.input_calendar_type.unwrap_or(crate::types::InputCalendarType::Solar),
         sizhu: sizhu_for_api,
         kongwang: kongwang_info,
         xingyun: xingyun_info,
         shensha_list,
-        wuxing_strength: chart.wuxing_strength.unwrap_or_default(),
+        wuxing_strength,
+        dayun_list,
+        qiyun,
+        analysis,
     }
 }
 
@@ -1400,7 +1671,8 @@ pub fn build_full_bazi_chart_for_api_temp(
     birth_year: u16,
     input_calendar_type: crate::types::InputCalendarType,
 ) -> FullBaziChartForApi {
-    use crate::calculations::{xingyun, kongwang, shensha, wuxing};
+    use crate::calculations::{xingyun, kongwang, shensha, wuxing, dayun};
+    use crate::constants::{calculate_shishen, get_hidden_stems, is_valid_canggan};
 
     let rizhu = day_ganzhi.gan;
 
@@ -1446,6 +1718,117 @@ pub fn build_full_bazi_chart_for_api_temp(
         rizhu,
     };
 
+    // 计算起运信息（默认距离节气15天）
+    let qiyun_info = dayun::calculate_qiyun_precise(year_ganzhi.gan.0, gender, 15, 0);
+    // 计算首次交运日期：出生年份 + 起运年龄
+    let jiaoyun_year = birth_year + qiyun_info.age_years as u16;
+    // 交运月日根据起运月数和天数估算（假设出生在1月1日）
+    let total_months = qiyun_info.age_months;
+    let jiaoyun_month = if total_months == 0 { 1 } else { ((total_months - 1) % 12) + 1 };
+    let jiaoyun_day = if qiyun_info.age_days == 0 { 1 } else { qiyun_info.age_days.min(28) };
+    
+    let qiyun = QiYunForApi {
+        age_years: qiyun_info.age_years,
+        age_months: qiyun_info.age_months,
+        age_days: qiyun_info.age_days,
+        is_shun: qiyun_info.is_shun,
+        jiaoyun_year,
+        jiaoyun_month,
+        jiaoyun_day,
+    };
+
+    // 计算大运列表（12步）
+    let dayun_raw = dayun::calculate_dayun_list(
+        month_ganzhi,
+        birth_year,
+        qiyun_info.age_years,
+        qiyun_info.is_shun,
+        12,
+    );
+
+    // 构建大运列表（含流年）
+    let mut dayun_list = sp_std::vec::Vec::new();
+    for (ganzhi, start_age, start_year) in dayun_raw.iter() {
+        // 计算大运十神
+        let tiangan_shishen = calculate_shishen(rizhu, ganzhi.gan);
+        let hidden_stems = get_hidden_stems(ganzhi.zhi);
+        let dizhi_benqi_shishen = if is_valid_canggan(hidden_stems[0].0.0) {
+            calculate_shishen(rizhu, hidden_stems[0].0)
+        } else {
+            ShiShen::BiJian
+        };
+
+        // 计算大运十二长生
+        let changsheng = xingyun::get_changsheng(rizhu, ganzhi.zhi);
+
+        // 构建流年列表（10年）
+        let mut liunian_list = sp_std::vec::Vec::new();
+        for i in 0..10u8 {
+            let ln_year = start_year + i as u16;
+            let ln_age = start_age + i;
+            // 流年干支 = (年份 - 4) % 60
+            let ln_ganzhi_index = ((ln_year as i32 - 4) % 60) as u8;
+            if let Some(ln_ganzhi) = GanZhi::from_index(ln_ganzhi_index) {
+                let ln_tiangan_shishen = calculate_shishen(rizhu, ln_ganzhi.gan);
+                let ln_hidden = get_hidden_stems(ln_ganzhi.zhi);
+                let ln_dizhi_shishen = if is_valid_canggan(ln_hidden[0].0.0) {
+                    calculate_shishen(rizhu, ln_hidden[0].0)
+                } else {
+                    ShiShen::BiJian
+                };
+                liunian_list.push(LiuNianForApi {
+                    ganzhi: ln_ganzhi,
+                    tiangan_shishen: ln_tiangan_shishen,
+                    dizhi_benqi_shishen: ln_dizhi_shishen,
+                    year: ln_year,
+                    age: ln_age,
+                });
+            }
+        }
+
+        dayun_list.push(DaYunForApi {
+            ganzhi: *ganzhi,
+            tiangan_shishen,
+            dizhi_benqi_shishen,
+            start_age: *start_age,
+            start_year: *start_year,
+            start_month: jiaoyun_month,
+            start_day: jiaoyun_day,
+            end_age: start_age + 9,
+            end_year: start_year + 9,
+            changsheng,
+            liunian_list,
+        });
+    }
+
+    // 计算命盘分析（用神、喜神、忌神）
+    let sizhu_index = SiZhuIndex {
+        year_gan: year_ganzhi.gan.0,
+        year_zhi: year_ganzhi.zhi.0,
+        month_gan: month_ganzhi.gan.0,
+        month_zhi: month_ganzhi.zhi.0,
+        day_gan: day_ganzhi.gan.0,
+        day_zhi: day_ganzhi.zhi.0,
+        hour_gan: hour_ganzhi.gan.0,
+        hour_zhi: hour_ganzhi.zhi.0,
+    };
+    let ge_ju = analyze_ge_ju_from_index(&sizhu_index, &wuxing_strength);
+    let qiang_ruo = analyze_qiang_ruo(&wuxing_strength, rizhu);
+    let (yong_shen, yong_shen_type) = analyze_yong_shen_from_index(ge_ju, qiang_ruo, &sizhu_index, &wuxing_strength);
+    let xi_shen = derive_xi_shen(yong_shen);
+    let ji_shen = derive_ji_shen(yong_shen, qiang_ruo, rizhu);
+    let score = calculate_comprehensive_score(ge_ju, qiang_ruo, &wuxing_strength);
+
+    let analysis = AnalysisForApi {
+        ge_ju,
+        qiang_ruo,
+        yong_shen,
+        yong_shen_type,
+        xi_shen,
+        ji_shen,
+        score,
+    };
+
     FullBaziChartForApi {
         gender,
         birth_year,
@@ -1455,6 +1838,9 @@ pub fn build_full_bazi_chart_for_api_temp(
         xingyun: xingyun_info,
         shensha_list,
         wuxing_strength,
+        dayun_list,
+        qiyun,
+        analysis,
     }
 }
 
@@ -1493,6 +1879,13 @@ fn build_zhu_for_api(
     // 计算纳音
     let nayin = calculate_nayin(ganzhi);
 
+    // 计算自坐（本柱天干与地支本气的十神关系）
+    let zizuo = if is_valid_canggan(hidden_stems[0].0.0) {
+        calculate_shishen(ganzhi.gan, hidden_stems[0].0)
+    } else {
+        ShiShen::BiJian
+    };
+
     ZhuForApi {
         ganzhi: *ganzhi,
         tiangan_shishen,
@@ -1500,6 +1893,7 @@ fn build_zhu_for_api(
         canggan_list,
         nayin,
         changsheng,
+        zizuo,
     }
 }
 

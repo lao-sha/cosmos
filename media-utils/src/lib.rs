@@ -45,7 +45,7 @@
 //!
 //! ## 使用场景
 //!
-//! ### 1. Deceased Pallet - 纪念馆媒体
+//! ### 1. General Storage - 通用媒体存储
 //! ```ignore
 //! use media_common::{MediaKind, ImageValidator};
 //!

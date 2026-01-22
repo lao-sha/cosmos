@@ -10,6 +10,9 @@ use frame_support::{
 use scale_info::TypeInfo;
 use sp_runtime::RuntimeDebug;
 use sp_std::vec::Vec;
+use sp_std::marker::PhantomData;
+
+use crate::plugin::PluginHookType;
 
 // ========== 量子抗性密钥类型 ==========
 
@@ -259,7 +262,7 @@ pub enum ConfirmationStatus {
 
 /// 乐观消息状态
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
-pub struct OptimisticMessageState<T: frame_system::Config> {
+pub struct OptimisticMessageState {
     /// 临时消息ID
     pub temp_id: TempMessageId,
     /// 真实消息ID（确认后）
@@ -318,7 +321,7 @@ pub enum ProcessingStage {
 
 /// 加密配置
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct EncryptionConfig<T: frame_system::Config> {
+pub struct EncryptionConfig {
     /// 加密模式
     pub mode: EncryptionMode,
     /// 主密钥
@@ -351,12 +354,12 @@ pub enum AIDecisionType {
 }
 
 /// AI决策结果
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct AIDecisionResult<T: frame_system::Config> {
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+pub struct AIDecisionResult {
     /// 推荐的加密模式
     pub recommended_mode: EncryptionMode,
-    /// 置信度（0.0-1.0）
-    pub confidence: f32,
+    /// 置信度（0-100，代表0.0-1.0）
+    pub confidence: u8,
     /// 决策理由
     pub reasoning: BoundedVec<u8, ConstU32<512>>,
     /// 可选选项
@@ -417,8 +420,8 @@ pub enum AILearningMode {
 }
 
 /// 存储策略
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct StorageStrategy<T: frame_system::Config> {
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+pub struct StorageStrategy {
     /// 主要存储层
     pub primary_tier: StorageTier,
     /// 备份存储层
@@ -433,7 +436,7 @@ pub struct StorageStrategy<T: frame_system::Config> {
     pub auto_migration_enabled: bool,
 }
 
-impl<T: frame_system::Config> StorageStrategy<T> {
+impl StorageStrategy {
     /// 获取初始存储层级
     pub fn initial_tier(&self) -> StorageTier {
         self.primary_tier.clone()
@@ -442,7 +445,7 @@ impl<T: frame_system::Config> StorageStrategy<T> {
 
 /// 存储统计信息
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
-pub struct StorageStats<T: frame_system::Config> {
+pub struct StorageStats {
     /// 总消息数
     pub total_messages: u32,
     /// 链上存储消息数
@@ -457,7 +460,7 @@ pub struct StorageStats<T: frame_system::Config> {
     pub last_cleanup: u64,
 }
 
-impl<T: frame_system::Config> Default for StorageStats<T> {
+impl Default for StorageStats {
     fn default() -> Self {
         Self {
             total_messages: 0,
@@ -471,10 +474,10 @@ impl<T: frame_system::Config> Default for StorageStats<T> {
 }
 
 /// 用户行为数据
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct UserBehaviorData<T: frame_system::Config> {
-    /// 安全偏好评分（0.0-1.0）
-    pub security_preference: f32,
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+pub struct UserBehaviorData {
+    /// 安全偏好评分（0-100，代表0.0-1.0）
+    pub security_preference: u8,
     /// 偏好的加密模式
     pub preferred_encryption_mode: EncryptionMode,
     /// 响应时间偏好
@@ -529,8 +532,8 @@ pub enum EmergencyReason {
 }
 
 /// 快照状态（用于数据恢复）
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct SnapshotState<T: frame_system::Config> {
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+pub struct SnapshotState {
     /// 快照ID
     pub snapshot_id: [u8; 32],
     /// 群组状态哈希
@@ -794,7 +797,7 @@ pub struct QuantumResistanceStatus {
 
 /// 插件执行记录
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
-pub struct PluginExecutionRecord<T: frame_system::Config> {
+pub struct PluginExecutionRecord {
     /// 执行时间戳
     pub timestamp: u64,
     /// 钩子类型
@@ -835,4 +838,130 @@ impl Default for GlobalPluginConfig {
             max_plugin_storage: 1024 * 1024 * 1024, // 1GB
         }
     }
+}
+
+// ========== 举报与申诉系统类型 ==========
+
+/// 群聊举报目标类型
+#[derive(Encode, Decode, DecodeWithMemTracking, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+pub enum GroupReportTarget {
+    /// 举报群组本身
+    Group,
+    /// 举报特定消息
+    Message(MessageId),
+    /// 举报群组成员
+    Member(BoundedVec<u8, ConstU32<64>>), // 成员账户ID的编码
+}
+
+/// 群聊举报类型
+#[derive(Encode, Decode, DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+pub enum GroupReportType {
+    /// 违规内容（涉黄、暴力等）
+    IllegalContent,
+    /// 骚扰成员
+    Harassment,
+    /// 诈骗行为
+    Fraud,
+    /// 垃圾信息/广告
+    Spam,
+    /// 仇恨言论
+    HateSpeech,
+    /// 其他
+    Other,
+}
+
+/// 举报状态
+#[derive(Encode, Decode, DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+pub enum ReportStatus {
+    /// 待审核
+    Pending,
+    /// 审核中
+    UnderReview,
+    /// 举报成立
+    Upheld,
+    /// 举报驳回
+    Rejected,
+    /// 恶意举报
+    Malicious,
+    /// 已撤回
+    Withdrawn,
+    /// 已过期
+    Expired,
+}
+
+/// 申诉结果
+#[derive(Encode, Decode, DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+pub enum AppealResult {
+    /// 申诉成立（解除处罚）
+    Upheld,
+    /// 申诉驳回（维持处罚）
+    Rejected,
+}
+
+/// 群聊举报记录
+#[derive(Encode, Decode, DecodeWithMemTracking, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+#[scale_info(skip_type_params(T))]
+pub struct GroupReportRecord<T: frame_system::Config> {
+    /// 举报 ID
+    pub id: u64,
+    /// 举报者账户
+    pub reporter: T::AccountId,
+    /// 被举报的群组 ID
+    pub group_id: GroupId,
+    /// 举报目标
+    pub target: GroupReportTarget,
+    /// 举报类型
+    pub report_type: GroupReportType,
+    /// 证据 IPFS CID
+    pub evidence_cid: BoundedVec<u8, ConstU32<128>>,
+    /// 举报描述
+    pub description: BoundedVec<u8, ConstU32<512>>,
+    /// 押金金额（使用 u128 存储）
+    pub deposit: u128,
+    /// 举报状态
+    pub status: ReportStatus,
+    /// 创建时间（区块号）
+    pub created_at: u64,
+    /// 处理时间（区块号）
+    pub resolved_at: Option<u64>,
+    /// 是否匿名举报
+    pub is_anonymous: bool,
+}
+
+/// 群组封禁记录
+#[derive(Encode, Decode, DecodeWithMemTracking, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+#[scale_info(skip_type_params(T))]
+pub struct GroupBanRecord<T: frame_system::Config> {
+    /// 被封禁的群组 ID
+    pub group_id: GroupId,
+    /// 群组创建者
+    pub creator: T::AccountId,
+    /// 封禁时间（区块号）
+    pub banned_at: u64,
+    /// 封禁原因
+    pub reason: BoundedVec<u8, ConstU32<512>>,
+    /// 关联的举报 ID（如果有）
+    pub related_report_id: Option<u64>,
+    /// 是否已申诉
+    pub is_appealed: bool,
+    /// 申诉结果
+    pub appeal_result: Option<AppealResult>,
+}
+
+/// 成员禁言记录
+#[derive(Encode, Decode, DecodeWithMemTracking, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+#[scale_info(skip_type_params(T))]
+pub struct MemberMuteRecord<T: frame_system::Config> {
+    /// 群组 ID
+    pub group_id: GroupId,
+    /// 被禁言的成员
+    pub member: T::AccountId,
+    /// 禁言时间（区块号）
+    pub muted_at: u64,
+    /// 禁言到期时间（区块号，None 表示永久）
+    pub muted_until: Option<u64>,
+    /// 禁言原因
+    pub reason: BoundedVec<u8, ConstU32<256>>,
+    /// 关联的举报 ID（如果有）
+    pub related_report_id: Option<u64>,
 }

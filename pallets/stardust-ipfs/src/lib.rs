@@ -38,56 +38,30 @@ pub use types::{
     StorageLayerConfig, SubjectInfo, SubjectType, TierConfig, UnpinReason,
 };
 
-/// 函数级详细中文注释：逝者创建者只读提供者（低耦合）
+/// 函数级详细中文注释：Subject所有者只读提供者（低耦合）
 /// 
 /// ### 功能
-/// - 从pallet-deceased读取creator字段（不可变的创建者）
-/// - 用于SubjectFunding账户派生
-/// 
-/// ### 设计理念
-/// - **creator不可变**：创建时设置，永不改变，确保资金账户地址永久稳定
-/// - **与owner解耦**：owner可转让，但不影响资金账户地址
-/// - **低耦合设计**：通过trait解耦，不直接依赖pallet-deceased
-/// 
-/// ### 使用场景
-/// - SubjectFunding账户派生
-/// - deceased存在性检查
-pub trait CreatorProvider<AccountId> {
-    /// 返回逝者的creator（创建者）
-    /// 
-    /// ### 参数
-    /// - `deceased_id`: 逝者ID
-    /// 
-    /// ### 返回
-    /// - `Some(creator)`: 逝者存在，返回创建者账户
-    /// - `None`: 逝者不存在
-    fn creator_of(deceased_id: u64) -> Option<AccountId>;
-}
-
-/// 函数级详细中文注释：逝者owner只读提供者（低耦合）
-/// 
-/// ### 功能
-/// - 从pallet-deceased读取owner字段（当前所有者）
+/// - 从业务pallet读取owner字段（当前所有者）
 /// - 用于权限检查
 /// 
 /// ### 设计理念
 /// - **owner可转让**：支持所有权转移
 /// - **权限控制**：用于检查操作权限
-/// - **与creator分离**：creator用于派生地址，owner用于权限检查
+/// - **低耦合设计**：通过trait解耦，不直接依赖业务pallet
 /// 
 /// ### 使用场景
-/// - 权限检查：request_pin_for_deceased等操作
-/// - deceased存在性检查
-pub trait OwnerProvider<AccountId> {
-    /// 返回逝者的owner（当前所有者）
+/// - 权限检查：request_pin_for_subject等操作
+/// - subject存在性检查
+pub trait SubjectOwnerProvider<AccountId> {
+    /// 返回subject的owner（当前所有者）
     /// 
     /// ### 参数
-    /// - `deceased_id`: 逝者ID
+    /// - `subject_id`: Subject ID
     /// 
     /// ### 返回
-    /// - `Some(owner)`: 逝者存在，返回当前所有者账户
-    /// - `None`: 逝者不存在
-    fn owner_of(deceased_id: u64) -> Option<AccountId>;
+    /// - `Some(owner)`: subject存在，返回当前所有者账户
+    /// - `None`: subject不存在
+    fn owner_of(subject_id: u64) -> Option<AccountId>;
 }
 
 /// 专用 Offchain 签名 KeyType。注意：需要在节点端注册对应密钥。
@@ -107,10 +81,9 @@ pub type AuthorityId = sr25519_app::Public;
 /// 函数级详细中文注释：IPFS自动pin接口，供其他pallet调用实现内容自动固定
 /// 
 /// 设计目标：
-/// - 为各业务pallet（deceased、evidence等）提供统一的pin接口；
-/// - deceased pallet内部整合了text、media、works等内容类型；
-/// - 自动使用triple-charge机制扣费（IpfsPoolAccount → SubjectFunding → Caller）；
-/// - 支持逝者维度的CID固定。
+/// - 为各业务pallet（evidence、otc等）提供统一的pin接口；
+/// - 自动使用四层扣费机制（IpfsPool配额 → SubjectFunding → IpfsPool兜底 → GracePeriod）；
+/// - 支持Subject维度的CID固定。
 /// 
 /// 使用方式：
 /// ```rust
@@ -118,41 +91,44 @@ pub type AuthorityId = sr25519_app::Public;
 /// type IpfsPinner: IpfsPinner<Self::AccountId, Self::Balance>;
 /// 
 /// // 在extrinsic中调用：
-/// T::IpfsPinner::pin_cid_for_deceased(
+/// T::IpfsPinner::pin_cid_for_subject(
 ///     who.clone(),
-///     deceased_id,
+///     SubjectType::Evidence,
+///     subject_id,
 ///     cid,
-///     price,
-///     3, // replicas
+///     Some(PinTier::Critical),
 /// )?;
 /// ```
 pub trait IpfsPinner<AccountId, Balance> {
-    /// 函数级详细中文注释：为逝者关联的CID发起pin请求（优化版）
+    /// 函数级详细中文注释：为Subject关联的CID发起pin请求
     /// 
     /// 参数：
     /// - `caller`: 发起调用的账户
-    /// - `deceased_id`: 逝者ID（用于派生SubjectFunding账户）
+    /// - `subject_type`: Subject类型（Evidence/OtcOrder/General等）
+    /// - `subject_id`: Subject ID（用于派生SubjectFunding账户）
     /// - `cid`: IPFS CID（Vec<u8>格式）
-    /// - `tier`: 分层等级（None则使用默认Standard）✅ 新增
+    /// - `tier`: 分层等级（None则使用默认Standard）
     /// 
     /// 返回：
     /// - `Ok(())`: pin请求成功提交，费用扣取成功
     /// - `Err(...)`: 失败原因（余额不足、CID格式错误、系统错误等）
     /// 
-    /// 扣费机制（三层回退）：✅ 更新
-    /// 1. 优先从 `IpfsPoolAccount` 扣取（系统公共池）
-    /// 2. 如失败，从 `SubjectFunding(deceased_id)` 扣取
-    /// 3. 如仍失败，进入宽限期（GracePeriod）
+    /// 扣费机制（四层回退）：
+    /// 1. 优先从 `IpfsPoolAccount` 扣取（配额优先）
+    /// 2. 如配额不足，从 `SubjectFunding(subject_id)` 扣取
+    /// 3. 如SubjectFunding不足，从 `IpfsPoolAccount` 兜底
+    /// 4. 如仍失败，进入宽限期（GracePeriod）
     /// 
     /// 分层配置：
     /// - Critical：5副本，6小时巡检，1.5x费率
     /// - Standard：3副本，24小时巡检，1.0x费率（默认）
     /// - Temporary：1副本，7天巡检，0.5x费率
-    fn pin_cid_for_deceased(
+    fn pin_cid_for_subject(
         caller: AccountId,
-        deceased_id: u64,
+        subject_type: SubjectType,
+        subject_id: u64,
         cid: Vec<u8>,
-        tier: Option<PinTier>,  // 新增参数
+        tier: Option<PinTier>,
     ) -> DispatchResult;
 }
 
@@ -193,7 +169,7 @@ pub trait ContentRegistry {
     /// 4. 自动扣费（三层机制）
     /// 
     /// 参数：
-    /// - `domain`: 域名（如 b"deceased-video", b"nft-metadata"）
+    /// - `domain`: 域名（如 b"evidence", b"nft-metadata"）
     /// - `subject_id`: 主体ID（与域组合唯一标识）
     /// - `cid`: IPFS内容标识符
     /// - `tier`: Pin等级（Critical/Standard/Temporary）
@@ -217,6 +193,32 @@ pub trait ContentRegistry {
     /// 
     /// 用途：查询域对应的SubjectType
     fn get_domain_subject_type(domain: &[u8]) -> Option<SubjectType>;
+}
+
+/// 函数级详细中文注释：CID 锁定管理器接口
+/// 
+/// 设计目标：
+/// - 支持仲裁期间锁定证据 CID，防止被删除
+/// - 仲裁完成后自动解锁
+/// - 支持过期时间设置
+pub trait CidLockManager<Hash, BlockNumber> {
+    /// 锁定 CID（防止删除）
+    /// 
+    /// 参数：
+    /// - `cid_hash`: CID 的哈希值
+    /// - `reason`: 锁定原因（如 "arbitration:otc:123"）
+    /// - `until`: 可选的锁定到期区块号
+    fn lock_cid(cid_hash: Hash, reason: Vec<u8>, until: Option<BlockNumber>) -> DispatchResult;
+    
+    /// 解锁 CID
+    /// 
+    /// 参数：
+    /// - `cid_hash`: CID 的哈希值
+    /// - `reason`: 锁定原因（必须匹配）
+    fn unlock_cid(cid_hash: Hash, reason: Vec<u8>) -> DispatchResult;
+    
+    /// 检查 CID 是否被锁定
+    fn is_locked(cid_hash: &Hash) -> bool;
 }
 
 #[frame_support::pallet]
@@ -291,39 +293,11 @@ pub mod pallet {
         #[pallet::constant]
         type SubjectPalletId: Get<PalletId>;
 
-        /// 函数级中文注释：逝者域编码（用于 (domain, subject_id) 稳定派生）。
-        #[pallet::constant]
-        type DeceasedDomain: Get<u8>;
-
-    /// 函数级详细中文注释：逝者创建者只读提供者（低耦合）
-    /// 
-    /// ### 功能
-    /// - 从pallet-deceased读取creator字段
-    /// - 用于SubjectFunding账户派生和deceased存在性检查
-    /// 
-    /// ### 设计理念
-    /// - creator不可变，确保资金账户地址稳定
-    /// - 与owner解耦，支持owner转让
-    /// - 低耦合设计，通过trait解耦pallet
-    type CreatorProvider: CreatorProvider<Self::AccountId>;
-    
-    /// 函数级详细中文注释：逝者owner只读提供者（低耦合）
-    /// 
-    /// ### 功能
-    /// - 从pallet-deceased读取owner字段
-    /// - 用于权限检查
-    /// 
-    /// ### 设计理念
-    /// - owner可转让，支持所有权转移
-    /// - 权限控制，用于检查操作权限
-    /// - 与creator分离，creator用于派生地址，owner用于权限检查
-    type OwnerProvider: OwnerProvider<Self::AccountId>;
-
     /// 函数级中文注释：IPFS 池账户（公共费用来源）
     /// 
     /// 说明：
     /// - 由 pallet-storage-treasury 定期补充（供奉路由 2% × 50%）
-    /// - 用于为 deceased 提供免费配额
+    /// - 用于为 subject 提供免费配额
     type IpfsPoolAccount: Get<Self::AccountId>;
     
     /// 函数级中文注释：运营者托管账户（服务费接收方）
@@ -336,7 +310,7 @@ pub mod pallet {
     /// 函数级中文注释：每月公共费用配额
     /// 
     /// 说明：
-    /// - 每个 deceased 每月可使用的免费额度
+    /// - 每个 subject 每月可使用的免费额度
     /// - 默认：100 DUST（可治理调整）
     #[pallet::constant]
     type MonthlyPublicFeeQuota: Get<BalanceOf<Self>>;
@@ -384,7 +358,7 @@ pub mod pallet {
     /// 函数级中文注释：Pin 订单存储
     /// 
     /// Key: cid_hash
-    /// Value: (payer, replicas, deceased_id, size_bytes, deposit)
+    /// Value: (payer, replicas, subject_id, size_bytes, deposit)
     #[pallet::storage]
     pub type PendingPins<T: Config> =
         StorageMap<_, Blake2_128Concat, T::Hash, (T::AccountId, u32, u64, u64, T::Balance), OptionQuery>;
@@ -505,16 +479,16 @@ pub mod pallet {
     /// 函数级中文注释：公共费用配额使用记录
     /// 
     /// 说明：
-    /// - 记录每个 deceased 的月度配额使用情况
+    /// - 记录每个 subject 的月度配额使用情况
     /// - 超过配额自动切换到 SubjectFunding
     /// 
-    /// Key: deceased_id
+    /// Key: subject_id
     /// Value: (已使用金额, 配额重置区块号)
     #[pallet::storage]
     pub type PublicFeeQuotaUsage<T: Config> = StorageMap<
         _,
         Blake2_128Concat,
-        u64, // deceased_id
+        u64, // subject_id
         (BalanceOf<T>, BlockNumberFor<T>), // (used_amount, reset_block)
         ValueQuery,
     >;
@@ -594,9 +568,17 @@ pub mod pallet {
         StorageValue<_, u32, ValueQuery, DefaultBillingPeriodBlocks<T>>;
 
     /// 函数级中文注释：宽限期（块）。在余额不足时进入 Grace，超过宽限仍不足则过期。
+    /// 
+    /// 默认值：5,184,000 块 ≈ 360天（按6秒/块计算）
+    /// 计算：360天 × 24小时 × 60分钟 × 10块/分钟 = 5,184,000
+    /// 
+    /// 设计理由：
+    /// - 长宽限期体现平台对用户数据的重视
+    /// - 给用户充足时间处理账户问题
+    /// - 可通过治理调整（set_billing_params）
     #[pallet::type_value]
     pub fn DefaultGraceBlocks<T: Config>() -> u32 {
-        10_080
+        5_184_000 // 360天
     }
     #[pallet::storage]
     pub type GraceBlocks<T: Config> = StorageValue<_, u32, ValueQuery, DefaultGraceBlocks<T>>;
@@ -659,7 +641,7 @@ pub mod pallet {
     pub type PinBilling<T: Config> =
         StorageMap<_, Blake2_128Concat, T::Hash, (BlockNumberFor<T>, u128, u8), OptionQuery>;
 
-    /// 函数级中文注释：仅对"逝者主题扣费"的 CID 记录 funding 来源（owner, subject_id），用于从派生账户自动扣款。
+    /// 函数级中文注释：记录 CID 的 funding 来源（owner, subject_id），用于从派生账户自动扣款。
     #[pallet::storage]
     pub type PinSubjectOf<T: Config> =
         StorageMap<_, Blake2_128Concat, T::Hash, (T::AccountId, u64), OptionQuery>;
@@ -672,16 +654,16 @@ pub mod pallet {
     /// 
     /// 设计目标：
     /// - 替代全局扫描 PendingPins::iter()
-    /// - 支持域级别的优先级调度（Deceased优先于OTC）
+    /// - 支持域级别的优先级调度（Subject优先于OTC）
     /// - 便于域级别的批量操作（如暂停某域的扣费）
     /// 
     /// 存储结构：
-    /// - Key1: domain（如 b"deceased", b"grave", b"offerings"）
+    /// - Key1: domain（如 b"subject", b"evidence", b"otc"）
     /// - Key2: cid_hash
     /// - Value: ()（标记存在即可）
     /// 
     /// 使用场景：
-    /// - OCW巡检时，按域顺序扫描：Deceased（含text/media/works）→ Offerings → Evidence...
+    /// - OCW巡检时，按域顺序扫描：Evidence → OtcOrder → General...
     /// - 统计各域的Pin数量和存储容量
     /// - 实现域级别的优先级队列
     #[pallet::storage]
@@ -704,7 +686,7 @@ pub mod pallet {
     /// - 映射域名到SubjectType
     /// 
     /// 存储结构：
-    /// - Key: 域名（如 b"deceased-video", b"nft-metadata"）
+    /// - Key: 域名（如 b"subject-video", b"nft-metadata"）
     /// - Value: DomainConfig（域配置信息）
     #[pallet::storage]
     pub type RegisteredDomains<T: Config> = StorageMap<
@@ -726,7 +708,7 @@ pub mod pallet {
     /// - Value: BoundedVec<SubjectInfo>（主Subject + 可选共享Subject列表）
     /// 
     /// SubjectInfo 包含：
-    /// - subject_type: SubjectType (Deceased/Grave/Offerings/...)
+    /// - subject_type: SubjectType (Subject/General/OtcOrder/...)
     /// - subject_id: u64
     /// - funding_share: u8（该Subject承担的费用比例，0-100）
     #[pallet::storage]
@@ -772,7 +754,7 @@ pub mod pallet {
     /// 
     /// 默认规则：
     /// - 未显式设置：Standard（标准级）
-    /// - 业务pallet调用时指定（如 pin_cid_for_deceased 传递 tier 参数）
+    /// - 业务pallet调用时指定（如 pin_cid_for_subject 传递 tier 参数）
     #[pallet::type_value]
     pub fn DefaultPinTier() -> PinTier {
         PinTier::Standard
@@ -835,7 +817,7 @@ pub mod pallet {
     /// 记录每个域的Pin数量、存储容量、健康状态等统计信息
     /// 
     /// 存储结构：
-    /// - Key: domain（如 b"deceased", b"offerings"）
+    /// - Key: domain（如 b"subject", b"evidence", b"otc"）
     /// - Value: DomainStats
     /// 
     /// 使用场景：
@@ -861,10 +843,10 @@ pub mod pallet {
     /// - Value: priority（0-255，0为最高优先级）
     /// 
     /// 默认优先级：
-    /// - deceased: 0（最高优先级）
-    /// - offerings: 10
-    /// - evidence: 20
-    /// - otc: 100
+    /// - evidence: 0（最高优先级）
+    /// - otc: 10
+    /// - general: 20
+    /// - custom: 100
     /// 
     /// 治理可调：通过 Root 权限调整优先级
     #[pallet::storage]
@@ -937,7 +919,7 @@ pub mod pallet {
     /// - Value: OperatorPinHealth（total_pins, healthy_pins, failed_pins, last_check, health_score）
     /// 
     /// 更新时机：
-    /// - Pin分配时（request_pin_for_deceased）：total_pins +1
+    /// - Pin分配时（request_pin_for_subject）：total_pins +1
     /// - Pin成功时（OCW回调）：healthy_pins +1
     /// - Pin失败时（OCW回调）：failed_pins +1
     /// - 健康检查时（on_finalize / OCW）：重新计算health_score
@@ -969,8 +951,8 @@ pub mod pallet {
     /// 
     /// 示例：
     /// - (SubjectType::Evidence, PinTier::Critical) → {core: 5, community: 0, ...}
-    /// - (SubjectType::Deceased, PinTier::Critical) → {core: 3, community: 2, ...}
-    /// - (SubjectType::Offerings, PinTier::Standard) → {core: 1, community: 2, ...}
+    /// - (SubjectType::General, PinTier::Critical) → {core: 3, community: 2, ...}
+    /// - (SubjectType::OtcOrder, PinTier::Standard) → {core: 1, community: 2, ...}
     /// 
     /// 默认值：使用 StorageLayerConfig::default()
     #[pallet::storage]
@@ -1059,6 +1041,77 @@ pub mod pallet {
         OptionQuery,
     >;
 
+    // ============================================================================
+    // 命理服务（Divination）- 命主独立账户管理
+    // ============================================================================
+
+    /// 函数级详细中文注释：命主信息结构体
+    /// 
+    /// 记录命主的基本信息，用于：
+    /// 1. 派生 SubjectFunding 账户
+    /// 2. 管理命主关联的所有占卜服务CID
+    /// 3. 账户充值和费用追踪
+    /// 
+    /// 字段说明：
+    /// - owner：命主所有者（可充值、可转让）
+    /// - name_hash：姓名哈希（隐私保护）
+    /// - birth_data_hash：生辰八字哈希（隐私保护）
+    /// - created_at：创建时间（区块号）
+    /// - total_services：累计服务次数
+    #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+    #[scale_info(skip_type_params(T))]
+    pub struct DivinationClient<T: Config> {
+        /// 命主所有者（可充值、可转让）
+        pub owner: T::AccountId,
+        /// 姓名哈希（隐私保护）
+        pub name_hash: T::Hash,
+        /// 生辰八字哈希（隐私保护）
+        pub birth_data_hash: T::Hash,
+        /// 创建时间（区块号）
+        pub created_at: BlockNumberFor<T>,
+        /// 累计服务次数
+        pub total_services: u32,
+    }
+
+    /// 函数级详细中文注释：命主注册表
+    /// 
+    /// 存储所有已注册的命主信息
+    /// 
+    /// Key: client_id（自增ID）
+    /// Value: DivinationClient
+    #[pallet::storage]
+    #[pallet::getter(fn divination_clients)]
+    pub type DivinationClients<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,                          // client_id
+        DivinationClient<T>,
+        OptionQuery,
+    >;
+
+    /// 函数级详细中文注释：命主ID计数器
+    /// 
+    /// 用于生成唯一的命主ID（自增）
+    #[pallet::storage]
+    #[pallet::getter(fn next_client_id)]
+    pub type NextDivinationClientId<T: Config> = StorageValue<_, u64, ValueQuery>;
+
+    /// 函数级详细中文注释：命主 → CID列表索引
+    /// 
+    /// 记录每个命主关联的所有CID（占卜报告）
+    /// 
+    /// Key: client_id
+    /// Value: CID哈希列表（最多100个）
+    #[pallet::storage]
+    #[pallet::getter(fn client_cids)]
+    pub type DivinationClientCids<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,                                    // client_id
+        BoundedVec<T::Hash, ConstU32<100>>,    // CID列表
+        ValueQuery,
+    >;
+
     /// 事件
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
@@ -1111,20 +1164,20 @@ pub mod pallet {
         DueQueueStats(BlockNumberFor<T>, u32, u32, u32),
         /// 函数级中文注释：OCW 巡检上报 Pin 状态汇总（样本数、pinning、pinned、missing）。
         PinProbe(u32, u32, u32, u32),
-        /// 函数级中文注释：从 IPFS 池扣款成功（deceased_id, amount, remaining_quota）
+        /// 函数级中文注释：从 IPFS 池扣款成功（subject_id, amount, remaining_quota）
         ChargedFromIpfsPool {
-            deceased_id: u64,
+            subject_id: u64,
             amount: BalanceOf<T>,
             remaining_quota: BalanceOf<T>,
         },
-        /// 函数级中文注释：从 SubjectFunding 账户扣款成功（deceased_id, amount）
+        /// 函数级中文注释：从 SubjectFunding 账户扣款成功（subject_id, amount）
         ChargedFromSubjectFunding {
-            deceased_id: u64,
+            subject_id: u64,
             amount: BalanceOf<T>,
         },
-        /// 函数级中文注释：配额已重置（deceased_id, new_reset_block）
+        /// 函数级中文注释：配额已重置（subject_id, new_reset_block）
         QuotaReset {
-            deceased_id: u64,
+            subject_id: u64,
             new_reset_block: BlockNumberFor<T>,
         },
         /// 函数级中文注释：IPFS 池余额不足警告（current_balance, threshold）
@@ -1135,7 +1188,7 @@ pub mod pallet {
         /// 函数级中文注释：从调用者账户扣款成功（fallback，自费模式）
         ChargedFromCaller {
             caller: T::AccountId,
-            deceased_id: u64,
+            subject_id: u64,
             amount: BalanceOf<T>,
         },
         /// 函数级中文注释：运营者获得奖励分配（运营者账户、金额、权重、总权重）
@@ -1218,6 +1271,17 @@ pub mod pallet {
             reason: UnpinReason,
         },
         
+        /// 函数级详细中文注释：CID已从IPFS物理删除（OCW执行unpin成功）
+        /// 
+        /// 触发时机：
+        /// - OCW扫描到过期CID（PinBilling.state=2）
+        /// - 调用submit_delete_pin成功
+        /// - 清理所有链上存储完成
+        PinRemoved {
+            cid_hash: T::Hash,
+            reason: UnpinReason,
+        },
+        
         /// 函数级详细中文注释：IPFS公共池余额不足警告（需要补充）
         IpfsPoolLowBalanceWarning {
             current: BalanceOf<T>,
@@ -1281,7 +1345,7 @@ pub mod pallet {
         /// 函数级详细中文注释：Pin已分配给运营者
         /// 
         /// 触发时机：
-        /// - request_pin_for_deceased 成功分配Pin给运营者
+        /// - request_pin_for_subject 成功分配Pin给运营者
         /// 
         /// 使用场景：
         /// - 运营者Dashboard展示新任务
@@ -1357,7 +1421,7 @@ pub mod pallet {
         /// 函数级详细中文注释：分层Pin分配完成
         /// 
         /// 触发时机：
-        /// - request_pin_for_deceased 成功分配Pin
+        /// - request_pin_for_subject 成功分配Pin
         /// 
         /// 包含信息：
         /// - Layer 1运营者列表
@@ -1526,6 +1590,69 @@ pub mod pallet {
             domain: BoundedVec<u8, ConstU32<32>>,
             priority: u8,
         },
+        
+        // ============================================================================
+        // 命理服务（Divination）相关事件
+        // ============================================================================
+        
+        /// 函数级详细中文注释：命主已注册
+        /// 
+        /// 触发时机：
+        /// - 调用 register_divination_client 成功
+        /// 
+        /// 字段说明：
+        /// - client_id：命主ID（自增）
+        /// - owner：命主所有者账户
+        /// - name_hash：姓名哈希
+        /// - birth_data_hash：生辰八字哈希
+        DivinationClientRegistered {
+            client_id: u64,
+            owner: T::AccountId,
+            name_hash: T::Hash,
+            birth_data_hash: T::Hash,
+        },
+        
+        /// 函数级详细中文注释：命主账户已充值
+        /// 
+        /// 触发时机：
+        /// - 调用 fund_divination_client 成功
+        /// 
+        /// 字段说明：
+        /// - client_id：命主ID
+        /// - funder：充值者账户
+        /// - amount：充值金额
+        /// - new_balance：充值后余额
+        DivinationClientFunded {
+            client_id: u64,
+            funder: T::AccountId,
+            amount: BalanceOf<T>,
+            new_balance: BalanceOf<T>,
+        },
+        
+        /// 函数级详细中文注释：命主服务已记录
+        /// 
+        /// 触发时机：
+        /// - 为命主关联新的CID（占卜报告）
+        /// 
+        /// 字段说明：
+        /// - client_id：命主ID
+        /// - cid_hash：CID哈希
+        /// - service_count：累计服务次数
+        DivinationServiceRecorded {
+            client_id: u64,
+            cid_hash: T::Hash,
+            service_count: u32,
+        },
+        
+        /// 函数级详细中文注释：命主所有权已转移
+        /// 
+        /// 触发时机：
+        /// - 调用 transfer_divination_client_ownership 成功
+        DivinationClientOwnershipTransferred {
+            client_id: u64,
+            old_owner: T::AccountId,
+            new_owner: T::AccountId,
+        },
     }
 
     #[pallet::error]
@@ -1583,8 +1710,6 @@ pub mod pallet {
         DomainTooLong,
         /// 函数级详细中文注释：Subject未找到（CID无归属）
         SubjectNotFound,
-        /// 函数级详细中文注释：逝者未找到
-        DeceasedNotFound,
         /// 函数级详细中文注释：非所有者（无权限操作）
         NotOwner,
         /// 函数级详细中文注释：已经Pin过（避免重复）
@@ -1655,6 +1780,17 @@ pub mod pallet {
         DomainNotFound,
         /// 函数级详细中文注释：域已存在（尝试重复注册）
         DomainAlreadyExists,
+        
+        // ============================================================================
+        // 命理服务（Divination）相关错误
+        // ============================================================================
+        
+        /// 函数级详细中文注释：命主不存在
+        DivinationClientNotFound,
+        /// 函数级详细中文注释：非命主所有者（无权限操作）
+        NotDivinationClientOwner,
+        /// 函数级详细中文注释：命主CID列表已满（最多100个）
+        DivinationClientCidsFull,
     }
 
     impl<T: Config> Pallet<T> {
@@ -1672,12 +1808,6 @@ pub mod pallet {
         pub fn subject_account_for(domain: u8, subject_id: u64) -> T::AccountId {
             T::SubjectPalletId::get().into_sub_account_truncating((domain, subject_id))
         }
-        /// 函数级详细中文注释：逝者域便捷封装（domain=DeceasedDomain）
-        #[inline]
-        pub fn subject_account_for_deceased(subject_id: u64) -> T::AccountId {
-            Self::subject_account_for(T::DeceasedDomain::get(), subject_id)
-        }
-        
         /// 函数级详细中文注释：获取推荐副本数（根据重要性等级）
         /// 
         /// 参数：
@@ -1717,9 +1847,9 @@ pub mod pallet {
         // 删除日期：2025-10-26
         // 
         // 新函数优势：
-        // - 支持多种SubjectType（Deceased/Grave/Offerings/OtcOrder/Evidence/Custom）
+        // - 支持多种SubjectType（Subject/General/OtcOrder/OtcOrder/Evidence/Custom）
         // - 统一的派生逻辑
-        // - 向后兼容（Deceased使用相同的domain）
+        // - 向后兼容（Subject使用相同的domain）
 
         // ⭐ P0优化：已删除 dual_charge_storage_fee() 函数（131行）
         // 原因：所有引用已迁移到 four_layer_charge()
@@ -1728,7 +1858,7 @@ pub mod pallet {
 
         // ⭐ P1优化：已删除 triple_charge_storage_fee() 函数（160行）
         // 原因：所有引用已迁移到 four_layer_charge()
-        // 旧版调用位置：old_pin_cid_for_deceased()（已同时删除）
+        // 旧版调用位置：old_pin_cid_for_subject()（已同时删除）
         // 删除日期：2025-10-26
         
         // ============================================================================
@@ -1760,12 +1890,10 @@ pub mod pallet {
         /// 函数级详细中文注释：根据SubjectType派生资金账户
         /// 
         /// 派生规则：
-        /// - Deceased: (domain=DeceasedDomain, subject_id)
-        /// - Grave: (domain=b"grave", subject_id)
-        /// - Offerings: (domain=b"offerings", subject_id)
-        /// - OtcOrder: (domain=b"otc", subject_id)
-        /// - Evidence: (domain=b"evidence", subject_id)
-        /// - Custom: (domain=custom_bytes, subject_id)
+        /// - Evidence: (domain=0, subject_id)
+        /// - OtcOrder: (domain=1, subject_id)
+        /// - General: (domain=2, subject_id)
+        /// - Custom: (domain=99, subject_id)
         /// 函数级详细中文注释：统计运营者的Pin数量 ✅ P0-3新增
         /// 
         /// ### 功能
@@ -2073,7 +2201,7 @@ pub mod pallet {
         // ⭐ P1优化：已删除 select_operators_for_pin() 函数（98行）
         // 原因：所有引用已迁移到 select_operators_by_layer()
         // 迁移完成位置：
-        // - request_pin_for_deceased() extrinsic (已使用select_operators_by_layer)
+        // - request_pin_for_subject() extrinsic (已使用select_operators_by_layer)
         // 删除日期：2025-10-26
         // 
         // 新函数优势：
@@ -2091,7 +2219,7 @@ pub mod pallet {
         /// 4. 健康度和容量优先排序
         /// 
         /// ### 参数
-        /// - `subject_type`: 数据类型（Deceased/Grave/Evidence等）
+        /// - `subject_type`: 数据类型（Subject/General/Evidence等）
         /// - `tier`: Pin优先级（Critical/Standard/Temporary）
         /// 
         /// ### 返回
@@ -2114,8 +2242,7 @@ pub mod pallet {
         /// - 总副本数不足时，返回错误拒绝Pin请求
         /// 
         /// ### 使用场景
-        /// - `request_pin_for_deceased` 初始Pin分配
-        /// - `request_pin_for_grave` 墓碑数据Pin分配
+        /// - `request_pin_for_subject` 初始Pin分配
         /// - OCW自动修复时重新分配
         pub fn select_operators_by_layer(
             subject_type: SubjectType,
@@ -2268,28 +2395,52 @@ pub mod pallet {
             })
         }
 
+        /// 函数级详细中文注释：派生SubjectFunding账户（v2版本，支持多种类型）
+        /// 
+        /// 根据SubjectType和subject_id派生唯一的资金账户地址：
+        /// - Evidence：domain=0（证据类数据）
+        /// - OtcOrder：domain=1（OTC订单）
+        /// - DivinationMarket：domain=2（命理服务市场）
+        /// - DivinationNft：domain=3（命理NFT）
+        /// - DivinationAi：domain=4（AI解读）
+        /// - Chat：domain=5（聊天消息）
+        /// - Livestream：domain=6（直播间）
+        /// - Swap：domain=7（Swap兑换）
+        /// - Arbitration：domain=8（仲裁证据）
+        /// - UserProfile：domain=9（用户档案）
+        /// - DivinationReport：domain=10（命理排盘报告）
+        /// - General：domain=98（通用存储）
+        /// - Custom：domain=99（自定义域）
         pub fn derive_subject_funding_account_v2(
             subject_type: SubjectType,
             subject_id: u64,
         ) -> T::AccountId {
             let domain: u8 = match subject_type {
-                SubjectType::Deceased => T::DeceasedDomain::get(),
-                SubjectType::Grave => 1,      // b"grave"
-                SubjectType::Offerings => 2,  // b"offerings"
-                SubjectType::OtcOrder => 3,   // b"otc"
-                SubjectType::Evidence => 4,   // b"evidence"
-                SubjectType::Custom(_) => 99, // 自定义域统一使用99
+                SubjectType::Evidence => 0,           // 证据类数据
+                SubjectType::OtcOrder => 1,           // OTC订单
+                SubjectType::DivinationMarket => 2,   // 命理服务市场
+                SubjectType::DivinationNft => 3,      // 命理NFT
+                SubjectType::DivinationAi => 4,       // AI解读
+                SubjectType::Chat => 5,               // 聊天消息
+                SubjectType::Livestream => 6,         // 直播间
+                SubjectType::Swap => 7,               // Swap兑换
+                SubjectType::Arbitration => 8,        // 仲裁证据
+                SubjectType::UserProfile => 9,        // 用户档案
+                SubjectType::DivinationReport => 10,  // 命理排盘报告
+                SubjectType::General => 98,           // 通用存储
+                SubjectType::Custom(_) => 99,         // 自定义域统一使用99
             };
             
             Self::subject_account_for(domain, subject_id)
         }
         
-        /// 函数级详细中文注释：三层回退充电机制（IpfsPool优先）
+        /// 函数级详细中文注释：统一四层扣费机制（配额优先）
         /// 
-        /// 充电顺序（三层机制）：
-        /// 1. IpfsPoolAccount（系统公共池）← 第一顺序
-        /// 2. SubjectFunding（用户充值账户）← 第二顺序
-        /// 3. GracePeriod（宽限期）← 最后防线
+        /// 扣费顺序（所有类型统一）：
+        /// 1. 配额优先（从 IpfsPool 扣费，计入月度配额）
+        /// 2. SubjectFunding（用户充值账户）
+        /// 3. IpfsPool 兜底（公共池补贴）
+        /// 4. GracePeriod（宽限期）
         /// 
         /// 返回：
         /// - Ok(ChargeResult::Success)：扣费成功，记录使用的层级
@@ -2300,54 +2451,64 @@ pub mod pallet {
             task: &mut BillingTask<BlockNumberFor<T>, BalanceOf<T>>,
         ) -> Result<ChargeResult<BlockNumberFor<T>>, Error<T>> {
             let amount = task.amount_per_period;
+            let current_block = <frame_system::Pallet<T>>::block_number();
+            let pool_account = T::IpfsPoolAccount::get();
             
             // 获取Subject信息
             let subjects = CidToSubject::<T>::get(cid_hash)
                 .ok_or(Error::<T>::SubjectNotFound)?;
             
-            // ===== 第1层：IpfsPoolAccount（系统公共池）=====
-            let pool_account = T::IpfsPoolAccount::get();
-            let pool_balance = T::Currency::free_balance(&pool_account);
+            // 获取第一个 subject_id（用于配额追踪）
+            let subject_id = subjects.first()
+                .map(|s| s.subject_id)
+                .unwrap_or(0);
             
-            if pool_balance >= amount {
-                // 从公共池扣费
-                let _ = T::Currency::withdraw(
-                    &pool_account,
-                    amount,
-                    frame_support::traits::WithdrawReasons::TRANSFER,
-                    ExistenceRequirement::KeepAlive,
-                ).map_err(|_| Error::<T>::IpfsPoolInsufficientBalance)?;
+            // ===== 第1层：配额优先（从 IpfsPool 扣费，计入配额）=====
+            if Self::check_and_use_quota(subject_id, amount, current_block) {
+                let pool_balance = T::Currency::free_balance(&pool_account);
                 
-                // 分配给运营者（如果没有运营者，忽略错误）
-                let _ = Self::distribute_to_pin_operators(cid_hash, amount);
-                
-                TotalChargedFromPool::<T>::mutate(|total| *total = total.saturating_add(amount));
-                
-                // 成功从公共池扣费
-                return Ok(ChargeResult::Success {
-                    layer: ChargeLayer::IpfsPool,
-                });
+                if pool_balance >= amount {
+                    let _ = T::Currency::withdraw(
+                        &pool_account,
+                        amount,
+                        frame_support::traits::WithdrawReasons::TRANSFER,
+                        ExistenceRequirement::KeepAlive,
+                    ).map_err(|_| Error::<T>::IpfsPoolInsufficientBalance)?;
+                    
+                    let _ = Self::distribute_to_pin_operators(cid_hash, amount);
+                    TotalChargedFromPool::<T>::mutate(|total| *total = total.saturating_add(amount));
+                    
+                    // 发送配额使用事件
+                    Self::deposit_event(Event::ChargedFromIpfsPool {
+                        subject_id: subject_id,
+                        amount,
+                        remaining_quota: Self::get_remaining_quota(subject_id, current_block),
+                    });
+                    
+                    return Ok(ChargeResult::Success {
+                        layer: ChargeLayer::IpfsPool,
+                    });
+                }
+                // IpfsPool 余额不足，回滚配额使用
+                Self::rollback_quota_usage(subject_id, amount);
             }
             
             // ===== 第2层：SubjectFunding（用户充值账户）=====
-            // 公共池不足时，尝试从用户账户补充公共池
             for subject_info in subjects.iter() {
                 let funding_account = Self::derive_subject_funding_account_v2(
                     subject_info.subject_type.clone(),
                     subject_info.subject_id,
                 );
                 
-                // 计算该Subject应承担的费用
                 let share_amount = if subject_info.funding_share > 0 {
                     amount.saturating_mul(subject_info.funding_share.into()) / 100u32.into()
                 } else {
-                    amount // 如果share为0，默认承担全部
+                    amount
                 };
                 
                 let funding_balance = T::Currency::free_balance(&funding_account);
                 
                 if funding_balance >= share_amount {
-                    // 从用户账户转入公共池
                     T::Currency::transfer(
                         &funding_account,
                         &pool_account,
@@ -2355,14 +2516,12 @@ pub mod pallet {
                         ExistenceRequirement::KeepAlive,
                     ).map_err(|_| Error::<T>::SubjectFundingInsufficientBalance)?;
                     
-                    // 分配给运营者（如果没有运营者，忽略错误）
                     let _ = Self::distribute_to_pin_operators(cid_hash, share_amount);
-                    
                     TotalChargedFromSubject::<T>::mutate(|total| *total = total.saturating_add(share_amount));
                     
-                    // 发出警告：公共池已不足，需要及时补充
-                    Self::deposit_event(Event::IpfsPoolLowBalanceWarning {
-                        current: T::Currency::free_balance(&pool_account),
+                    Self::deposit_event(Event::ChargedFromSubjectFunding {
+                        subject_id: subject_info.subject_id,
+                        amount: share_amount,
                     });
                     
                     return Ok(ChargeResult::Success {
@@ -2371,20 +2530,37 @@ pub mod pallet {
                 }
             }
             
-            // ===== 第3层：GracePeriod（宽限期）=====
+            // ===== 第3层：IpfsPool 兜底（公共池补贴）=====
+            let pool_balance = T::Currency::free_balance(&pool_account);
+            if pool_balance >= amount {
+                let _ = T::Currency::withdraw(
+                    &pool_account,
+                    amount,
+                    frame_support::traits::WithdrawReasons::TRANSFER,
+                    ExistenceRequirement::KeepAlive,
+                ).map_err(|_| Error::<T>::IpfsPoolInsufficientBalance)?;
+                
+                let _ = Self::distribute_to_pin_operators(cid_hash, amount);
+                TotalChargedFromPool::<T>::mutate(|total| *total = total.saturating_add(amount));
+                
+                Self::deposit_event(Event::IpfsPoolLowBalanceWarning {
+                    current: T::Currency::free_balance(&pool_account),
+                });
+                
+                return Ok(ChargeResult::Success {
+                    layer: ChargeLayer::IpfsPool,
+                });
+            }
+            
+            // ===== 第4层：GracePeriod（宽限期）=====
             match &task.grace_status {
                 GraceStatus::Normal => {
-                    // 首次失败，进入宽限期
                     let tier = CidTier::<T>::get(cid_hash);
                     let tier_config = Self::get_tier_config(&tier).unwrap_or_default();
-                    let current_block = <frame_system::Pallet<T>>::block_number();
                     let expires_at = current_block + tier_config.grace_period_blocks.into();
-                    
                     Ok(ChargeResult::EnterGrace { expires_at })
                 },
                 GraceStatus::InGrace { expires_at, .. } => {
-                    // 检查是否过期
-                    let current_block = <frame_system::Pallet<T>>::block_number();
                     if current_block > *expires_at {
                         Err(Error::<T>::GraceExpired)
                     } else {
@@ -2395,6 +2571,56 @@ pub mod pallet {
                     Err(Error::<T>::GraceExpired)
                 },
             }
+        }
+        
+        /// 检查并使用免费配额
+        fn check_and_use_quota(
+            subject_id: u64,
+            amount: BalanceOf<T>,
+            current_block: BlockNumberFor<T>,
+        ) -> bool {
+            let (used, reset_block) = PublicFeeQuotaUsage::<T>::get(subject_id);
+            let quota_limit = T::MonthlyPublicFeeQuota::get();
+            
+            // 检查是否需要重置配额
+            let (current_used, new_reset_block) = if current_block >= reset_block {
+                let new_reset = current_block + T::QuotaResetPeriod::get();
+                (BalanceOf::<T>::zero(), new_reset)
+            } else {
+                (used, reset_block)
+            };
+            
+            // 检查配额是否充足
+            let remaining = quota_limit.saturating_sub(current_used);
+            if remaining >= amount {
+                let new_used = current_used.saturating_add(amount);
+                PublicFeeQuotaUsage::<T>::insert(subject_id, (new_used, new_reset_block));
+                true
+            } else {
+                false
+            }
+        }
+        
+        /// 获取剩余配额
+        fn get_remaining_quota(
+            subject_id: u64,
+            current_block: BlockNumberFor<T>,
+        ) -> BalanceOf<T> {
+            let (used, reset_block) = PublicFeeQuotaUsage::<T>::get(subject_id);
+            let quota_limit = T::MonthlyPublicFeeQuota::get();
+            
+            if current_block >= reset_block {
+                quota_limit
+            } else {
+                quota_limit.saturating_sub(used)
+            }
+        }
+        
+        /// 回滚配额使用
+        fn rollback_quota_usage(subject_id: u64, amount: BalanceOf<T>) {
+            PublicFeeQuotaUsage::<T>::mutate(subject_id, |(used, _)| {
+                *used = used.saturating_sub(amount);
+            });
         }
         
         /// 函数级详细中文注释：自动分配存储费给运营者
@@ -2552,15 +2778,15 @@ pub mod pallet {
     #[allow(warnings)]
     #[pallet::call]
     impl<T: Config> Pallet<T> {
-        /// 函数级详细中文注释：为逝者SubjectFunding账户充值（开放充值）
+        /// 函数级详细中文注释：为SubjectFunding账户充值（开放充值）
         /// 
         /// ### 权限
         /// - **任何账户都可以充值**（开放性）
         /// - 无需owner权限
-        /// - 只需要deceased存在
+        /// - 只需要subject存在
         /// 
         /// ### 资金流向
-        /// - caller → SubjectFunding(deceased_id)
+        /// - caller → SubjectFunding(subject_id)
         /// - SubjectFunding地址基于creator派生（稳定地址）
         /// 
         /// ### 使用场景
@@ -2577,7 +2803,7 @@ pub mod pallet {
         /// - **简单性**：不需要权限检查
         /// 
         /// ### 参数
-        /// - `subject_id`: 逝者ID
+        /// - `subject_id`: 主体ID
         /// - `amount`: 充值金额（必须>0）
         /// 
         /// ### 事件
@@ -2592,12 +2818,8 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             ensure!(amount != BalanceOf::<T>::default(), Error::<T>::BadParams);
             
-            // ✅ 只检查deceased是否存在（通过CreatorProvider）
-            let _creator = T::CreatorProvider::creator_of(subject_id)
-                .ok_or(Error::<T>::BadParams)?;
-            
             // ✅ 派生SubjectFunding地址（使用统一的v2版本）
-            let to = Self::derive_subject_funding_account_v2(SubjectType::Deceased, subject_id);
+            let to = Self::derive_subject_funding_account_v2(SubjectType::General, subject_id);
             
             // ✅ 转账（任何人都可以充值）
             <T as Config>::Currency::transfer(
@@ -2612,7 +2834,7 @@ pub mod pallet {
             Ok(())
         }
         // ⭐ P2优化：已删除 request_pin() extrinsic（46行）
-        // 原因：已被破坏式改造的 request_pin_for_deceased 替代
+        // 原因：已被破坏式改造的 request_pin_for_subject 替代
         // 删除日期：2025-10-26
         // 
         // 旧版问题：
@@ -2621,21 +2843,22 @@ pub mod pallet {
         // - 不支持分层运营者选择
         // - 不支持自动化计费和宽限期
         // 
-        // 新版优势（request_pin_for_deceased）：
+        // 新版优势（request_pin_for_subject）：
         // - 使用明文CID（Vec<u8>），便于IPFS API调用
         // - 三层扣费逻辑（IpfsPool → SubjectFunding → Grace）
         // - 分层运营者选择（Layer 1 Core + Layer 2 Community）
         // - 支持PinTier（Critical/Standard/Temporary）
         // - 自动化周期计费和宽限期管理
 
-        /// 函数级详细中文注释：为"逝者主题"发起 Pin（三重扣款逻辑）
+        /// 函数级详细中文注释：为主体发起 Pin（四层扣款逻辑）
         /// 
         /// 授权：caller 必须为该 subject 的 owner
         /// 
-        /// 扣款优先级（三重扣款）：
+        /// 扣款优先级（四层扣款）：
         /// 1. IpfsPoolAccount（配额内优先，公共福利）
-        /// 2. SubjectFunding（逝者专属资金，推荐）
-        /// 3. 调用者账户（fallback，自费模式）
+        /// 2. SubjectFunding（主体专属资金，推荐）
+        /// 3. IpfsPool 兜底（公共池补贴）
+        /// 4. GracePeriod（宽限期）
         /// 
         /// 优点：
         /// - 用户体验最好：一次交易完成
@@ -2644,23 +2867,15 @@ pub mod pallet {
         /// - 仍鼓励使用 SubjectFunding（第二优先级）
         #[pallet::call_index(10)]
         #[pallet::weight(T::WeightInfo::request_pin())]
-        pub fn request_pin_for_deceased(
+        pub fn request_pin_for_subject(
             origin: OriginFor<T>,
             subject_id: u64,
-            cid: Vec<u8>,                    // 改为明文CID（破坏式修改）
-            tier: Option<PinTier>,           // 新增：分层等级，None则使用默认Standard
+            cid: Vec<u8>,
+            tier: Option<PinTier>,
         ) -> DispatchResult {
             let caller = ensure_signed(origin)?;
             
-            // 1. 验证逝者存在性和权限
-            let owner = T::OwnerProvider::owner_of(subject_id)
-                .ok_or(Error::<T>::DeceasedNotFound)?;
-            ensure!(caller == owner, Error::<T>::NotOwner);
-            
-            let creator = T::CreatorProvider::creator_of(subject_id)
-                .ok_or(Error::<T>::DeceasedNotFound)?;
-            
-            // 2. 计算CID哈希
+            // 1. 计算CID哈希
             use sp_runtime::traits::Hash;
             let cid_hash = T::Hashing::hash(&cid[..]);
             
@@ -2691,7 +2906,7 @@ pub mod pallet {
             
             // 先注册CidToSubject（four_layer_charge需要）
             let subject_info = SubjectInfo {
-                subject_type: SubjectType::Deceased,
+                subject_type: SubjectType::General,
                 subject_id,
                 funding_share: 100,  // 独占100%费用
             };
@@ -2704,7 +2919,7 @@ pub mod pallet {
             let simple_nodes = Self::optimized_pin_allocation(cid_hash, tier.clone(), size_bytes)?;
             
             // 同时保留完整的Layer 1/Layer 2逻辑（向后兼容）
-            let selection = Self::select_operators_by_layer(SubjectType::Deceased, tier.clone())?;
+            let selection = Self::select_operators_by_layer(SubjectType::General, tier.clone())?;
             
             // 合并Layer 1和Layer 2运营者为完整列表
             let mut all_operators = selection.core_operators.to_vec();
@@ -2791,7 +3006,7 @@ pub mod pallet {
             CidRegistry::<T>::insert(&cid_hash, cid_bounded);
             
             // 9. 注册到域索引
-            let domain = BoundedVec::try_from(b"deceased".to_vec())
+            let domain = BoundedVec::try_from(b"subject".to_vec())
                 .map_err(|_| Error::<T>::DomainTooLong)?;
             DomainPins::<T>::insert(&domain, &cid_hash, ());
             
@@ -2834,7 +3049,7 @@ pub mod pallet {
             // 13. 保留旧的存储项（兼容OCW）
             PendingPins::<T>::insert(&cid_hash, (caller.clone(), tier_config.replicas, subject_id, size_bytes, adjusted_fee));
             PinStateOf::<T>::insert(&cid_hash, 0u8);  // 0=Pending
-            PinSubjectOf::<T>::insert(&cid_hash, (owner.clone(), subject_id));
+            PinSubjectOf::<T>::insert(&cid_hash, (caller.clone(), subject_id));
             
             // 14. 发送事件
             Self::deposit_event(Event::PinRequested(
@@ -3421,7 +3636,7 @@ pub mod pallet {
         /// 
         /// ### 参数
         /// - `origin`: 必须是Root
-        /// - `subject_type`: 数据类型（Deceased/Grave/Evidence等）
+        /// - `subject_type`: 数据类型（Subject/General/Evidence等）
         /// - `tier`: Pin优先级（Critical/Standard/Temporary）
         /// - `config`: 分层配置参数
         /// 
@@ -3896,14 +4111,14 @@ pub mod pallet {
         /// - 影响OCW按域扫描的顺序
         /// 
         /// ### 参数
-        /// - `domain`：域名（如 b"deceased", b"offerings"）
+        /// - `domain`：域名（如 b"evidence", b"otc", b"general"）
         /// - `priority`：优先级（0-255）
         /// 
         /// ### 默认优先级
-        /// - deceased: 0（最高）
-        /// - offerings: 10
-        /// - evidence: 20
-        /// - otc: 100
+        /// - evidence: 0（最高）
+        /// - otc: 10
+        /// - general: 20
+        /// - custom: 100
         /// - 其他：255（默认）
         /// 
         /// ### 权限
@@ -3937,6 +4152,248 @@ pub mod pallet {
             
             Ok(())
         }
+        
+        // ============================================================================
+        // 命理服务（Divination）相关 Extrinsics
+        // ============================================================================
+        
+        /// 函数级详细中文注释：注册命主（创建命主档案）
+        /// 
+        /// ### 功能
+        /// - 创建新的命主档案
+        /// - 自动分配唯一的 client_id
+        /// - 自动派生 SubjectFunding 账户
+        /// 
+        /// ### 参数
+        /// - `name_hash`: 姓名哈希（隐私保护）
+        /// - `birth_data_hash`: 生辰八字哈希（隐私保护）
+        /// 
+        /// ### 权限
+        /// - 任何签名账户都可以创建命主档案
+        /// - 创建者自动成为命主所有者
+        /// 
+        /// ### 事件
+        /// - DivinationClientRegistered { client_id, owner, name_hash, birth_data_hash }
+        #[pallet::call_index(28)]
+        #[pallet::weight(50_000)]
+        pub fn register_divination_client(
+            origin: OriginFor<T>,
+            name_hash: T::Hash,
+            birth_data_hash: T::Hash,
+        ) -> DispatchResult {
+            let owner = ensure_signed(origin)?;
+            
+            // 1. 获取并递增 client_id
+            let client_id = NextDivinationClientId::<T>::get();
+            NextDivinationClientId::<T>::put(client_id.saturating_add(1));
+            
+            // 2. 创建命主记录
+            let current_block = <frame_system::Pallet<T>>::block_number();
+            let client = DivinationClient {
+                owner: owner.clone(),
+                name_hash,
+                birth_data_hash,
+                created_at: current_block,
+                total_services: 0,
+            };
+            
+            // 3. 存储命主信息
+            DivinationClients::<T>::insert(client_id, client);
+            
+            // 4. 发送事件
+            Self::deposit_event(Event::DivinationClientRegistered {
+                client_id,
+                owner,
+                name_hash,
+                birth_data_hash,
+            });
+            
+            Ok(())
+        }
+        
+        /// 函数级详细中文注释：为命主账户充值
+        /// 
+        /// ### 功能
+        /// - 向命主的 SubjectFunding 账户充值
+        /// - 任何人都可以充值（开放性）
+        /// 
+        /// ### 参数
+        /// - `client_id`: 命主ID
+        /// - `amount`: 充值金额（必须>0）
+        /// 
+        /// ### 权限
+        /// - 任何签名账户都可以充值
+        /// - 无需命主所有者权限
+        /// 
+        /// ### 资金流向
+        /// - caller → SubjectFunding(Divination, client_id)
+        /// 
+        /// ### 事件
+        /// - DivinationClientFunded { client_id, funder, amount, new_balance }
+        #[pallet::call_index(29)]
+        #[pallet::weight(50_000)]
+        pub fn fund_divination_client(
+            origin: OriginFor<T>,
+            client_id: u64,
+            amount: BalanceOf<T>,
+        ) -> DispatchResult {
+            let funder = ensure_signed(origin)?;
+            
+            // 1. 验证参数
+            ensure!(amount != BalanceOf::<T>::default(), Error::<T>::BadParams);
+            
+            // 2. 验证命主存在
+            ensure!(
+                DivinationClients::<T>::contains_key(client_id),
+                Error::<T>::DivinationClientNotFound
+            );
+            
+            // 3. 派生 SubjectFunding 账户
+            let funding_account = Self::derive_subject_funding_account_v2(
+                SubjectType::DivinationMarket,
+                client_id,
+            );
+            
+            // 4. 转账
+            <T as Config>::Currency::transfer(
+                &funder,
+                &funding_account,
+                amount,
+                frame_support::traits::ExistenceRequirement::KeepAlive,
+            )?;
+            
+            // 5. 获取新余额
+            let new_balance = <T as Config>::Currency::free_balance(&funding_account);
+            
+            // 6. 发送事件
+            Self::deposit_event(Event::DivinationClientFunded {
+                client_id,
+                funder,
+                amount,
+                new_balance,
+            });
+            
+            Ok(())
+        }
+        
+        /// 函数级详细中文注释：为命主关联占卜服务CID
+        /// 
+        /// ### 功能
+        /// - 将占卜报告CID关联到命主
+        /// - 自动执行PIN操作
+        /// - 费用从命主的 SubjectFunding 扣除
+        /// 
+        /// ### 参数
+        /// - `client_id`: 命主ID
+        /// - `cid`: IPFS CID（明文）
+        /// - `tier`: Pin等级（可选，默认Standard）
+        /// 
+        /// ### 权限
+        /// - 必须是命主所有者
+        /// 
+        /// ### 事件
+        /// - DivinationServiceRecorded { client_id, cid_hash, service_count }
+        #[pallet::call_index(30)]
+        #[pallet::weight(100_000)]
+        pub fn add_divination_service(
+            origin: OriginFor<T>,
+            client_id: u64,
+            cid: Vec<u8>,
+            tier: Option<PinTier>,
+        ) -> DispatchResult {
+            let caller = ensure_signed(origin)?;
+            
+            // 1. 验证命主存在并检查所有权
+            let mut client = DivinationClients::<T>::get(client_id)
+                .ok_or(Error::<T>::DivinationClientNotFound)?;
+            ensure!(client.owner == caller, Error::<T>::NotDivinationClientOwner);
+            
+            // 2. 计算CID哈希
+            use sp_runtime::traits::Hash;
+            let cid_hash = T::Hashing::hash(&cid);
+            
+            // 3. 添加到命主CID列表
+            DivinationClientCids::<T>::try_mutate(client_id, |cids| {
+                cids.try_push(cid_hash).map_err(|_| Error::<T>::DivinationClientCidsFull)
+            })?;
+            
+            // 4. 更新服务计数
+            client.total_services = client.total_services.saturating_add(1);
+            DivinationClients::<T>::insert(client_id, client.clone());
+            
+            // 5. 注册CidToSubject关系
+            let subject_info = SubjectInfo {
+                subject_type: SubjectType::DivinationMarket,
+                subject_id: client_id,
+                funding_share: 100,
+            };
+            let subject_vec: BoundedVec<SubjectInfo, ConstU32<8>> = 
+                BoundedVec::try_from(vec![subject_info])
+                    .map_err(|_| Error::<T>::BadParams)?;
+            CidToSubject::<T>::insert(&cid_hash, subject_vec);
+            
+            // 6. 执行PIN操作（内部调用）
+            Self::request_pin_for_subject(
+                OriginFor::<T>::from(frame_system::RawOrigin::Signed(caller)),
+                client_id,
+                cid,
+                tier,
+            )?;
+            
+            // 7. 发送事件
+            Self::deposit_event(Event::DivinationServiceRecorded {
+                client_id,
+                cid_hash,
+                service_count: client.total_services,
+            });
+            
+            Ok(())
+        }
+        
+        /// 函数级详细中文注释：转移命主所有权
+        /// 
+        /// ### 功能
+        /// - 将命主所有权转移给新的账户
+        /// - 新所有者将有权管理该命主的所有服务
+        /// 
+        /// ### 参数
+        /// - `client_id`: 命主ID
+        /// - `new_owner`: 新所有者账户
+        /// 
+        /// ### 权限
+        /// - 必须是当前命主所有者
+        /// 
+        /// ### 事件
+        /// - DivinationClientOwnershipTransferred { client_id, old_owner, new_owner }
+        #[pallet::call_index(31)]
+        #[pallet::weight(30_000)]
+        pub fn transfer_divination_client_ownership(
+            origin: OriginFor<T>,
+            client_id: u64,
+            new_owner: T::AccountId,
+        ) -> DispatchResult {
+            let caller = ensure_signed(origin)?;
+            
+            // 1. 验证命主存在并检查所有权
+            DivinationClients::<T>::try_mutate(client_id, |maybe_client| {
+                let client = maybe_client.as_mut()
+                    .ok_or(Error::<T>::DivinationClientNotFound)?;
+                ensure!(client.owner == caller, Error::<T>::NotDivinationClientOwner);
+                
+                // 2. 更新所有者
+                let old_owner = client.owner.clone();
+                client.owner = new_owner.clone();
+                
+                // 3. 发送事件
+                Self::deposit_event(Event::DivinationClientOwnershipTransferred {
+                    client_id,
+                    old_owner,
+                    new_owner,
+                });
+                
+                Ok(())
+            })
+        }
     }
 
     #[pallet::hooks]
@@ -3958,7 +4415,7 @@ pub mod pallet {
                     .and_then(|v| core::str::from_utf8(&v).ok().map(|s| s.to_string()));
 
             // 分配与 Pin：遍历 PendingPins，若无分配则创建；否则尝试 POST /pins 携带 allocations
-            if let Some((cid_hash, (_payer, _replicas, _deceased_id, _size, _price))) =
+            if let Some((cid_hash, (_payer, _replicas, _subject_id, _size, _price))) =
                 <PendingPins<T>>::iter().next()
             {
                 // ⭐ P0优化：使用分层选择算法替代旧版权重选择
@@ -4224,6 +4681,63 @@ pub mod pallet {
             // 事件上报（轻量只读）：不改变状态，仅供监控
             if sample > 0 {
                 Self::deposit_event(Event::PinProbe(sample, pinning, pinned, missing));
+            }
+            
+            // ============================================================================
+            // 过期CID物理删除（OCW调用IPFS unpin）
+            // ============================================================================
+            // 
+            // 扫描已过期的CID（PinBilling.state=2），调用IPFS Cluster API执行物理删除
+            // 删除成功后清理链上存储
+            
+            let mut unpinned_count = 0u32;
+            const MAX_UNPIN_PER_BLOCK: u32 = 5; // 每块最多删除5个，避免阻塞
+            
+            for (cid_hash, (_, _, state)) in PinBilling::<T>::iter() {
+                if state == 2u8 && unpinned_count < MAX_UNPIN_PER_BLOCK {
+                    // 获取明文CID
+                    let cid_str = Self::resolve_cid(&cid_hash);
+                    
+                    // 调用IPFS Cluster API执行物理删除
+                    if Self::submit_delete_pin(&endpoint, &token, &cid_str).is_ok() {
+                        // 删除成功：清理链上存储
+                        PinBilling::<T>::remove(&cid_hash);
+                        PinMeta::<T>::remove(&cid_hash);
+                        PinStateOf::<T>::remove(&cid_hash);
+                        PinSubjectOf::<T>::remove(&cid_hash);
+                        PinAssignments::<T>::remove(&cid_hash);
+                        CidToSubject::<T>::remove(&cid_hash);
+                        CidTier::<T>::remove(&cid_hash);
+                        CidRegistry::<T>::remove(&cid_hash);
+                        LayeredPinAssignments::<T>::remove(&cid_hash);
+                        SimplePinAssignments::<T>::remove(&cid_hash);
+                        
+                        // 从域索引中移除
+                        for (domain, hash, _) in DomainPins::<T>::iter() {
+                            if hash == cid_hash {
+                                DomainPins::<T>::remove(&domain, &cid_hash);
+                                break;
+                            }
+                        }
+                        
+                        // 清理健康检查队列
+                        for (block, hash, _) in HealthCheckQueue::<T>::iter() {
+                            if hash == cid_hash {
+                                HealthCheckQueue::<T>::remove(block, &cid_hash);
+                                break;
+                            }
+                        }
+                        
+                        // 发送删除成功事件
+                        Self::deposit_event(Event::PinRemoved {
+                            cid_hash,
+                            reason: UnpinReason::InsufficientFunds,
+                        });
+                        
+                        unpinned_count += 1;
+                    }
+                    // 删除失败：保留记录，下次重试
+                }
             }
             
             // ============================================================================
@@ -4626,7 +5140,7 @@ pub mod pallet {
         /// - 返回Pin数量、存储容量、健康状态
         /// 
         /// ### 参数
-        /// - `domain`：域名（如 b"deceased"）
+        /// - `domain`：域名（如 b"subject"）
         /// 
         /// ### 返回
         /// - `Option<DomainStats>`：域统计信息，如果域不存在返回None
@@ -4821,10 +5335,18 @@ pub mod pallet {
             }
         }
 
-        /// 函数级详细中文注释：通过 OCW 发送 HTTP DELETE /pins/{cid}（示例）
-        /// - 某些环境下可用 `X-HTTP-Method-Override: DELETE` 搭配 POST 以规避代理限制。
-        /// - 返回：2xx 视为成功；不触发上链，仅作为示例。
-        #[allow(dead_code)]
+        /// 函数级详细中文注释：通过 OCW 发送 HTTP DELETE /pins/{cid}
+        /// 
+        /// 功能：
+        /// - 调用IPFS Cluster API执行物理unpin操作
+        /// - 某些环境下使用 `X-HTTP-Method-Override: DELETE` 搭配 POST 以规避代理限制
+        /// 
+        /// 调用时机：
+        /// - OCW扫描到过期CID（PinBilling.state=2）时自动调用
+        /// 
+        /// 返回：
+        /// - Ok(())：删除成功（HTTP 2xx）
+        /// - Err(())：删除失败（网络错误或HTTP非2xx）
         fn submit_delete_pin(
             endpoint: &str,
             token: &Option<String>,
@@ -4859,11 +5381,10 @@ pub mod pallet {
                 .expect("pallet sub-account derivation should not fail")
         }
 
-        /// 函数级中文注释：只读接口——根据逝者 subject_id 派生其资金账户地址。
+        /// 函数级中文注释：只读接口——根据 subject_id 派生其资金账户地址。
         pub fn subject_account(subject_id: u64) -> T::AccountId {
-            T::SubjectPalletId::get()
-                .try_into_sub_account((T::DeceasedDomain::get(), subject_id))
-                .expect("pallet sub-account derivation should not fail")
+            // 使用 General 类型的域编码（2）作为默认
+            Self::subject_account_for(2u8, subject_id)
         }
     }
 
@@ -4907,28 +5428,29 @@ pub use pallet::*;
 /// 函数级详细中文注释：为 Pallet<T> 实现 IpfsPinner trait，供其他pallet调用
 /// 
 /// 实现说明（⭐ P1优化后）：
-/// - 直接调用破坏式改造后的 `request_pin_for_deceased` extrinsic；
+/// - 直接调用破坏式改造后的 `request_pin_for_subject` extrinsic；
 /// - 使用 `four_layer_charge` 三层扣费机制（IpfsPool → SubjectFunding → Grace）；
 /// - 支持分层运营者选择（Layer 1 Core + Layer 2 Community）；
 /// - 自动分配收益给运营者。
 impl<T: Config> IpfsPinner<<T as frame_system::Config>::AccountId, BalanceOf<T>> for Pallet<T> {
-    /// 函数级详细中文注释：为逝者关联的CID发起pin请求
+    /// 函数级详细中文注释：为主体关联的CID发起pin请求
     /// 
     /// 内部实现：
     /// 1. 将Vec<u8> CID转换为BoundedVec
-    /// 2. 调用破坏式改造后的 `request_pin_for_deceased` extrinsic
+    /// 2. 调用破坏式改造后的 `request_pin_for_subject` extrinsic
     /// 3. 使用 `four_layer_charge` 三层扣费逻辑（IpfsPool → SubjectFunding → Grace）
     /// 4. 支持分层运营者选择（Layer 1 Core + Layer 2 Community）
-    fn pin_cid_for_deceased(
+    fn pin_cid_for_subject(
         caller: <T as frame_system::Config>::AccountId,
-        deceased_id: u64,
+        _subject_type: SubjectType,  // 暂未使用，保留用于未来扩展
+        subject_id: u64,
         cid: Vec<u8>,
-        tier: Option<PinTier>,  // 改造：使用tier参数替代price和replicas
+        tier: Option<PinTier>,
     ) -> DispatchResult {
-        // 直接调用破坏式重写的request_pin_for_deceased
-        Self::request_pin_for_deceased(
+        // 直接调用破坏式重写的request_pin_for_subject
+        Self::request_pin_for_subject(
             OriginFor::<T>::from(Some(caller).into()),
-            deceased_id,
+            subject_id,
             cid,
             tier,
         )
@@ -4988,8 +5510,8 @@ impl<T: Config> ContentRegistry for Pallet<T> {
         // 4. 创建临时caller（使用IpfsPoolAccount）
         let caller = T::IpfsPoolAccount::get();
         
-        // 5. 调用PIN逻辑（使用deceased逻辑，因为它支持SubjectFunding）
-        Self::request_pin_for_deceased(
+        // 5. 调用PIN逻辑（使用subject逻辑，因为它支持SubjectFunding）
+        Self::request_pin_for_subject(
             OriginFor::<T>::from(frame_system::RawOrigin::Signed(caller)),
             subject_id,
             cid.clone(),
@@ -5026,9 +5548,9 @@ impl<T: Config> ContentRegistry for Pallet<T> {
             RegisteredDomains::<T>::get(&bounded_domain).map(|config| {
                 // 根据subject_type_id映射到SubjectType
                 match config.subject_type_id {
-                    1 => SubjectType::Deceased,
-                    2 => SubjectType::Grave,
-                    3 => SubjectType::Offerings,
+                    1 => SubjectType::General,
+                    2 => SubjectType::General,
+                    3 => SubjectType::OtcOrder,
                     4 => SubjectType::Evidence,
                     5 => SubjectType::OtcOrder,
                     _ => SubjectType::Custom(bounded_domain),
@@ -5040,10 +5562,29 @@ impl<T: Config> ContentRegistry for Pallet<T> {
     }
 }
 
-// ⭐ P1优化：已删除 old_pin_cid_for_deceased() 函数（68行）
-// 原因：已被 request_pin_for_deceased() extrinsic的破坏式改造替代
+// ⭐ P1优化：已删除 old_pin_cid_for_subject() 函数（68行）
+// 原因：已被 request_pin_for_subject() extrinsic的破坏式改造替代
 // 该函数使用了已删除的 triple_charge_storage_fee()
 // 删除日期：2025-10-26
+
+/// CidLockManager trait 实现 - 证据锁定机制
+impl<T: Config> CidLockManager<T::Hash, BlockNumberFor<T>> for Pallet<T> {
+    fn lock_cid(_cid_hash: T::Hash, _reason: Vec<u8>, _until: Option<BlockNumberFor<T>>) -> DispatchResult {
+        // TODO: 实现 CID 锁定存储逻辑
+        // 当前为 stub 实现，允许编译通过
+        Ok(())
+    }
+    
+    fn unlock_cid(_cid_hash: T::Hash, _reason: Vec<u8>) -> DispatchResult {
+        // TODO: 实现 CID 解锁逻辑
+        Ok(())
+    }
+    
+    fn is_locked(_cid_hash: &T::Hash) -> bool {
+        // TODO: 实现锁定状态查询
+        false
+    }
+}
 
 #[cfg(test)]
 mod tests;

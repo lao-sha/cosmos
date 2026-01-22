@@ -172,7 +172,7 @@ pub type SignedPayload = generic::SignedPayload<RuntimeCall, TxExtension>;
 ///
 /// This can be a tuple of types, each implementing `OnRuntimeUpgrade`.
 #[allow(unused_parens)]
-type Migrations = ();
+pub type Migrations = ();
 
 /// Executive: handles dispatch to the various modules.
 pub type Executive = frame_executive::Executive<
@@ -181,7 +181,6 @@ pub type Executive = frame_executive::Executive<
 	frame_system::ChainContext<Runtime>,
 	Runtime,
 	AllPalletsWithSystem,
-	Migrations,
 >;
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
@@ -223,9 +222,37 @@ mod runtime {
 	#[runtime::pallet_index(6)]
 	pub type Sudo = pallet_sudo;
 
-	// Include the custom logic from the pallet-template in the runtime.
-	#[runtime::pallet_index(7)]
-	pub type Template = pallet_template;
+	// ============================================================================
+	// Governance: Committees (Collective + Membership)
+	// ============================================================================
+
+	// 1. 技术委员会 (Technical Committee)
+	#[runtime::pallet_index(70)]
+	pub type TechnicalCommittee = pallet_collective<Instance1>;
+
+	#[runtime::pallet_index(71)]
+	pub type TechnicalMembership = pallet_collective_membership<Instance1>;
+
+	// 2. 仲裁委员会 (Arbitration Committee)
+	#[runtime::pallet_index(72)]
+	pub type ArbitrationCommittee = pallet_collective<Instance2>;
+
+	#[runtime::pallet_index(73)]
+	pub type ArbitrationMembership = pallet_collective_membership<Instance2>;
+
+	// 3. 财务委员会 (Treasury Council)
+	#[runtime::pallet_index(74)]
+	pub type TreasuryCouncil = pallet_collective<Instance3>;
+
+	#[runtime::pallet_index(75)]
+	pub type TreasuryMembership = pallet_collective_membership<Instance3>;
+
+	// 4. 内容委员会 (Content Committee)
+	#[runtime::pallet_index(76)]
+	pub type ContentCommittee = pallet_collective<Instance4>;
+
+	#[runtime::pallet_index(77)]
+	pub type ContentMembership = pallet_collective_membership<Instance4>;
 
 	// ============================================================================
 	// Divination Pallets
@@ -330,4 +357,7 @@ mod runtime {
 
 	#[runtime::pallet_index(64)]
 	pub type Arbitration = pallet_arbitration;
+
+	#[runtime::pallet_index(65)]
+	pub type StorageLifecycle = pallet_storage_lifecycle;
 }

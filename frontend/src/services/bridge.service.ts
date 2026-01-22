@@ -1,6 +1,10 @@
 /**
- * Bridge 服务 - 处理跨链桥接交易
- * 支持官方桥接和做市商桥接
+ * Bridge/Swap 服务 - 处理 DUST 与 USDT 的兑换交易
+ *
+ * 重要变更 (2026-01-19):
+ * - 链端 pallet-swap 已移除官方兑换功能，仅支持做市商兑换
+ * - officialSwap 方法已弃用
+ * - 新增 markSwapComplete 和 reportSwap 方法
  */
 
 import { ApiPromise } from '@polkadot/api';
@@ -14,11 +18,21 @@ import { u8aToHex, hexToU8a } from '@polkadot/util';
 export type StatusCallback = (status: string) => void;
 
 /**
- * 桥接类型
+ * 兑换类型（已简化，官方兑换已移除）
  */
-export enum BridgeType {
-  Official = 'Official',  // 官方桥接
-  Maker = 'Maker',        // 做市商桥接
+export enum SwapType {
+  Maker = 'Maker',  // 做市商兑换
+}
+
+/**
+ * 兑换状态
+ */
+export enum SwapStatus {
+  Pending = 'Pending',     // 待处理
+  Completed = 'Completed', // 已完成
+  Timeout = 'Timeout',     // 超时
+  Reported = 'Reported',   // 被举报
+  Refunded = 'Refunded',   // 已退款
 }
 
 /**
@@ -26,15 +40,24 @@ export enum BridgeType {
  */
 export interface SwapRecord {
   id: number;
-  account: string;
-  bridgeType: BridgeType;
+  buyer: string;
+  makerId: number;
   dustAmount: bigint;
   usdtAmount: bigint;
-  tronAddress: string;
-  makerId?: number;
-  status: 'Pending' | 'Completed' | 'Failed';
-  timestamp: number;
-  blockNumber: number;
+  buyerTronAddress: string;
+  makerTronAddress: string;
+  status: SwapStatus;
+  createdAt: number;
+  completedAt?: number;
+  tronTxHash?: string;
+}
+
+/**
+ * @deprecated 使用 SwapType 替代
+ */
+export enum BridgeType {
+  Official = 'Official',
+  Maker = 'Maker',
 }
 
 /**
@@ -53,68 +76,33 @@ export class BridgeService {
   }
 
   /**
+   * @deprecated 链端已移除官方兑换功能，请使用 makerSwap 方法
+   *
    * 官方桥接：DUST → USDT
-   * @param dustAmount DUST 数量（最小单位）
-   * @param tronAddress TRON 地址
-   * @param onStatusChange 状态变化回调
-   * @returns 兑换记录ID
+   * @throws 始终抛出错误，提示使用 makerSwap
    */
   async officialSwap(
     dustAmount: bigint,
     tronAddress: string,
     onStatusChange?: StatusCallback
   ): Promise<number> {
-    const api = this.getApi();
-    const accountAddress = getCurrentSignerAddress();
-
-    if (!accountAddress) {
-      throw new Error('No signer address available. Please unlock wallet first.');
-    }
-
-    // 验证 TRON 地址格式
-    const tronRegex = /^T[A-Za-z1-9]{33}$/;
-    if (!tronRegex.test(tronAddress)) {
-      throw new Error('Invalid TRON address format');
-    }
-
-    onStatusChange?.('准备交易...');
-
-    // 将 TRON 地址转换为字节数组
-    const tronAddressBytes = new TextEncoder().encode(tronAddress);
-
-    // 创建交易
-    const tx = api.tx.bridge.officialSwap(
-      dustAmount.toString(),
-      u8aToHex(tronAddressBytes)
+    throw new Error(
+      '官方兑换功能已停用。链端 pallet-swap 已移除此功能，请使用 makerSwap 进行做市商兑换。'
     );
-
-    onStatusChange?.('等待签名...');
-
-    // 签名并发送交易
-    const { events } = await signAndSend(api, tx, accountAddress, onStatusChange);
-
-    // 从事件中提取兑换记录ID
-    const swapEvent = events.find(
-      ({ event }: any) =>
-        event.section === 'bridge' &&
-        event.method === 'SwapCreated'
-    );
-
-    if (!swapEvent) {
-      throw new Error('未找到兑换创建事件');
-    }
-
-    // 提取记录ID（假设事件数据格式为 [account, swapId, ...]）
-    const swapId = swapEvent.event.data[1].toString();
-
-    return parseInt(swapId, 10);
   }
 
   /**
-   * 做市商桥接：DUST → USDT
+   * 做市商兑换：DUST → USDT
+   *
+   * 用户通过做市商将 DUST 兑换为 USDT。
+   * 流程：
+   * 1. 用户调用此方法，DUST 被锁定
+   * 2. 做市商向用户的 TRON 地址转账 USDT
+   * 3. 做市商调用 markSwapComplete 确认完成
+   *
    * @param makerId 做市商ID
-   * @param dustAmount DUST 数量（最小单位）
-   * @param tronAddress TRON 地址
+   * @param dustAmount DUST 数量（最小单位，精度 10^12）
+   * @param tronAddress 用户的 TRON 地址（接收 USDT）
    * @param onStatusChange 状态变化回调
    * @returns 兑换记录ID
    */
@@ -142,8 +130,8 @@ export class BridgeService {
     // 将 TRON 地址转换为字节数组
     const tronAddressBytes = new TextEncoder().encode(tronAddress);
 
-    // 创建交易
-    const tx = api.tx.bridge.makerSwap(
+    // 创建交易 - 注意: pallet 名称是 swap 而不是 bridge
+    const tx = api.tx.swap.makerSwap(
       makerId,
       dustAmount.toString(),
       u8aToHex(tronAddressBytes)
@@ -157,18 +145,91 @@ export class BridgeService {
     // 从事件中提取兑换记录ID
     const swapEvent = events.find(
       ({ event }: any) =>
-        event.section === 'bridge' &&
-        event.method === 'SwapCreated'
+        event.section === 'swap' &&
+        event.method === 'MakerSwapCreated'
     );
 
     if (!swapEvent) {
       throw new Error('未找到兑换创建事件');
     }
 
-    // 提取记录ID
-    const swapId = swapEvent.event.data[1].toString();
+    // 提取记录ID（事件格式: [swapId, buyer, makerId, dustAmount, usdtAmount]）
+    const swapId = swapEvent.event.data[0].toString();
 
     return parseInt(swapId, 10);
+  }
+
+  /**
+   * 标记兑换完成（做市商调用）
+   *
+   * 做市商在向用户 TRON 地址转账 USDT 后调用此方法确认完成。
+   *
+   * @param swapId 兑换记录ID
+   * @param tronTxHash TRON 网络的交易哈希（用于验证和防重放）
+   * @param onStatusChange 状态变化回调
+   */
+  async markSwapComplete(
+    swapId: number,
+    tronTxHash: string,
+    onStatusChange?: StatusCallback
+  ): Promise<void> {
+    const api = this.getApi();
+    const accountAddress = getCurrentSignerAddress();
+
+    if (!accountAddress) {
+      throw new Error('No signer address available. Please unlock wallet first.');
+    }
+
+    // 验证 TRON 交易哈希格式（64位十六进制）
+    const tronTxHashRegex = /^[a-fA-F0-9]{64}$/;
+    if (!tronTxHashRegex.test(tronTxHash)) {
+      throw new Error('Invalid TRON transaction hash format');
+    }
+
+    onStatusChange?.('准备确认交易...');
+
+    // 创建交易
+    const tx = api.tx.swap.markSwapComplete(swapId, tronTxHash);
+
+    onStatusChange?.('等待签名...');
+
+    await signAndSend(api, tx, accountAddress, onStatusChange);
+
+    console.log('[BridgeService] Swap marked as complete:', swapId);
+  }
+
+  /**
+   * 举报兑换（用户调用）
+   *
+   * 如果做市商未在规定时间内完成转账，用户可以举报。
+   * 举报后会触发仲裁流程。
+   *
+   * @param swapId 兑换记录ID
+   * @param evidenceCid 证据的 IPFS CID（可选，如截图等）
+   * @param onStatusChange 状态变化回调
+   */
+  async reportSwap(
+    swapId: number,
+    evidenceCid?: string,
+    onStatusChange?: StatusCallback
+  ): Promise<void> {
+    const api = this.getApi();
+    const accountAddress = getCurrentSignerAddress();
+
+    if (!accountAddress) {
+      throw new Error('No signer address available. Please unlock wallet first.');
+    }
+
+    onStatusChange?.('准备举报交易...');
+
+    // 创建交易
+    const tx = api.tx.swap.reportSwap(swapId, evidenceCid || null);
+
+    onStatusChange?.('等待签名...');
+
+    await signAndSend(api, tx, accountAddress, onStatusChange);
+
+    console.log('[BridgeService] Swap reported:', swapId);
   }
 
   /**
@@ -180,33 +241,34 @@ export class BridgeService {
     const api = this.getApi();
 
     try {
-      // 查询链上存储
-      const entries = await api.query.bridge.swapRecords.entries();
+      // 查询链上存储 - 使用 swap pallet
+      const entries = await api.query.swap.makerSwapRecords.entries();
 
       const records: SwapRecord[] = [];
 
       for (const [key, value] of entries) {
         const record = value.toJSON() as any;
 
-        // 过滤用户
-        if (record.account === account) {
+        // 过滤用户（作为买家）
+        if (record.buyer === account) {
           records.push({
-            id: record.id,
-            account: record.account,
-            bridgeType: record.bridgeType,
-            dustAmount: BigInt(record.dustAmount),
-            usdtAmount: BigInt(record.usdtAmount),
-            tronAddress: record.tronAddress,
+            id: parseInt(key.args[0].toString(), 10),
+            buyer: record.buyer,
             makerId: record.makerId,
-            status: record.status,
-            timestamp: record.timestamp,
-            blockNumber: record.blockNumber,
+            dustAmount: BigInt(record.dustAmount || 0),
+            usdtAmount: BigInt(record.usdtAmount || 0),
+            buyerTronAddress: record.buyerTronAddress,
+            makerTronAddress: record.makerTronAddress,
+            status: this.parseSwapStatus(record.status),
+            createdAt: record.timeInfo?.createdAt || 0,
+            completedAt: record.timeInfo?.completedAt,
+            tronTxHash: record.tronTxHash,
           });
         }
       }
 
-      // 按时间倒序排序
-      records.sort((a, b) => b.timestamp - a.timestamp);
+      // 按创建时间倒序排序
+      records.sort((a, b) => b.createdAt - a.createdAt);
 
       return records;
     } catch (error) {
@@ -224,7 +286,7 @@ export class BridgeService {
     const api = this.getApi();
 
     try {
-      const record = await api.query.bridge.swapRecords(swapId);
+      const record = await api.query.swap.makerSwapRecords(swapId);
 
       if (record.isEmpty) {
         return null;
@@ -233,16 +295,17 @@ export class BridgeService {
       const data = record.toJSON() as any;
 
       return {
-        id: data.id,
-        account: data.account,
-        bridgeType: data.bridgeType,
-        dustAmount: BigInt(data.dustAmount),
-        usdtAmount: BigInt(data.usdtAmount),
-        tronAddress: data.tronAddress,
+        id: swapId,
+        buyer: data.buyer,
         makerId: data.makerId,
-        status: data.status,
-        timestamp: data.timestamp,
-        blockNumber: data.blockNumber,
+        dustAmount: BigInt(data.dustAmount || 0),
+        usdtAmount: BigInt(data.usdtAmount || 0),
+        buyerTronAddress: data.buyerTronAddress,
+        makerTronAddress: data.makerTronAddress,
+        status: this.parseSwapStatus(data.status),
+        createdAt: data.timeInfo?.createdAt || 0,
+        completedAt: data.timeInfo?.completedAt,
+        tronTxHash: data.tronTxHash,
       };
     } catch (error) {
       console.error('[BridgeService] Get record error:', error);
@@ -251,21 +314,75 @@ export class BridgeService {
   }
 
   /**
+   * 订阅兑换记录状态变化
+   * @param swapId 兑换记录ID
+   * @param callback 状态变化回调
+   * @returns 取消订阅函数
+   */
+  async subscribeToSwap(
+    swapId: number,
+    callback: (record: SwapRecord) => void
+  ): Promise<() => void> {
+    const api = this.getApi();
+
+    const unsub = await api.query.swap.makerSwapRecords(swapId, (record) => {
+      if (!record.isEmpty) {
+        const data = record.toJSON() as any;
+        callback({
+          id: swapId,
+          buyer: data.buyer,
+          makerId: data.makerId,
+          dustAmount: BigInt(data.dustAmount || 0),
+          usdtAmount: BigInt(data.usdtAmount || 0),
+          buyerTronAddress: data.buyerTronAddress,
+          makerTronAddress: data.makerTronAddress,
+          status: this.parseSwapStatus(data.status),
+          createdAt: data.timeInfo?.createdAt || 0,
+          completedAt: data.timeInfo?.completedAt,
+          tronTxHash: data.tronTxHash,
+        });
+      }
+    });
+
+    return unsub;
+  }
+
+  /**
+   * 解析兑换状态
+   */
+  private parseSwapStatus(status: any): SwapStatus {
+    if (typeof status === 'string') {
+      return status as SwapStatus;
+    }
+    // 处理枚举对象格式
+    if (status && typeof status === 'object') {
+      const key = Object.keys(status)[0];
+      return key as SwapStatus;
+    }
+    return SwapStatus.Pending;
+  }
+
+  /**
    * 获取当前 DUST 价格
-   * @returns DUST 价格（USDT）
+   * @returns DUST 价格（USDT，精度 10^6）
    */
   async getDustPrice(): Promise<number> {
     const api = this.getApi();
 
     try {
-      const price = await api.query.bridge.dustPrice();
+      // 从 tradingPricing pallet 获取价格
+      const coldStartExited = await api.query.tradingPricing.coldStartExited();
 
-      if (price.isEmpty) {
-        return 0.10; // 默认价格
+      if (!coldStartExited.isTrue) {
+        // 冷启动期间，获取默认价格
+        const defaultPrice = await api.query.tradingPricing.defaultPrice();
+        const priceValue = defaultPrice.toNumber();
+        return priceValue > 1000 ? priceValue / 1_000_000 : 0.1;
       }
 
-      // 假设价格存储为固定精度的整数（例如：100 = 0.10 USDT）
-      return price.toNumber() / 1000;
+      const stats = await api.query.tradingPricing.marketStats();
+      const data = stats.toJSON() as any;
+      return (data?.weightedPrice || 100000) / 1_000_000;
     } catch (error) {
       console.error('[BridgeService] Get price error:', error);
       return 0.10; // 返回默认价格
@@ -275,7 +392,7 @@ export class BridgeService {
   /**
    * 获取用户的 DUST 余额
    * @param account 用户地址
-   * @returns DUST 余额（最小单位）
+   * @returns DUST 余额（最小单位，精度 10^12）
    */
   async getDustBalance(account: string): Promise<bigint> {
     const api = this.getApi();
@@ -289,6 +406,24 @@ export class BridgeService {
       console.error('[BridgeService] Get balance error:', error);
       throw error;
     }
+  }
+
+  /**
+   * 格式化 DUST 数量为可读字符串
+   * @param amount DUST 数量（最小单位）
+   * @returns 格式化后的字符串
+   */
+  static formatDustAmount(amount: bigint): string {
+    return (Number(amount) / 1e12).toFixed(4);
+  }
+
+  /**
+   * 格式化 USDT 数量为可读字符串
+   * @param amount USDT 数量（最小单位，精度 10^6）
+   * @returns 格式化后的字符串
+   */
+  static formatUsdtAmount(amount: bigint): string {
+    return (Number(amount) / 1e6).toFixed(2);
   }
 }
 

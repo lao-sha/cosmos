@@ -8,7 +8,6 @@ edition = "2021"
 [workspace]
 members = [
     "node",
-    "pallets/template",
     "pallets/divination/common",
     "pallets/divination/privacy",
     "pallets/divination/almanac",
@@ -25,6 +24,7 @@ members = [
     "pallets/divination/tarot",
     "pallets/divination/membership",
     "pallets/divination/tee-privacy",
+    "pallets/divination/affiliate",
     "pallets/chat/common",
     "pallets/chat/permission",
     "pallets/chat/core",
@@ -42,6 +42,7 @@ members = [
     "pallets/stardust-ipfs",
     "pallets/evidence",
     "pallets/arbitration",
+    "pallets/storage-lifecycle",
     "media-utils",
     "runtime",
 ]
@@ -49,10 +50,10 @@ resolver = "2"
 
 [workspace.dependencies]
 solochain-template-runtime = { path = "./runtime", default-features = false }
-pallet-template = { path = "./pallets/template", default-features = false }
 # Divination pallets
 pallet-divination-common = { path = "./pallets/divination/common", default-features = false }
 pallet-divination-privacy = { path = "./pallets/divination/privacy", default-features = false }
+pallet-affiliate = { path = "./pallets/divination/affiliate", default-features = false }
 pallet-almanac = { path = "./pallets/divination/almanac", default-features = false }
 pallet-divination-ai = { path = "./pallets/divination/ai", default-features = false }
 pallet-divination-market = { path = "./pallets/divination/market", default-features = false }
@@ -91,6 +92,8 @@ media-utils = { path = "./media-utils", default-features = false }
 pallet-evidence = { path = "./pallets/evidence", default-features = false }
 # Arbitration pallet
 pallet-arbitration = { path = "./pallets/arbitration", default-features = false }
+# Storage lifecycle pallet
+pallet-storage-lifecycle = { path = "./pallets/storage-lifecycle", default-features = false }
 # Additional dependencies
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 sp-application-crypto = { version = "44.0.0", default-features = false }
@@ -140,6 +143,8 @@ pallet-aura = { version = "44.0.0", default-features = false }
 pallet-balances = { version = "46.0.0", default-features = false }
 pallet-grandpa = { version = "45.0.0", default-features = false }
 pallet-sudo = { version = "45.0.0", default-features = false }
+pallet-collective = { version = "45.0.0", default-features = false }
+pallet-collective-membership = { package = "pallet-membership", version = "45.0.0", default-features = false }
 pallet-timestamp = { version = "44.0.0", default-features = false }
 pallet-transaction-payment-rpc-runtime-api = { version = "45.0.0", default-features = false }
 scale-info = { version = "2.11.6", default-features = false }

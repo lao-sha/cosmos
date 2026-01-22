@@ -971,7 +971,8 @@ pub mod pallet {
                     Error::<T>::NotAssignedNode
                 );
 
-                // TODO: Phase 4 将验证 Enclave 签名
+                // 🔮 Phase 4 计划：验证 Enclave 签名
+                // 当前阶段使用 AdminOrigin 校验，Phase 4 将实现完整的 SGX 签名验证
                 // Self::verify_enclave_signature(&who, &output_hash, &enclave_signature)?;
 
                 // 更新请求状态
@@ -1635,7 +1636,8 @@ pub mod pallet {
                 Error::<T>::AttestationExpired
             );
 
-            // TODO: Phase 4 将实现完整的 IAS 签名验证
+            // 🔮 Phase 4 计划：实现完整的 IAS 签名验证
+            // 当前阶段跳过验证，Phase 4 将接入 Intel Attestation Service
             // Self::verify_ias_signature(attestation)?;
 
             Ok(())

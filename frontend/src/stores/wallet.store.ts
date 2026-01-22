@@ -22,7 +22,7 @@ import {
   getAlias,
   setAlias,
   type LocalKeystore,
-} from '@/lib/keystore.native';
+} from '@/lib/keystore';
 
 /**
  * 账户资产信息
@@ -104,27 +104,27 @@ export const useWalletStore = create<WalletState>()((set, get) => ({
         isLoading: false,
       });
 
-      // 加载所有账户
+      console.log('[Wallet] Initialized successfully:', { hasWallet, address });
+      
+      // 延迟加载账户列表，不阻塞初始化
       if (hasWallet) {
-        console.log('[Wallet] Loading all accounts...');
-        try {
-          await get().loadAllAccounts();
-        } catch (err) {
-          console.error('[Wallet] Failed to load accounts:', err);
-          // 不阻塞初始化
-        }
+        setTimeout(() => {
+          console.log('[Wallet] Loading accounts in background...');
+          get().loadAllAccounts().catch(err => {
+            console.error('[Wallet] Failed to load accounts:', err);
+          });
+        }, 100);
       }
-
-      console.log('[Wallet] Initialized:', { hasWallet, address });
     } catch (error) {
       console.error('[Wallet] Initialize error:', error);
       set({
         isReady: true,
         hasWallet: false,
         isLocked: true,
-        error: '初始化失败',
+        error: '初始化失败: ' + (error instanceof Error ? error.message : String(error)),
         isLoading: false,
       });
+      throw error;
     } finally {
       set({ isLoading: false });
     }

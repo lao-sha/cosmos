@@ -4,7 +4,7 @@
  * 主题色：金棕色 #B2955D
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -21,9 +21,11 @@ import { Picker } from '@react-native-picker/picker';
 import { BottomNavBar } from '@/components/BottomNavBar';
 import { UnlockWalletDialog } from '@/components/UnlockWalletDialog';
 import { TransactionStatusDialog } from '@/components/TransactionStatusDialog';
+import { useDivinationSave } from '@/hooks/useDivinationSave';
 import { divinationService, DivinationType } from '@/services/divination.service';
 import { isSignerUnlocked, unlockWalletForSigning } from '@/lib/signer';
 import { getCurrentSignerAddress } from '@/lib/signer';
+import { initializeApi, isApiInitialized } from '@/lib/api';
 
 // 主题色
 const THEME_COLOR = '#B2955D';
@@ -46,6 +48,16 @@ const WU_XING_COLORS: Record<string, string> = {
   '土': '#F57C00',
   '金': '#FDD835',
   '水': '#1565C0',
+};
+
+// 从干支字符串解析索引 (如 "甲子" -> { gan: 0, zhi: 0 })
+const parseGanzhi = (ganzhi: string): { gan: number; zhi: number } => {
+  if (!ganzhi || ganzhi.length < 2) return { gan: 0, zhi: 0 };
+  const ganChar = ganzhi.charAt(0);
+  const zhiChar = ganzhi.charAt(1);
+  const gan = TIAN_GAN.indexOf(ganChar);
+  const zhi = DI_ZHI.indexOf(zhiChar);
+  return { gan: gan >= 0 ? gan : 0, zhi: zhi >= 0 ? zhi : 0 };
 };
 
 // 时辰选项
@@ -80,7 +92,7 @@ const SHICHEN_OPTIONS = [
 type Gender = 'male' | 'female';
 type CalendarType = 'solar' | 'lunar';
 
-// 八字结果
+// 八字结果（存储完整 API 返回数据）
 interface BaziResult {
   id: number;
   name: string;
@@ -99,6 +111,8 @@ interface BaziResult {
   dayMaster: number;
   shengxiao: string;
   createdAt: Date;
+  // 完整 API 数据
+  chartData?: any;
 }
 
 export default function BaziPage() {
@@ -116,14 +130,46 @@ export default function BaziPage() {
   const [birthDay, setBirthDay] = useState(15);
   const [birthHour, setBirthHour] = useState(12);
 
-  // 上链相关状态
-  const [showUnlockDialog, setShowUnlockDialog] = useState(false);
-  const [showTxStatus, setShowTxStatus] = useState(false);
-  const [txStatus, setTxStatus] = useState('准备中...');
-  const [saving, setSaving] = useState(false);
+  // 使用统一的上链保存 Hook
+  const {
+    showUnlockDialog,
+    showTxStatus,
+    txStatus,
+    saving,
+    saveToChain,
+    saveBaziToChain,
+    handleUnlockSuccess,
+    setShowUnlockDialog,
+    setShowTxStatus,
+  } = useDivinationSave({
+    divinationType: DivinationType.Bazi,
+    historyRoute: '/divination/history',
+  });
+
+  const [apiReady, setApiReady] = useState(false);
+
+  // 初始化 API
+  useEffect(() => {
+    const init = async () => {
+      try {
+        if (!isApiInitialized()) {
+          await initializeApi();
+        }
+        setApiReady(true);
+      } catch (error) {
+        console.error('API 初始化失败:', error);
+        Alert.alert('连接失败', '无法连接到区块链节点，请检查网络');
+      }
+    };
+    init();
+  }, []);
 
   // 免费试算（调用 Runtime API，不保存到链上）
   const calculateBaziTemp = async () => {
+    if (!apiReady) {
+      Alert.alert('请稍候', '正在连接区块链节点...');
+      return;
+    }
     setLoading(true);
     try {
       // 调用链端 Runtime API 进行免费计算
@@ -139,24 +185,12 @@ export default function BaziPage() {
 
       console.log('八字计算结果:', chartData);
 
-      // 从链端返回的数据中提取四柱信息
+      // 从链端返回的数据中提取四柱信息（解析 ganzhi 字符串）
       const siZhu = {
-        year: {
-          gan: chartData.sizhu.yearZhu.tianganIndex,
-          zhi: chartData.sizhu.yearZhu.dizhiIndex
-        },
-        month: {
-          gan: chartData.sizhu.monthZhu.tianganIndex,
-          zhi: chartData.sizhu.monthZhu.dizhiIndex
-        },
-        day: {
-          gan: chartData.sizhu.dayZhu.tianganIndex,
-          zhi: chartData.sizhu.dayZhu.dizhiIndex
-        },
-        hour: {
-          gan: chartData.sizhu.hourZhu.tianganIndex,
-          zhi: chartData.sizhu.hourZhu.dizhiIndex
-        },
+        year: parseGanzhi(chartData.sizhu.yearZhu.ganzhi),
+        month: parseGanzhi(chartData.sizhu.monthZhu.ganzhi),
+        day: parseGanzhi(chartData.sizhu.dayZhu.ganzhi),
+        hour: parseGanzhi(chartData.sizhu.hourZhu.ganzhi),
       };
 
       // 五行统计
@@ -185,6 +219,7 @@ export default function BaziPage() {
         dayMaster: siZhu.day.gan,
         shengxiao: SHENG_XIAO[siZhu.year.zhi] || '未知',
         createdAt: new Date(),
+        chartData, // 保存完整 API 数据
       };
 
       setResult(baziResult);
@@ -198,200 +233,38 @@ export default function BaziPage() {
   };
 
   // 开始排盘（调用 Extrinsic，保存到链上）
-  const createBaziChart = async () => {
-    // 检查钱包是否解锁
-    if (!isSignerUnlocked()) {
-      setShowUnlockDialog(true);
+  const handleCreateBaziChart = async () => {
+    if (!apiReady) {
+      Alert.alert('请稍候', '正在连接区块链节点...');
       return;
     }
 
-    setLoading(true);
-    setShowTxStatus(true);
-    setTxStatus('准备上链...');
+    await saveBaziToChain({
+      name: name || null,
+      birthYear,
+      birthMonth,
+      birthDay,
+      birthHour,
+      birthMinute: 0,
+      gender,
+      calendarType,
+    });
 
-    try {
-      // 调用服务创建八字命盘
-      const chartId = await divinationService.createBaziChart(
-        name || null,
-        birthYear,
-        birthMonth,
-        birthDay,
-        birthHour,
-        0, // minute，暂时设为 0
-        gender,
-        calendarType,
-        (status) => {
-          setTxStatus(status);
-        }
-      );
-
-      setTxStatus('创建成功！');
-
-      // 创建成功后，调用免费试算获取结果显示
-      setTimeout(async () => {
-        setShowTxStatus(false);
-
-        // 获取八字数据用于显示
-        try {
-          const chartData = await divinationService.calculateBaziTemp(
-            birthYear,
-            birthMonth,
-            birthDay,
-            birthHour,
-            0,
-            gender,
-            calendarType
-          );
-
-          // 从链端返回的数据中提取四柱信息
-          const siZhu = {
-            year: {
-              gan: chartData.sizhu.yearZhu.tianganIndex,
-              zhi: chartData.sizhu.yearZhu.dizhiIndex
-            },
-            month: {
-              gan: chartData.sizhu.monthZhu.tianganIndex,
-              zhi: chartData.sizhu.monthZhu.dizhiIndex
-            },
-            day: {
-              gan: chartData.sizhu.dayZhu.tianganIndex,
-              zhi: chartData.sizhu.dayZhu.dizhiIndex
-            },
-            hour: {
-              gan: chartData.sizhu.hourZhu.tianganIndex,
-              zhi: chartData.sizhu.hourZhu.dizhiIndex
-            },
-          };
-
-          // 五行统计
-          const wuxingCount: Record<string, number> = { '木': 0, '火': 0, '土': 0, '金': 0, '水': 0 };
-          Object.values(siZhu).forEach(zhu => {
-            const ganWuxing = TIAN_GAN_WUXING[zhu.gan];
-            const zhiWuxing = DI_ZHI_WUXING[zhu.zhi];
-            if (ganWuxing) {
-              wuxingCount[ganWuxing] = (wuxingCount[ganWuxing] || 0) + 1;
-            }
-            if (zhiWuxing) {
-              wuxingCount[zhiWuxing] = (wuxingCount[zhiWuxing] || 0) + 1;
-            }
-          });
-
-          const baziResult: BaziResult = {
-            id: chartId,
-            name: name || '求测者',
-            birthYear,
-            birthMonth,
-            birthDay,
-            birthHour,
-            gender,
-            siZhu,
-            wuxingCount,
-            dayMaster: siZhu.day.gan,
-            shengxiao: SHENG_XIAO[siZhu.year.zhi] || '未知',
-            createdAt: new Date(),
-          };
-
-          setResult(baziResult);
-          setHistory(prev => [baziResult, ...prev]);
-
-          Alert.alert(
-            '创建成功',
-            `八字已保存到链上\\n命盘ID: ${chartId}`,
-            [
-              {
-                text: '查看历史',
-                onPress: () => router.push('/divination/bazi-list' as any),
-              },
-              { text: '确定' },
-            ]
-          );
-        } catch (error) {
-          console.error('获取八字数据失败:', error);
-        }
-      }, 1500);
-    } catch (error: any) {
-      console.error('创建八字失败:', error);
-      setTxStatus('创建失败');
-      setTimeout(() => {
-        setShowTxStatus(false);
-        Alert.alert('创建失败', error.message || '未知错误');
-      }, 1500);
-    } finally {
-      setLoading(false);
-    }
+    // 注意：saveBaziToChain 成功后会跳转或显示提示
+    // 如果需要更新本地结果状态，可以在这里添加逻辑
   };
 
   const handleReset = () => {
     setResult(null);
   };
 
-  // 保存到链上
+  // 保存到链上 (保存计算结果)
   const handleSaveToChain = async () => {
     if (!result) {
       Alert.alert('提示', '请先进行八字排盘');
       return;
     }
-
-    try {
-      // 检查钱包是否解锁
-      if (!isSignerUnlocked()) {
-        setShowUnlockDialog(true);
-        return;
-      }
-
-      setSaving(true);
-      setShowTxStatus(true);
-      setTxStatus('准备上链...');
-
-      // 调用服务保存到链上
-      const recordId = await divinationService.storeDivinationResult(
-        DivinationType.Bazi,
-        result,
-        (status) => {
-          setTxStatus(status);
-        }
-      );
-
-      setTxStatus('保存成功！');
-
-      setTimeout(() => {
-        setShowTxStatus(false);
-        Alert.alert(
-          '保存成功',
-          `八字已保存到链上\n记录ID: ${recordId}`,
-          [
-            {
-              text: '查看历史',
-              onPress: () => router.push('/divination/bazi-list' as any),
-            },
-            { text: '确定' },
-          ]
-        );
-      }, 1500);
-    } catch (error: any) {
-      console.error('保存到链上失败:', error);
-      setTxStatus('保存失败');
-      setTimeout(() => {
-        setShowTxStatus(false);
-        Alert.alert('保存失败', error.message || '未知错误');
-      }, 1500);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // 处理钱包解锁
-  const handleUnlockSuccess = async (password: string) => {
-    try {
-      await unlockWalletForSigning(password);
-      setShowUnlockDialog(false);
-      // 解锁成功后继续创建八字
-      setTimeout(() => {
-        createBaziChart();
-      }, 300);
-    } catch (error: any) {
-      Alert.alert('解锁失败', error.message || '密码错误');
-    }
+    await saveToChain(result);
   };
 
   // 渲染四柱
@@ -623,11 +496,11 @@ export default function BaziPage() {
 
         {/* 开始排盘按钮 */}
         <Pressable
-          style={[styles.primaryButton, loading && styles.buttonDisabled]}
-          onPress={createBaziChart}
-          disabled={loading}
+          style={[styles.primaryButton, (loading || saving) && styles.buttonDisabled]}
+          onPress={handleCreateBaziChart}
+          disabled={loading || saving}
         >
-          {loading ? (
+          {loading || saving ? (
             <ActivityIndicator color={THEME_COLOR_LIGHT} />
           ) : (
             <Text style={styles.primaryButtonText}>开始排盘</Text>
@@ -644,70 +517,311 @@ export default function BaziPage() {
   // 渲染结果
   const renderResult = () => {
     if (!result) return null;
+    const cd = result.chartData;
+
+    // 获取四柱数据
+    const pillars = cd ? [
+      { label: '年柱', zhu: cd.sizhu?.yearZhu },
+      { label: '月柱', zhu: cd.sizhu?.monthZhu },
+      { label: '日柱', zhu: cd.sizhu?.dayZhu, isDay: true },
+      { label: '时柱', zhu: cd.sizhu?.hourZhu },
+    ] : [];
 
     return (
       <View style={styles.resultContainer}>
-        {/* 基本信息卡片 */}
+        {/* 基本信息 */}
         <View style={styles.infoCard}>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>姓名</Text>
-            <Text style={styles.infoValue}>{result.name}</Text>
-          </View>
-          <View style={styles.infoDivider} />
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>公历</Text>
-            <Text style={styles.infoValue}>
-              {result.birthYear}年{result.birthMonth}月{result.birthDay}日 {result.birthHour}时
-            </Text>
-          </View>
-          <View style={styles.infoDivider} />
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>性别</Text>
-            <Text style={styles.infoValue}>{result.gender === 'male' ? '男' : '女'}</Text>
-          </View>
-          <View style={styles.infoDivider} />
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>生肖</Text>
-            <Text style={styles.infoValue}>属{result.shengxiao}</Text>
-          </View>
+          <Text style={styles.infoTitle}>{result.name} - {result.gender === 'male' ? '乾造' : '坤造'}</Text>
+          <Text style={styles.infoSubtitle}>
+            {result.birthYear}年{result.birthMonth}月{result.birthDay}日 {result.birthHour}时 | 属{result.shengxiao}
+          </Text>
         </View>
 
-        {/* 四柱 */}
-        {renderSiZhu()}
+        {/* 命盘表格 */}
+        {cd && (
+          <View style={styles.chartTable}>
+            {/* 表头 */}
+            <View style={styles.tableRow}>
+              <View style={[styles.tableCell, styles.tableLabelCell]}><Text style={styles.tableLabelText}>四柱</Text></View>
+              {pillars.map((p, i) => (
+                <View key={i} style={[styles.tableCell, styles.tableHeaderCell]}>
+                  <Text style={[styles.tableHeaderText, p.isDay && { color: THEME_COLOR }]}>{p.label}</Text>
+                </View>
+              ))}
+            </View>
 
-        {/* 五行分布 */}
-        {renderWuXing()}
+            {/* 十神 */}
+            <View style={styles.tableRow}>
+              <View style={[styles.tableCell, styles.tableLabelCell]}><Text style={styles.tableLabelText}>十神</Text></View>
+              {pillars.map((p, i) => (
+                <View key={i} style={styles.tableCell}>
+                  <Text style={styles.tableCellText}>{p.isDay ? '日元' : (p.zhu?.tianganShishen || '-')}</Text>
+                </View>
+              ))}
+            </View>
+
+            {/* 天干 */}
+            <View style={styles.tableRow}>
+              <View style={[styles.tableCell, styles.tableLabelCell]}><Text style={styles.tableLabelText}>{result.gender === 'male' ? '乾造' : '坤造'}</Text></View>
+              {pillars.map((p, i) => {
+                const gz = p.zhu?.ganzhi || '';
+                const gan = gz.charAt(0);
+                const ganIdx = TIAN_GAN.indexOf(gan);
+                const wuxing = ganIdx >= 0 ? TIAN_GAN_WUXING[ganIdx] : '木';
+                const color = WU_XING_COLORS[wuxing] || '#333';
+                return (
+                  <View key={i} style={styles.tableCell}>
+                    <Text style={[styles.ganzhiText, { color }]}>{gan || '-'}</Text>
+                  </View>
+                );
+              })}
+            </View>
+
+            {/* 地支 */}
+            <View style={styles.tableRow}>
+              <View style={[styles.tableCell, styles.tableLabelCell]}><Text style={styles.tableLabelText}></Text></View>
+              {pillars.map((p, i) => {
+                const gz = p.zhu?.ganzhi || '';
+                const zhi = gz.charAt(1);
+                const zhiIdx = DI_ZHI.indexOf(zhi);
+                const wuxing = zhiIdx >= 0 ? DI_ZHI_WUXING[zhiIdx] : '水';
+                const color = WU_XING_COLORS[wuxing] || '#333';
+                return (
+                  <View key={i} style={styles.tableCell}>
+                    <Text style={[styles.ganzhiText, { color }]}>{zhi || '-'}</Text>
+                  </View>
+                );
+              })}
+            </View>
+
+            {/* 藏干 */}
+            <View style={styles.tableRow}>
+              <View style={[styles.tableCell, styles.tableLabelCell]}><Text style={styles.tableLabelText}>藏干</Text></View>
+              {pillars.map((p, i) => (
+                <View key={i} style={styles.tableCell}>
+                  <Text style={styles.tableCellSmall}>
+                    {p.zhu?.cangganList?.map((cg: any) => `${cg.gan}${cg.shishen}`).join('\n') || '-'}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
+            {/* 纳音 */}
+            <View style={styles.tableRow}>
+              <View style={[styles.tableCell, styles.tableLabelCell]}><Text style={styles.tableLabelText}>纳音</Text></View>
+              {pillars.map((p, i) => (
+                <View key={i} style={styles.tableCell}>
+                  <Text style={styles.tableCellSmall}>{p.zhu?.nayin || '-'}</Text>
+                </View>
+              ))}
+            </View>
+
+            {/* 地势(长生) */}
+            <View style={styles.tableRow}>
+              <View style={[styles.tableCell, styles.tableLabelCell]}><Text style={styles.tableLabelText}>地势</Text></View>
+              {pillars.map((p, i) => (
+                <View key={i} style={styles.tableCell}>
+                  <Text style={styles.tableCellText}>{p.zhu?.changsheng || '-'}</Text>
+                </View>
+              ))}
+            </View>
+
+            {/* 自坐 */}
+            <View style={styles.tableRow}>
+              <View style={[styles.tableCell, styles.tableLabelCell]}><Text style={styles.tableLabelText}>自坐</Text></View>
+              {pillars.map((p, i) => (
+                <View key={i} style={styles.tableCell}>
+                  <Text style={styles.tableCellText}>{p.zhu?.zizuo || '-'}</Text>
+                </View>
+              ))}
+            </View>
+
+            {/* 空亡 */}
+            <View style={styles.tableRow}>
+              <View style={[styles.tableCell, styles.tableLabelCell]}><Text style={styles.tableLabelText}>空亡</Text></View>
+              <View style={styles.tableCell}>
+                <Text style={styles.tableCellSmall}>{cd.kongwang?.yearKong ? '空' : '-'}</Text>
+              </View>
+              <View style={styles.tableCell}>
+                <Text style={styles.tableCellSmall}>{cd.kongwang?.monthKong ? '空' : '-'}</Text>
+              </View>
+              <View style={styles.tableCell}>
+                <Text style={styles.tableCellSmall}>{cd.kongwang?.dayKong ? '空' : '-'}</Text>
+              </View>
+              <View style={styles.tableCell}>
+                <Text style={styles.tableCellSmall}>{cd.kongwang?.hourKong ? '空' : '-'}</Text>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* 神煞（按柱位分组显示） */}
+        {cd?.shenshaList && cd.shenshaList.length > 0 && (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>神煞</Text>
+            <View style={styles.shenshaTable}>
+              {/* 表头 */}
+              <View style={styles.shenshaTableRow}>
+                <View style={[styles.shenshaTableCell, styles.shenshaTableLabelCell]}>
+                  <Text style={styles.shenshaTableLabelText}>柱位</Text>
+                </View>
+                <View style={[styles.shenshaTableCell, styles.shenshaTableHeaderCell]}>
+                  <Text style={styles.shenshaTableHeaderText}>年柱</Text>
+                </View>
+                <View style={[styles.shenshaTableCell, styles.shenshaTableHeaderCell]}>
+                  <Text style={styles.shenshaTableHeaderText}>月柱</Text>
+                </View>
+                <View style={[styles.shenshaTableCell, styles.shenshaTableHeaderCell]}>
+                  <Text style={styles.shenshaTableHeaderText}>日柱</Text>
+                </View>
+                <View style={[styles.shenshaTableCell, styles.shenshaTableHeaderCell]}>
+                  <Text style={styles.shenshaTableHeaderText}>时柱</Text>
+                </View>
+              </View>
+              {/* 神煞内容行 */}
+              <View style={styles.shenshaTableRow}>
+                <View style={[styles.shenshaTableCell, styles.shenshaTableLabelCell]}>
+                  <Text style={styles.shenshaTableLabelText}>神煞</Text>
+                </View>
+                {['Year', 'Month', 'Day', 'Hour'].map((pos) => {
+                  const items = cd.shenshaList.filter((ss: any) => ss.position === pos);
+                  return (
+                    <View key={pos} style={styles.shenshaTableCell}>
+                      {items.length > 0 ? items.map((ss: any, idx: number) => (
+                        <Text key={idx} style={[
+                          styles.shenshaItemText,
+                          ss.nature === 'Xiong' ? styles.shenshaItemBad : styles.shenshaItemGood
+                        ]}>
+                          {ss.shensha}
+                        </Text>
+                      )) : <Text style={styles.shenshaItemEmpty}>-</Text>}
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* 五行强度 */}
+        {cd?.wuxingStrength && (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>五行强度</Text>
+            <View style={styles.wuxingRow}>
+              {(['jin', 'mu', 'shui', 'huo', 'tu'] as const).map((wx) => {
+                const labels: Record<string, string> = { jin: '金', mu: '木', shui: '水', huo: '火', tu: '土' };
+                const label = labels[wx] || '木';
+                const val = cd.wuxingStrength?.[wx] || 0;
+                return (
+                  <View key={wx} style={styles.wuxingItem}>
+                    <Text style={[styles.wuxingLabelLarge, { color: WU_XING_COLORS[label] }]}>{label}</Text>
+                    <Text style={styles.wuxingValue}>{val}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        )}
+
+        {/* 命盘分析 */}
+        {cd?.analysis && (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>命盘分析</Text>
+            <View style={styles.analysisRow}>
+              <Text style={styles.analysisItem}>格局: {cd.analysis.geJu}</Text>
+              <Text style={styles.analysisItem}>强弱: {cd.analysis.qiangRuo}</Text>
+            </View>
+            <View style={styles.analysisRow}>
+              <Text style={styles.analysisItem}>用神: {cd.analysis.yongShen}</Text>
+              <Text style={styles.analysisItem}>喜神: {cd.analysis.xiShen}</Text>
+              <Text style={styles.analysisItem}>忌神: {cd.analysis.jiShen}</Text>
+            </View>
+            <Text style={styles.scoreText}>综合评分: {cd.analysis.score}/100</Text>
+          </View>
+        )}
+
+        {/* 起运信息 */}
+        {cd?.qiyun && (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>起运信息</Text>
+            <Text style={styles.qiyunText}>
+              出生后{cd.qiyun.ageYears}年{cd.qiyun.ageMonths}月{cd.qiyun.ageDays}日起大运，
+              {cd.qiyun.isShun ? '顺排' : '逆排'}，
+              {cd.qiyun.jiaoyunYear}年{cd.qiyun.jiaoyunMonth}月{cd.qiyun.jiaoyunDay}日交运
+            </Text>
+          </View>
+        )}
+
+        {/* 大运列表 */}
+        {cd?.dayunList && cd.dayunList.length > 0 && (
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>大运</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={styles.dayunRow}>
+                {cd.dayunList.map((dy: any, i: number) => (
+                  <View key={i} style={styles.dayunItem}>
+                    <Text style={styles.dayunAge}>{dy.startAge}-{dy.endAge}岁</Text>
+                    <Text style={styles.dayunGanzhi}>{dy.ganzhi}</Text>
+                    <Text style={styles.dayunShishen}>{dy.tianganShishen}</Text>
+                    <Text style={styles.dayunYear}>{dy.startYear}年</Text>
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
+
+            {/* 流年表格 */}
+            <Text style={[styles.sectionTitle, { marginTop: 16 }]}>流年</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View>
+                {/* 表头：大运干支 */}
+                <View style={styles.liunianHeaderRow}>
+                  <View style={styles.liunianLabelCell}><Text style={styles.liunianLabelText}>大运</Text></View>
+                  {cd.dayunList.map((dy: any, i: number) => (
+                    <View key={i} style={styles.liunianHeaderCell}>
+                      <Text style={styles.liunianHeaderText}>{dy.ganzhi}</Text>
+                      <Text style={styles.liunianSubText}>{dy.tianganShishen}</Text>
+                    </View>
+                  ))}
+                </View>
+                {/* 流年行（每个大运10年） */}
+                {Array.from({ length: 10 }).map((_, rowIdx) => (
+                  <View key={rowIdx} style={styles.liunianRow}>
+                    <View style={styles.liunianLabelCell}>
+                      <Text style={styles.liunianLabelText}>流年{rowIdx + 1}</Text>
+                    </View>
+                    {cd.dayunList.map((dy: any, colIdx: number) => {
+                      const ln = dy.liunianList?.[rowIdx];
+                      return (
+                        <View key={colIdx} style={styles.liunianCell}>
+                          {ln ? (
+                            <>
+                              <Text style={styles.liunianYear}>{ln.year}</Text>
+                              <Text style={styles.liunianGanzhi}>{ln.ganzhi}</Text>
+                              <Text style={styles.liunianShishen}>{ln.tianganShishen}</Text>
+                            </>
+                          ) : <Text style={styles.liunianEmpty}>-</Text>}
+                        </View>
+                      );
+                    })}
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
+          </View>
+        )}
 
         {/* 操作按钮 */}
         <View style={styles.actionButtons}>
-          <Pressable
-            style={styles.saveButton}
-            onPress={handleSaveToChain}
-            disabled={saving}
-          >
-            {saving ? (
-              <ActivityIndicator color="#FFF" />
-            ) : (
+          <Pressable style={styles.saveButton} onPress={handleSaveToChain} disabled={saving}>
+            {saving ? <ActivityIndicator color="#FFF" /> : (
               <>
                 <Ionicons name="cloud-upload-outline" size={18} color="#FFF" />
                 <Text style={styles.saveButtonText}>保存到链上</Text>
               </>
             )}
           </Pressable>
-          <Pressable
-            style={styles.aiButton}
-            onPress={() => Alert.alert('提示', 'AI解读功能即将上线')}
-          >
+          <Pressable style={styles.aiButton} onPress={() => Alert.alert('提示', 'AI解读功能即将上线')}>
             <Text style={styles.aiButtonText}>🤖 AI智能解盘</Text>
-          </Pressable>
-          <Pressable
-            style={styles.detailButton}
-            onPress={() => router.push({
-              pathname: '/divination/bazi-detail',
-              params: { data: JSON.stringify(result) }
-            } as any)}
-          >
-            <Text style={styles.detailButtonText}>查看命盘详情 →</Text>
           </Pressable>
         </View>
 
@@ -1192,5 +1306,281 @@ const styles = StyleSheet.create({
   },
   bottomNavLabelActive: {
     color: THEME_COLOR,
+  },
+  // 新增：结果页面表格样式
+  infoTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    textAlign: 'center',
+  },
+  infoSubtitle: {
+    fontSize: 13,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  chartTable: {
+    backgroundColor: '#FFF',
+    borderRadius: 8,
+    marginTop: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+  },
+  tableRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  tableCell: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 40,
+  },
+  tableLabelCell: {
+    flex: 0.6,
+    backgroundColor: '#FDF8E8',
+  },
+  tableLabelText: {
+    fontSize: 12,
+    color: '#8B6914',
+    fontWeight: '500',
+  },
+  tableHeaderCell: {
+    backgroundColor: '#FAFAFA',
+  },
+  tableHeaderText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#333',
+  },
+  tableCellText: {
+    fontSize: 12,
+    color: '#333',
+    textAlign: 'center',
+  },
+  tableCellSmall: {
+    fontSize: 10,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 14,
+  },
+  ganzhiText: {
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  sectionCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 8,
+    marginTop: 12,
+    padding: 12,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: THEME_COLOR,
+    marginBottom: 8,
+  },
+  shenshaContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  shenshaTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#E8F5E9',
+    borderRadius: 4,
+  },
+  shenshaTagBad: {
+    backgroundColor: '#FFEBEE',
+  },
+  shenshaText: {
+    fontSize: 11,
+    color: '#333',
+  },
+  wuxingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  wuxingItem: {
+    alignItems: 'center',
+  },
+  wuxingLabelLarge: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  wuxingValue: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+  analysisRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginBottom: 6,
+  },
+  analysisItem: {
+    fontSize: 13,
+    color: '#333',
+  },
+  scoreText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: THEME_COLOR,
+    marginTop: 8,
+  },
+  qiyunText: {
+    fontSize: 13,
+    color: '#333',
+    lineHeight: 20,
+  },
+  dayunRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  dayunItem: {
+    width: 60,
+    alignItems: 'center',
+    paddingVertical: 8,
+    backgroundColor: '#FAFAFA',
+    borderRadius: 6,
+  },
+  dayunAge: {
+    fontSize: 10,
+    color: '#999',
+  },
+  dayunGanzhi: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginVertical: 4,
+  },
+  dayunShishen: {
+    fontSize: 10,
+    color: THEME_COLOR,
+  },
+  dayunYear: {
+    fontSize: 10,
+    color: '#666',
+  },
+  // 流年样式
+  liunianHeaderRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5E5',
+  },
+  liunianRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  liunianLabelCell: {
+    width: 50,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    backgroundColor: '#FDF8E8',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  liunianLabelText: {
+    fontSize: 10,
+    color: '#8B6914',
+    fontWeight: '500',
+  },
+  liunianHeaderCell: {
+    width: 55,
+    paddingVertical: 6,
+    alignItems: 'center',
+    backgroundColor: '#FAFAFA',
+  },
+  liunianHeaderText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#333',
+  },
+  liunianSubText: {
+    fontSize: 9,
+    color: THEME_COLOR,
+  },
+  liunianCell: {
+    width: 55,
+    paddingVertical: 4,
+    alignItems: 'center',
+  },
+  liunianYear: {
+    fontSize: 9,
+    color: '#999',
+  },
+  liunianGanzhi: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#333',
+  },
+  liunianShishen: {
+    fontSize: 9,
+    color: '#666',
+  },
+  liunianEmpty: {
+    fontSize: 10,
+    color: '#CCC',
+  },
+  // 神煞表格样式
+  shenshaTable: {
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  shenshaTableRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  shenshaTableCell: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    minHeight: 40,
+  },
+  shenshaTableLabelCell: {
+    flex: 0.6,
+    backgroundColor: '#FDF8E8',
+    justifyContent: 'center',
+  },
+  shenshaTableLabelText: {
+    fontSize: 11,
+    color: '#8B6914',
+    fontWeight: '500',
+  },
+  shenshaTableHeaderCell: {
+    backgroundColor: '#FAFAFA',
+    justifyContent: 'center',
+  },
+  shenshaTableHeaderText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#333',
+  },
+  shenshaItemText: {
+    fontSize: 10,
+    marginVertical: 1,
+  },
+  shenshaItemGood: {
+    color: '#2E7D32',
+  },
+  shenshaItemBad: {
+    color: '#C62828',
+  },
+  shenshaItemEmpty: {
+    fontSize: 10,
+    color: '#CCC',
   },
 });

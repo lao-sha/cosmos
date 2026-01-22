@@ -4,7 +4,7 @@ use crate as pallet_livestream;
 use frame_support::{
     derive_impl,
     parameter_types,
-    traits::{ConstU128, ConstU32, ConstU8},
+    traits::{ConstU128, ConstU32, ConstU64, ConstU8},
     PalletId,
 };
 use frame_system::EnsureRoot;
@@ -67,6 +67,13 @@ impl pallet_livestream::Config for Test {
     type PalletId = LivestreamPalletId;
     type GovernanceOrigin = EnsureRoot<u64>;
     type WeightInfo = ();
+
+    // 举报系统配置
+    type MinReportDeposit = ConstU128<10_000_000_000_000>; // 10 DUST
+    type ReportTimeout = ConstU64<100>; // 100 blocks for testing
+    type ReportCooldownPeriod = ConstU64<10>; // 10 blocks for testing
+    type ReportWithdrawWindow = ConstU64<5>; // 5 blocks for testing
+    type ContentCommittee = EnsureRoot<u64>; // Use root for testing
 }
 
 /// 构建测试外部环境

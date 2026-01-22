@@ -157,7 +157,7 @@ export default function ZiweiPage() {
     setShowTxStatus,
   } = useDivinationSave({
     divinationType: DivinationType.Ziwei,
-    historyRoute: '/divination/ziwei-list',
+    historyRoute: '/divination/history',
   });
 
   // 计算紫微命盘

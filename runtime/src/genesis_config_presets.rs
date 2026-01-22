@@ -15,7 +15,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{AccountId, BalancesConfig, RuntimeGenesisConfig, SudoConfig, UNIT};
+use crate::{
+	AccountId, BalancesConfig, RuntimeGenesisConfig, SudoConfig, UNIT,
+	TechnicalCommitteeConfig, ArbitrationCommitteeConfig, TreasuryCouncilConfig, ContentCommitteeConfig,
+	TechnicalMembershipConfig, ArbitrationMembershipConfig, TreasuryMembershipConfig, ContentMembershipConfig,
+};
 use alloc::{vec, vec::Vec};
 use frame_support::build_struct_json_patch;
 use serde_json::Value;
@@ -23,15 +27,39 @@ use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use sp_consensus_grandpa::AuthorityId as GrandpaId;
 use sp_genesis_builder::{self, PresetId};
 use sp_keyring::Sr25519Keyring;
+use sp_runtime::AccountId32;
 
-/// Total initial supply: 1,000,000,000,000 DUST
-const INITIAL_SUPPLY: u128 = 1_000_000_000_000 * UNIT;
+/// 从十六进制字符串解析 AccountId32（支持24字节，右侧补零到32字节）
+fn parse_account_hex(hex_str: &str) -> AccountId32 {
+	let bytes = hex::decode(hex_str).expect("Invalid hex string");
+	let mut arr = [0u8; 32];
+	let len = bytes.len().min(32);
+	arr[..len].copy_from_slice(&bytes[..len]);
+	AccountId32::new(arr)
+}
+
+/// 委员会成员账户（创世配置）
+/// Prime: 52e0a18b887e9a3d75d1a14ed6c75cc0baa3fa7e0f711a69
+fn committee_members() -> (AccountId, AccountId, AccountId) {
+	let member1 = parse_account_hex("52e0a18b887e9a3d75d1a14ed6c75cc0baa3fa7e0f711a69"); // Prime
+	let member2 = parse_account_hex("541336f979e4c0e114e747c5e125030ff72016193799876c");
+	let member3 = parse_account_hex("5d8ca769cf8f79359c027a7c4b8b65c0a1598a0b3ba8f52d");
+	(member1, member2, member3)
+}
+
+/// Total initial supply: 100,000,000,000 DUST
+const INITIAL_SUPPLY: u128 = 100_000_000_000 * UNIT;
 
 // Returns the genesis config presets populated with given parameters.
 fn testnet_genesis(
 	initial_authorities: Vec<(AuraId, GrandpaId)>,
 	endowed_accounts: Vec<AccountId>,
+	_prime: Option<AccountId>,  // Prime member (需启动后通过 set_prime extrinsic 设置)
 	root: AccountId,
+	technical_members: Vec<AccountId>,
+	arbitration_members: Vec<AccountId>,
+	treasury_members: Vec<AccountId>,
+	content_members: Vec<AccountId>,
 ) -> Value {
 	let balance_per_account = INITIAL_SUPPLY / endowed_accounts.len() as u128;
 	build_struct_json_patch!(RuntimeGenesisConfig {
@@ -43,17 +71,55 @@ fn testnet_genesis(
 				.collect::<Vec<_>>(),
 		},
 		aura: pallet_aura::GenesisConfig {
-			authorities: initial_authorities.iter().map(|x| (x.0.clone())).collect::<Vec<_>>(),
+			authorities: initial_authorities.iter().map(|x| x.0.clone()).collect::<Vec<_>>(),
 		},
 		grandpa: pallet_grandpa::GenesisConfig {
 			authorities: initial_authorities.iter().map(|x| (x.1.clone(), 1)).collect::<Vec<_>>(),
 		},
 		sudo: SudoConfig { key: Some(root) },
+		// 委员会初始成员配置
+		technical_committee: TechnicalCommitteeConfig {
+			members: technical_members.clone(),
+			phantom: Default::default(),
+		},
+		arbitration_committee: ArbitrationCommitteeConfig {
+			members: arbitration_members.clone(),
+			phantom: Default::default(),
+		},
+		treasury_council: TreasuryCouncilConfig {
+			members: treasury_members.clone(),
+			phantom: Default::default(),
+		},
+		content_committee: ContentCommitteeConfig {
+			members: content_members.clone(),
+			phantom: Default::default(),
+		},
+		// 委员会成员管理配置（含 Prime）
+		technical_membership: TechnicalMembershipConfig {
+			members: technical_members.try_into().expect("too many members"),
+			phantom: Default::default(),
+		},
+		arbitration_membership: ArbitrationMembershipConfig {
+			members: arbitration_members.try_into().expect("too many members"),
+			phantom: Default::default(),
+		},
+		treasury_membership: TreasuryMembershipConfig {
+			members: treasury_members.try_into().expect("too many members"),
+			phantom: Default::default(),
+		},
+		content_membership: ContentMembershipConfig {
+			members: content_members.try_into().expect("too many members"),
+			phantom: Default::default(),
+		},
 	})
 }
 
 /// Return the development genesis config.
 pub fn development_config_genesis() -> Value {
+	// 使用统一的委员会成员
+	let (member1, member2, member3) = committee_members();
+	let all_members = vec![member1.clone(), member2.clone(), member3.clone()];
+
 	testnet_genesis(
 		vec![(
 			sp_keyring::Sr25519Keyring::Alice.public().into(),
@@ -64,13 +130,38 @@ pub fn development_config_genesis() -> Value {
 			Sr25519Keyring::Bob.to_account_id(),
 			Sr25519Keyring::AliceStash.to_account_id(),
 			Sr25519Keyring::BobStash.to_account_id(),
+			member1.clone(),
+			member2.clone(),
+			member3.clone(),
 		],
+		Some(member1),  // Prime for all committees
 		sp_keyring::Sr25519Keyring::Alice.to_account_id(),
+		// 技术委员会: 3 members
+		all_members.clone(),
+		// 仲裁委员会: 3 members
+		all_members.clone(),
+		// 财务委员会: 3 members
+		all_members.clone(),
+		// 内容委员会: 3 members
+		all_members,
 	)
 }
 
 /// Return the local genesis config preset.
 pub fn local_config_genesis() -> Value {
+	// 使用统一的委员会成员
+	let (member1, member2, member3) = committee_members();
+	let all_members = vec![member1.clone(), member2.clone(), member3.clone()];
+
+	// 收集所有 keyring 账户并添加委员会成员
+	let mut endowed: Vec<AccountId> = Sr25519Keyring::iter()
+		.filter(|v| v != &Sr25519Keyring::One && v != &Sr25519Keyring::Two)
+		.map(|v| v.to_account_id())
+		.collect();
+	endowed.push(member1.clone());
+	endowed.push(member2.clone());
+	endowed.push(member3.clone());
+
 	testnet_genesis(
 		vec![
 			(
@@ -82,11 +173,17 @@ pub fn local_config_genesis() -> Value {
 				sp_keyring::Ed25519Keyring::Bob.public().into(),
 			),
 		],
-		Sr25519Keyring::iter()
-			.filter(|v| v != &Sr25519Keyring::One && v != &Sr25519Keyring::Two)
-			.map(|v| v.to_account_id())
-			.collect::<Vec<_>>(),
+		endowed,
+		Some(member1),  // Prime for all committees
 		Sr25519Keyring::Alice.to_account_id(),
+		// 技术委员会: 3 members
+		all_members.clone(),
+		// 仲裁委员会: 3 members
+		all_members.clone(),
+		// 财务委员会: 3 members
+		all_members.clone(),
+		// 内容委员会: 3 members
+		all_members,
 	)
 }
 

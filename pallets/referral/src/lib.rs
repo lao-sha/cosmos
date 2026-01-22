@@ -23,8 +23,13 @@
 //! **抽离日期**: 2025-12-30
 
 pub use pallet::*;
+pub mod weights;
+pub use weights::WeightInfo;
 
 extern crate alloc;
+
+#[cfg(feature = "runtime-benchmarks")]
+mod benchmarking;
 
 #[cfg(test)]
 mod mock;
@@ -37,6 +42,7 @@ pub mod pallet {
     use super::*;
     use frame_support::{pallet_prelude::*, BoundedVec};
     use frame_system::pallet_prelude::*;
+    use sp_runtime::SaturatedConversion;
     use sp_std::vec::Vec;
 
     /// 推荐链最大层数
@@ -61,10 +67,13 @@ pub mod pallet {
         /// 推荐链最大搜索深度（防止无限循环）
         #[pallet::constant]
         type MaxSearchHops: Get<u32>;
+
+        /// 权重信息
+        type WeightInfo: crate::weights::WeightInfo;
     }
 
     // ========================================
-    // 存储项（3个）
+    // 存储项（4个）
     // ========================================
 
     /// 推荐人映射：账户 → 推荐人
@@ -91,6 +100,22 @@ pub mod pallet {
         T::AccountId,
         BoundedVec<u8, T::MaxCodeLen>,
     >;
+
+    /// 🆕 推荐关系统计信息
+    #[pallet::storage]
+    #[pallet::getter(fn referral_stats)]
+    pub type ReferralStats<T: Config> = StorageValue<_, ReferralStatistics, ValueQuery>;
+
+    /// 🆕 推荐关系统计结构
+    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, Debug, Default)]
+    pub struct ReferralStatistics {
+        /// 总推荐关系数
+        pub total_sponsors: u64,
+        /// 总推荐码数
+        pub total_codes: u64,
+        /// 最后更新区块
+        pub last_updated: u32,
+    }
 
     // ========================================
     // 事件
@@ -154,7 +179,7 @@ pub mod pallet {
         /// - 不能绑定自己
         /// - 不能形成循环
         #[pallet::call_index(0)]
-        #[pallet::weight(Weight::from_parts(10_000, 0))]
+        #[pallet::weight(T::WeightInfo::bind_sponsor())]
         pub fn bind_sponsor(
             origin: OriginFor<T>,
             sponsor_code: Vec<u8>,
@@ -173,7 +198,7 @@ pub mod pallet {
         /// - 推荐码未被占用
         /// - 用户未认领其他推荐码
         #[pallet::call_index(1)]
-        #[pallet::weight(Weight::from_parts(10_000, 0))]
+        #[pallet::weight(T::WeightInfo::claim_code())]
         pub fn claim_code(
             origin: OriginFor<T>,
             code: Vec<u8>,
@@ -275,6 +300,12 @@ pub mod pallet {
                 AccountByCode::<T>::insert(&default_code, who);
                 CodeByAccount::<T>::insert(who, &default_code);
 
+                // 🆕 更新统计信息
+                ReferralStats::<T>::mutate(|stats| {
+                    stats.total_codes = stats.total_codes.saturating_add(1);
+                    stats.last_updated = frame_system::Pallet::<T>::block_number().saturated_into();
+                });
+
                 // 发射事件
                 Self::deposit_event(Event::CodeClaimed {
                     who: who.clone(),
@@ -325,6 +356,12 @@ pub mod pallet {
             // 绑定推荐人
             Sponsors::<T>::insert(&who, &sponsor);
 
+            // 🆕 更新统计信息
+            ReferralStats::<T>::mutate(|stats| {
+                stats.total_sponsors = stats.total_sponsors.saturating_add(1);
+                stats.last_updated = frame_system::Pallet::<T>::block_number().saturated_into();
+            });
+
             // 发射事件
             Self::deposit_event(Event::SponsorBound {
                 who: who.clone(),
@@ -371,6 +408,12 @@ pub mod pallet {
             // 认领推荐码
             AccountByCode::<T>::insert(&code, &who);
             CodeByAccount::<T>::insert(&who, &code);
+
+            // 🆕 更新统计信息
+            ReferralStats::<T>::mutate(|stats| {
+                stats.total_codes = stats.total_codes.saturating_add(1);
+                stats.last_updated = frame_system::Pallet::<T>::block_number().saturated_into();
+            });
 
             // 发射事件
             Self::deposit_event(Event::CodeClaimed {

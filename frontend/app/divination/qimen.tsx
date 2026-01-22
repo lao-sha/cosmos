@@ -213,7 +213,7 @@ export default function QimenPage() {
     setShowTxStatus,
   } = useDivinationSave({
     divinationType: DivinationType.Qimen,
-    historyRoute: '/divination/qimen-list',
+    historyRoute: '/divination/history',
   });
 
   // 节气列表

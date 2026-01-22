@@ -177,6 +177,11 @@ export default function ProfilePage() {
       onPress: () => Alert.alert('提示', '修改密码功能即将上线'),
     },
     {
+      icon: 'shield-checkmark-outline',
+      title: '隐私与授权',
+      onPress: () => router.push('/profile/privacy'),
+    },
+    {
       icon: 'time-outline',
       title: '交易历史',
       onPress: () => router.push('/wallet/transactions'),

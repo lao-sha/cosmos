@@ -7,7 +7,7 @@ import { ApiPromise } from '@polkadot/api';
 import { Keyring } from '@polkadot/keyring';
 import { KeyringPair } from '@polkadot/keyring/types';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { retrieveEncryptedMnemonic, getCurrentAddress } from '@/lib/keystore.native';
+import { retrieveEncryptedMnemonic, getCurrentAddress } from '@/lib/keystore';
 
 /**
  * 移动端签名器

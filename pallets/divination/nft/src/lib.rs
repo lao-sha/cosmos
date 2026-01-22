@@ -72,6 +72,9 @@ pub mod pallet {
         /// 在 Runtime 中组合为统一的 Provider。
         type DivinationProvider: DivinationProvider<Self::AccountId>;
 
+        /// IPFS 内容注册接口（用于自动 Pin NFT 媒体）
+        type ContentRegistry: pallet_stardust_ipfs::ContentRegistry;
+
         /// 最大名称长度
         #[pallet::constant]
         type MaxNameLength: Get<u32>;
@@ -192,13 +195,16 @@ pub mod pallet {
     >;
 
     /// 用户拥有的 NFT 列表
+    /// 
+    /// 🆕 存储膨胀防护：上限从 10000 → 1000 → 200
+    /// 超出部分建议通过链下索引服务查询
     #[pallet::storage]
     #[pallet::getter(fn user_nfts)]
     pub type UserNfts<T: Config> = StorageMap<
         _,
         Blake2_128Concat,
         T::AccountId,
-        BoundedVec<u64, ConstU32<10000>>,
+        BoundedVec<u64, ConstU32<200>>,
         ValueQuery,
     >;
 
@@ -500,13 +506,50 @@ pub mod pallet {
             let name_bounded: BoundedVec<u8, T::MaxNameLength> =
                 BoundedVec::try_from(name).map_err(|_| Error::<T>::NameTooLong)?;
             let image_cid_bounded: BoundedVec<u8, T::MaxCidLength> =
-                BoundedVec::try_from(image_cid).map_err(|_| Error::<T>::CidTooLong)?;
+                BoundedVec::try_from(image_cid.clone()).map_err(|_| Error::<T>::CidTooLong)?;
             let description_cid_bounded = description_cid
+                .clone()
                 .map(|cid| BoundedVec::try_from(cid).map_err(|_| Error::<T>::CidTooLong))
                 .transpose()?;
             let animation_cid_bounded = animation_cid
+                .clone()
                 .map(|cid| BoundedVec::try_from(cid).map_err(|_| Error::<T>::CidTooLong))
                 .transpose()?;
+
+            // 创建 NFT
+            let nft_id = NextNftId::<T>::get();
+            NextNftId::<T>::put(nft_id.saturating_add(1));
+
+            // 🆕 自动 Pin NFT 主图到 IPFS (Critical 层级 - 5副本)
+            // NFT 主图是高价值数字资产，需要最高可靠性
+            <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                b"divination-nft".to_vec(),
+                nft_id,
+                image_cid,
+                pallet_stardust_ipfs::PinTier::Critical,
+            )?;
+
+            // 🆕 如果有描述，Pin 描述 (Standard 层级)
+            if let Some(ref desc_cid) = description_cid {
+                // 描述 Pin 失败不影响主流程
+                let _ = <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                    b"divination-nft".to_vec(),
+                    nft_id.saturating_add(1000000),
+                    desc_cid.clone(),
+                    pallet_stardust_ipfs::PinTier::Standard,
+                ).ok();
+            }
+
+            // 🆕 如果有动画，Pin 动画 (Standard 层级)
+            if let Some(ref anim_cid) = animation_cid {
+                // 动画 Pin 失败不影响主流程
+                let _ = <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                    b"divination-nft".to_vec(),
+                    nft_id.saturating_add(2000000),
+                    anim_cid.clone(),
+                    pallet_stardust_ipfs::PinTier::Standard,
+                ).ok();
+            }
 
             let metadata = NftMetadata {
                 name: name_bounded,
@@ -515,10 +558,6 @@ pub mod pallet {
                 animation_cid: animation_cid_bounded,
                 external_url_cid: None,
             };
-
-            // 创建 NFT
-            let nft_id = NextNftId::<T>::get();
-            NextNftId::<T>::put(nft_id.saturating_add(1));
 
             let block_number = <frame_system::Pallet<T>>::block_number();
 
@@ -1044,14 +1083,38 @@ pub mod pallet {
             let name_bounded: BoundedVec<u8, T::MaxNameLength> =
                 BoundedVec::try_from(name).map_err(|_| Error::<T>::NameTooLong)?;
             let description_cid_bounded = description_cid
+                .clone()
                 .map(|cid| BoundedVec::try_from(cid).map_err(|_| Error::<T>::CidTooLong))
                 .transpose()?;
             let cover_cid_bounded = cover_cid
+                .clone()
                 .map(|cid| BoundedVec::try_from(cid).map_err(|_| Error::<T>::CidTooLong))
                 .transpose()?;
 
             let collection_id = NextCollectionId::<T>::get();
             NextCollectionId::<T>::put(collection_id.saturating_add(1));
+
+            // 🆕 如果有描述，Pin 描述 (Temporary 层级)
+            if let Some(ref desc_cid) = description_cid {
+                // 描述 Pin 失败不影响主流程
+                let _ = <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                    b"divination-nft".to_vec(),
+                    (collection_id as u64).saturating_add(3000000),
+                    desc_cid.clone(),
+                    pallet_stardust_ipfs::PinTier::Temporary,
+                ).ok();
+            }
+
+            // 🆕 如果有封面，Pin 封面 (Standard 层级)
+            if let Some(ref cover) = cover_cid {
+                // 封面 Pin 失败不影响主流程
+                let _ = <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                    b"divination-nft".to_vec(),
+                    (collection_id as u64).saturating_add(4000000),
+                    cover.clone(),
+                    pallet_stardust_ipfs::PinTier::Standard,
+                ).ok();
+            }
 
             let collection = Collection {
                 id: collection_id,

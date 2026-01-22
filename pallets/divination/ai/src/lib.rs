@@ -70,6 +70,9 @@ pub mod pallet {
         /// 占卜结果查询接口
         type DivinationProvider: DivinationProvider<Self::AccountId>;
 
+        /// IPFS 内容注册接口（用于自动 Pin AI 解读内容）
+        type ContentRegistry: pallet_stardust_ipfs::ContentRegistry;
+
         /// 基础解读费用
         #[pallet::constant]
         type BaseInterpretationFee: Get<BalanceOf<Self>>;
@@ -195,7 +198,7 @@ pub mod pallet {
         _,
         Blake2_128Concat,
         T::AccountId,
-        BoundedVec<u64, ConstU32<1000>>,
+        BoundedVec<u64, ConstU32<200>>,
         ValueQuery,
     >;
 
@@ -684,6 +687,26 @@ pub mod pallet {
                 !Results::<T>::contains_key(request_id),
                 Error::<T>::ResultAlreadySubmitted
             );
+
+            // 🆕 自动 Pin AI 解读内容到 IPFS（在创建 result 之前）
+            // 使用 Standard 层级（3副本，24小时巡检）
+            <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                b"divination-ai".to_vec(),
+                request_id,
+                content_cid.clone(),
+                pallet_stardust_ipfs::PinTier::Standard,
+            )?;
+
+            // 如果有摘要，也 Pin 摘要（Temporary 层级）
+            if let Some(ref summary) = summary_cid_bounded {
+                let _ = <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                    b"divination-ai".to_vec(),
+                    request_id,
+                    summary.to_vec(),
+                    pallet_stardust_ipfs::PinTier::Temporary,
+                );
+                // 注意：摘要 Pin 失败不影响主流程，使用 let _ 忽略错误
+            }
 
             // 创建结果
             let result = InterpretationResult {

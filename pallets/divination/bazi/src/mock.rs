@@ -5,12 +5,65 @@
 use crate as pallet_bazi_chart;
 use frame_support::{
 	derive_impl,
+	dispatch::DispatchResult,
 	parameter_types,
 	traits::ConstU32,
 };
 use sp_runtime::BuildStorage;
+use pallet_divination_privacy::types::PrivacyMode;
+use pallet_divination_common::DivinationType;
 
 type Block = frame_system::mocking::MockBlock<Test>;
+
+/// Mock PrivacyProvider 实现（用于测试）
+pub struct MockPrivacyProvider;
+
+impl pallet_divination_privacy::traits::EncryptedRecordManager<u64, u64> for MockPrivacyProvider {
+	fn create_record(
+		_owner: &u64,
+		_divination_type: DivinationType,
+		_result_id: u64,
+		_privacy_mode: PrivacyMode,
+		_encrypted_data: sp_std::vec::Vec<u8>,
+		_nonce: [u8; 24],
+		_auth_tag: [u8; 16],
+		_data_hash: [u8; 32],
+		_owner_encrypted_key: sp_std::vec::Vec<u8>,
+	) -> DispatchResult {
+		Ok(())
+	}
+
+	fn delete_record(
+		_owner: &u64,
+		_divination_type: DivinationType,
+		_result_id: u64,
+	) -> DispatchResult {
+		Ok(())
+	}
+
+	fn grant_access(
+		_grantor: &u64,
+		_divination_type: DivinationType,
+		_result_id: u64,
+		_grantee: &u64,
+		_encrypted_key: sp_std::vec::Vec<u8>,
+		_role: pallet_divination_privacy::types::AccessRole,
+		_scope: pallet_divination_privacy::types::AccessScope,
+		_expires_at: u64,
+		_bounty_id: Option<u64>,
+	) -> DispatchResult {
+		Ok(())
+	}
+
+	fn revoke_access(
+		_grantor: &u64,
+		_divination_type: DivinationType,
+		_result_id: u64,
+		_grantee: &u64,
+	) -> DispatchResult {
+		Ok(())
+	}
+}
 
 // 配置测试运行时
 frame_support::construct_runtime!(
@@ -55,6 +108,8 @@ impl pallet_bazi_chart::Config for Test {
 	type MaxChartsPerAccount = ConstU32<10>;
 	type MaxDaYunSteps = ConstU32<12>;
 	type MaxCangGan = ConstU32<3>;
+	// 隐私模块集成
+	type PrivacyProvider = MockPrivacyProvider;
 	// 存储押金相关配置
 	type Currency = Balances;
 	type StorageDepositPerKb = StorageDepositPerKb;

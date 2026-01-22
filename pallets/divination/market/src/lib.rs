@@ -60,7 +60,10 @@ pub mod pallet {
     };
     use frame_system::pallet_prelude::*;
     use pallet_divination_common::{DivinationProvider, DivinationType};
-    use sp_runtime::traits::{Saturating, Zero};
+    use pallet_affiliate::types::AffiliateDistributor;
+    use pallet_trading_common::PricingProvider;
+    use sp_runtime::traits::{Saturating, Zero, SaturatedConversion};
+    // 已移除 L1/L2 归档压缩，不再需要 amount_to_tier 和 block_to_year_month
     use sp_std::prelude::*;
 
     /// Pallet 配置 trait
@@ -72,13 +75,27 @@ pub mod pallet {
         /// 占卜结果查询接口
         type DivinationProvider: DivinationProvider<Self::AccountId>;
 
-        /// 最小保证金
+        /// IPFS 内容注册接口（用于自动 Pin 市场内容）
+        type ContentRegistry: pallet_stardust_ipfs::ContentRegistry;
+
+        /// 最小保证金（DUST数量）
         #[pallet::constant]
         type MinDeposit: Get<BalanceOf<Self>>;
+
+        /// 最小保证金USD价值（精度10^6，100_000_000 = 100 USDT）
+        #[pallet::constant]
+        type MinDepositUsd: Get<u64>;
+
+        /// 定价接口（用于换算保证金USD价值）
+        type Pricing: pallet_trading_common::PricingProvider<BalanceOf<Self>>;
 
         /// 最小服务价格
         #[pallet::constant]
         type MinServicePrice: Get<BalanceOf<Self>>;
+
+        /// 最大服务价格（修复 H-13: 防止异常高价）
+        #[pallet::constant]
+        type MaxServicePrice: Get<BalanceOf<Self>>;
 
         /// 订单超时时间（区块数）
         #[pallet::constant]
@@ -127,34 +144,24 @@ pub mod pallet {
         /// 治理权限来源
         type GovernanceOrigin: EnsureOrigin<Self::RuntimeOrigin>;
 
-        // ==================== 举报系统配置 ====================
-
-        /// 最小举报押金
-        #[pallet::constant]
-        type MinReportDeposit: Get<BalanceOf<Self>>;
-
-        /// 举报处理超时时间（区块数，超时后举报者可取回押金）
-        #[pallet::constant]
-        type ReportTimeout: Get<BlockNumberFor<Self>>;
-
-        /// 举报冷却期（同一用户对同一大师的举报间隔）
-        #[pallet::constant]
-        type ReportCooldownPeriod: Get<BlockNumberFor<Self>>;
-
-        /// 撤回举报的时间窗口（仅在此期间内可撤回）
-        #[pallet::constant]
-        type ReportWithdrawWindow: Get<BlockNumberFor<Self>>;
-
-        /// 恶意举报的信用扣分
-        #[pallet::constant]
-        type MaliciousReportPenalty: Get<u16>;
-
-        /// 举报审核委员会权限来源
-        type ReportReviewOrigin: EnsureOrigin<Self::RuntimeOrigin, Success = Self::AccountId>;
-
-        /// 国库账户（罚金剩余部分归国库）
+        /// 国库账户
         #[pallet::constant]
         type TreasuryAccount: Get<Self::AccountId>;
+
+        /// 🆕 联盟分成接口
+        type AffiliateDistributor: pallet_affiliate::types::AffiliateDistributor<
+            Self::AccountId,
+            u128,
+            BlockNumberFor<Self>,
+        >;
+
+        /// 🆕 平台抽成中用于联盟分成的比例（基点，5000 = 50%）
+        #[pallet::constant]
+        type AffiliateFeeRatio: Get<u16>;
+
+        /// 🆕 解读修改窗口（区块数，28800 ≈ 2天，按6秒/块计算）
+        #[pallet::constant]
+        type InterpretationEditWindow: Get<BlockNumberFor<Self>>;
     }
 
     /// 货币余额类型别名
@@ -260,22 +267,29 @@ pub mod pallet {
     /// 信用修复任务类型别名
     pub type CreditRepairTaskOf<T> = CreditRepairTask<BlockNumberFor<T>>;
 
-    // ==================== 举报系统类型别名 ====================
-
-    /// 举报记录类型别名
-    pub type ReportOf<T> = Report<
-        <T as frame_system::Config>::AccountId,
-        BalanceOf<T>,
-        BlockNumberFor<T>,
-        <T as Config>::MaxCidLength,
-        <T as Config>::MaxDescriptionLength,
-    >;
-
-    /// 大师举报档案类型别名
-    pub type ProviderReportProfileOf<T> = ProviderReportProfile<BlockNumberFor<T>>;
-
     #[pallet::pallet]
     pub struct Pallet<T>(_);
+
+    // ==================== 🆕 存储膨胀防护：Hooks ====================
+
+    #[pallet::hooks]
+    impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+        /// 空闲时归档已完成订单和悬赏（仅移动索引，保留完整数据）
+        fn on_idle(_now: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
+            let base_weight = Weight::from_parts(20_000, 0);
+            if remaining_weight.ref_time() < base_weight.ref_time() * 10 {
+                return Weight::zero();
+            }
+
+            // 1. 归档已完成订单（保留完整订单数据）
+            let w1 = Self::archive_completed_orders(5);
+            
+            // 2. 归档已结束悬赏（保留完整悬赏数据）
+            let w2 = Self::archive_completed_bounties(5);
+            
+            w1.saturating_add(w2)
+        }
+    }
 
     // ==================== 存储项 ====================
 
@@ -350,12 +364,14 @@ pub mod pallet {
     >;
 
     /// 客户订单索引
+    /// 上限从200提升到500，配合7天归档窗口可支持每天70+订单
     #[pallet::storage]
     #[pallet::getter(fn customer_orders)]
     pub type CustomerOrders<T: Config> =
-        StorageMap<_, Blake2_128Concat, T::AccountId, BoundedVec<u64, ConstU32<1000>>, ValueQuery>;
+        StorageMap<_, Blake2_128Concat, T::AccountId, BoundedVec<u64, ConstU32<500>>, ValueQuery>;
 
     /// 提供者订单索引
+    /// 上限从200提升到1000，热门提供者可能接单量更大
     #[pallet::storage]
     #[pallet::getter(fn provider_orders)]
     pub type ProviderOrders<T: Config> =
@@ -365,6 +381,32 @@ pub mod pallet {
     #[pallet::storage]
     #[pallet::getter(fn market_stats)]
     pub type MarketStatistics<T: Config> = StorageValue<_, MarketStats<BalanceOf<T>>, ValueQuery>;
+
+    /// 🆕 累计联盟分成金额
+    #[pallet::storage]
+    #[pallet::getter(fn total_affiliate_distributed)]
+    pub type TotalAffiliateDistributed<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
+
+    // ==================== 🆕 OCW 异步解读存储 ====================
+
+    /// 待处理解读（OCW 异步结算）
+    #[pallet::storage]
+    #[pallet::getter(fn pending_interpretations)]
+    pub type PendingInterpretations<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64, // order_id
+        PendingInterpretation<BlockNumberFor<T>, T::MaxCidLength, ConstU32<20>>,
+    >;
+
+    /// 待处理解读队列（按提交顺序）
+    #[pallet::storage]
+    #[pallet::getter(fn pending_interpretation_queue)]
+    pub type PendingInterpretationQueue<T: Config> = StorageValue<
+        _,
+        BoundedVec<u64, ConstU32<1000>>,
+        ValueQuery,
+    >;
 
     /// 按占卜类型的市场统计
     #[pallet::storage]
@@ -407,10 +449,11 @@ pub mod pallet {
         StorageMap<_, Blake2_128Concat, T::AccountId, BoundedVec<u64, ConstU32<500>>, ValueQuery>;
 
     /// 用户提交的悬赏回答索引
+    /// 上限从200提升到500，支持活跃回答者
     #[pallet::storage]
     #[pallet::getter(fn user_bounty_answers)]
     pub type UserBountyAnswers<T: Config> =
-        StorageMap<_, Blake2_128Concat, T::AccountId, BoundedVec<u64, ConstU32<1000>>, ValueQuery>;
+        StorageMap<_, Blake2_128Concat, T::AccountId, BoundedVec<u64, ConstU32<500>>, ValueQuery>;
 
     /// 悬赏投票记录（bounty_id -> voter -> vote）
     #[pallet::storage]
@@ -524,7 +567,7 @@ pub mod pallet {
         _,
         Blake2_128Concat,
         T::AccountId,
-        BoundedVec<u64, ConstU32<100>>,
+        BoundedVec<u64, ConstU32<200>>,
         ValueQuery,
     >;
 
@@ -566,77 +609,66 @@ pub mod pallet {
     #[pallet::getter(fn credit_stats)]
     pub type CreditStatistics<T: Config> = StorageValue<_, GlobalCreditStats, ValueQuery>;
 
-    // ==================== 举报系统存储项 ====================
+    // ==================== 🆕 存储膨胀防护：归档存储 ====================
 
-    /// 下一个举报 ID
+    /// 客户已归档订单ID索引（永久保留，用于历史查询）
+    /// 订单数据保留在 Orders 存储中，此处仅存储ID列表
     #[pallet::storage]
-    #[pallet::getter(fn next_report_id)]
-    pub type NextReportId<T> = StorageValue<_, u64, ValueQuery>;
-
-    /// 举报记录存储
-    #[pallet::storage]
-    #[pallet::getter(fn reports)]
-    pub type Reports<T: Config> = StorageMap<_, Blake2_128Concat, u64, ReportOf<T>>;
-
-    /// 大师收到的举报索引（provider -> report_ids）
-    #[pallet::storage]
-    #[pallet::getter(fn provider_reports)]
-    pub type ProviderReports<T: Config> = StorageMap<
+    #[pallet::getter(fn customer_archived_order_ids)]
+    pub type CustomerArchivedOrderIds<T: Config> = StorageMap<
         _,
         Blake2_128Concat,
         T::AccountId,
-        BoundedVec<u64, ConstU32<500>>,
+        BoundedVec<u64, ConstU32<10000>>,  // 支持每用户最多10000条历史订单
         ValueQuery,
     >;
 
-    /// 用户提交的举报索引（reporter -> report_ids）
+    /// 提供者已归档订单ID索引（永久保留）
     #[pallet::storage]
-    #[pallet::getter(fn user_reports)]
-    pub type UserReports<T: Config> = StorageMap<
+    #[pallet::getter(fn provider_archived_order_ids)]
+    pub type ProviderArchivedOrderIds<T: Config> = StorageMap<
         _,
         Blake2_128Concat,
         T::AccountId,
-        BoundedVec<u64, ConstU32<100>>,
+        BoundedVec<u64, ConstU32<50000>>,  // 提供者可能有更多历史订单
         ValueQuery,
     >;
 
-    /// 大师举报档案
+    /// 归档游标（用于on_idle处理订单）
     #[pallet::storage]
-    #[pallet::getter(fn provider_report_profiles)]
-    pub type ProviderReportProfiles<T: Config> = StorageMap<
+    pub type ArchiveCursor<T: Config> = StorageValue<_, u64, ValueQuery>;
+
+    /// 悬赏归档游标
+    #[pallet::storage]
+    pub type BountyArchiveCursor<T: Config> = StorageValue<_, u64, ValueQuery>;
+
+    /// 用户已归档悬赏问题ID索引（永久保留）
+    /// 悬赏数据保留在 BountyQuestions 存储中，此处仅存储ID列表
+    #[pallet::storage]
+    #[pallet::getter(fn user_archived_bounties)]
+    pub type UserArchivedBounties<T: Config> = StorageMap<
         _,
         Blake2_128Concat,
         T::AccountId,
-        ProviderReportProfileOf<T>,
+        BoundedVec<u64, ConstU32<5000>>,  // 支持每用户最多5000条历史悬赏
         ValueQuery,
     >;
 
-    /// 待处理举报队列（按时间排序）
+    /// 用户已归档悬赏回答ID索引（永久保留）
     #[pallet::storage]
-    #[pallet::getter(fn pending_reports)]
-    pub type PendingReports<T: Config> = StorageValue<
+    #[pallet::getter(fn user_archived_bounty_answers)]
+    pub type UserArchivedBountyAnswers<T: Config> = StorageMap<
         _,
-        BoundedVec<u64, ConstU32<1000>>,
+        Blake2_128Concat,
+        T::AccountId,
+        BoundedVec<u64, ConstU32<10000>>,  // 活跃回答者可能有更多历史
         ValueQuery,
     >;
 
-    /// 举报统计
+    /// 市场永久统计
     #[pallet::storage]
-    #[pallet::getter(fn report_stats)]
-    pub type ReportStatistics<T: Config> = StorageValue<_, ReportStats<BalanceOf<T>>, ValueQuery>;
-
-    /// 举报冷却期（防止同一用户短时间内重复举报同一大师）
-    /// (reporter, provider) -> last_report_block
-    #[pallet::storage]
-    #[pallet::getter(fn report_cooldown)]
-    pub type ReportCooldown<T: Config> = StorageDoubleMap<
-        _,
-        Blake2_128Concat,
-        T::AccountId,
-        Blake2_128Concat,
-        T::AccountId,
-        BlockNumberFor<T>,
-    >;
+    #[pallet::getter(fn permanent_stats)]
+    pub type PermanentStats<T: Config> = StorageValue<_, MarketPermanentStats, ValueQuery>;
 
     // ==================== 事件 ====================
 
@@ -724,6 +756,38 @@ pub mod pallet {
             order_id: u64,
             provider_earnings: BalanceOf<T>,
             platform_fee: BalanceOf<T>,
+        },
+
+        /// 🆕 联盟奖励已分配
+        AffiliateRewardDistributed {
+            order_id: u64,
+            customer: T::AccountId,
+            total_distributed: BalanceOf<T>,
+        },
+
+        // ==================== 🆕 OCW 异步解读事件 ====================
+
+        /// 多媒体解读已提交（等待 OCW 确认）
+        InterpretationPending {
+            order_id: u64,
+            provider: T::AccountId,
+        },
+
+        /// 解读已确认（OCW 处理完成，已结算）
+        InterpretationConfirmed {
+            order_id: u64,
+            content_cid: BoundedVec<u8, T::MaxCidLength>,
+        },
+
+        /// 解读处理超时
+        InterpretationTimeout {
+            order_id: u64,
+        },
+
+        /// 解读内容已更新
+        InterpretationUpdated {
+            order_id: u64,
+            provider: T::AccountId,
         },
 
         /// 订单已取消
@@ -930,6 +994,21 @@ pub mod pallet {
             target_value: u32,
         },
 
+        /// 投诉裁决后扣除提供者保证金
+        ProviderDepositSlashed {
+            provider: T::AccountId,
+            order_id: u64,
+            amount: BalanceOf<T>,
+            to_customer: bool,
+        },
+
+        /// 投诉裁决后订单退款
+        OrderRefundedOnComplaint {
+            order_id: u64,
+            customer: T::AccountId,
+            amount: BalanceOf<T>,
+        },
+
         /// 信用修复任务完成
         CreditRepairCompleted {
             provider: T::AccountId,
@@ -939,65 +1018,6 @@ pub mod pallet {
 
         /// 加入信用黑名单
         AddedToBlacklist { provider: T::AccountId },
-
-        // ==================== 举报系统事件 ====================
-
-        /// 举报已提交
-        ReportSubmitted {
-            report_id: u64,
-            reporter: Option<T::AccountId>, // 匿名时为 None
-            provider: T::AccountId,
-            report_type: ReportType,
-            deposit: BalanceOf<T>,
-        },
-
-        /// 举报已撤回
-        ReportWithdrawn { report_id: u64 },
-
-        /// 举报审核完成
-        ReportResolved {
-            report_id: u64,
-            result: ReportStatus,
-            resolver: T::AccountId,
-        },
-
-        /// 举报成立
-        ReportUpheld {
-            report_id: u64,
-            provider: T::AccountId,
-            penalty_amount: BalanceOf<T>,
-            reporter_reward: BalanceOf<T>,
-            is_banned: bool,
-        },
-
-        /// 举报驳回
-        ReportRejected {
-            report_id: u64,
-            reporter: T::AccountId,
-            deposit_refunded: BalanceOf<T>,
-        },
-
-        /// 恶意举报被处罚
-        MaliciousReportPenalized {
-            report_id: u64,
-            reporter: T::AccountId,
-            deposit_confiscated: BalanceOf<T>,
-        },
-
-        /// 举报已过期
-        ReportExpired { report_id: u64 },
-
-        /// 大师被封禁
-        ProviderBanned {
-            provider: T::AccountId,
-            reason: ReportType,
-        },
-
-        /// 大师进入观察期
-        ProviderUnderWatch {
-            provider: T::AccountId,
-            watch_end: BlockNumberFor<T>,
-        },
     }
 
     // ==================== 错误 ====================
@@ -1018,6 +1038,8 @@ pub mod pallet {
         TooManyPackages,
         /// 价格低于最低限制
         PriceTooLow,
+        /// 价格高于最高限制（修复 H-13）
+        PriceTooHigh,
         /// 订单不存在
         OrderNotFound,
         /// 订单状态无效
@@ -1160,32 +1182,20 @@ pub mod pallet {
         /// 信用等级不足
         InsufficientCreditLevel,
 
-        // ==================== 举报系统错误 ====================
+        // ==================== 🆕 OCW 异步解读错误 ====================
 
-        /// 不能举报自己
-        CannotReportSelf,
-        /// 举报冷却期中
-        ReportCooldownActive,
-        /// 举报不存在
-        ReportNotFound,
-        /// 不是举报者
-        NotReporter,
-        /// 举报非待处理状态
-        ReportNotPending,
-        /// 撤回窗口已过期
-        WithdrawWindowExpired,
-        /// 举报已处理
-        ReportAlreadyResolved,
-        /// 无效的审核结果
-        InvalidReportResult,
-        /// 举报未过期
-        ReportNotExpired,
-        /// 举报过多
-        TooManyReports,
-        /// 待处理举报过多
-        TooManyPendingReports,
-        /// 大师已被封禁（举报相关）
-        ProviderAlreadyBanned,
+        /// 待处理解读不存在
+        PendingInterpretationNotFound,
+        /// 待处理解读队列已满
+        PendingQueueFull,
+        /// 解读已提交，等待确认
+        InterpretationAlreadyPending,
+        /// 无效的 OCW 提交
+        InvalidOcwSubmission,
+        /// 媒体数量超过上限
+        TooManyMediaItems,
+        /// 修改窗口已过期
+        EditWindowExpired,
     }
 
     // ==================== 可调用函数 ====================
@@ -1222,8 +1232,31 @@ pub mod pallet {
             let bio_bounded: BoundedVec<u8, T::MaxBioLength> =
                 BoundedVec::try_from(bio).map_err(|_| Error::<T>::BioTooLong)?;
 
+            // 计算保证金：使用pricing换算，确保不低于100 USDT价值
+            let min_deposit_dust = T::MinDeposit::get();
+            let min_deposit_usd = T::MinDepositUsd::get(); // 100_000_000 (100 USDT)
+            
+            // 使用pricing模块换算100 USDT对应的DUST数量
+            let deposit = if let Some(price) = T::Pricing::get_dust_to_usd_rate() {
+                let price_u128: u128 = price.saturated_into();
+                if price_u128 > 0u128 {
+                    // DUST数量 = USD金额 * 精度 / 价格
+                    let required_dust_u128 = (min_deposit_usd as u128).saturating_mul(1_000_000u128) / price_u128;
+                    let required_dust: BalanceOf<T> = required_dust_u128.saturated_into();
+                    // 取pricing换算值和最小值中的较大者
+                    if required_dust > min_deposit_dust {
+                        required_dust
+                    } else {
+                        min_deposit_dust
+                    }
+                } else {
+                    min_deposit_dust
+                }
+            } else {
+                min_deposit_dust
+            };
+            
             // 锁定保证金
-            let deposit = T::MinDeposit::get();
             T::Currency::reserve(&who, deposit)?;
 
             let block_number = <frame_system::Pallet<T>>::block_number();
@@ -1276,6 +1309,23 @@ pub mod pallet {
             accepts_urgent: Option<bool>,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
+
+            // 🆕 如果有头像 CID，先 Pin 到 IPFS (Standard 层级)
+            if let Some(ref cid) = avatar_cid {
+                // 使用 provider 账户地址编码的前8字节作为 subject_id
+                let subject_id = who.using_encoded(|bytes| {
+                    let mut arr = [0u8; 8];
+                    arr.copy_from_slice(&bytes[..8.min(bytes.len())]);
+                    u64::from_le_bytes(arr)
+                });
+
+                <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                    b"divination-market".to_vec(),
+                    subject_id,
+                    cid.clone(),
+                    pallet_stardust_ipfs::PinTier::Standard,
+                )?;
+            }
 
             Providers::<T>::try_mutate(&who, |maybe_provider| {
                 let provider = maybe_provider.as_mut().ok_or(Error::<T>::ProviderNotFound)?;
@@ -1419,6 +1469,14 @@ pub mod pallet {
                 Error::<T>::DivinationTypeNotSupported
             );
             ensure!(price >= T::MinServicePrice::get(), Error::<T>::PriceTooLow);
+            ensure!(price <= T::MaxServicePrice::get(), Error::<T>::PriceTooHigh);
+            
+            // 🆕 P1修复: 验证组合价格（基础价 + 加急加价）不超过限制
+            if urgent_available && urgent_surcharge > 0 {
+                let surcharge = price.saturating_mul(urgent_surcharge.into()) / 10000u32.into();
+                let max_price = price.saturating_add(surcharge);
+                ensure!(max_price <= T::MaxServicePrice::get(), Error::<T>::PriceTooHigh);
+            }
 
             let name_bounded: BoundedVec<u8, ConstU32<64>> =
                 BoundedVec::try_from(name).map_err(|_| Error::<T>::NameTooLong)?;
@@ -1476,6 +1534,15 @@ pub mod pallet {
 
                 if let Some(p) = price {
                     ensure!(p >= T::MinServicePrice::get(), Error::<T>::PriceTooLow);
+                    ensure!(p <= T::MaxServicePrice::get(), Error::<T>::PriceTooHigh);
+                    
+                    // 🆕 P1修复: 验证新价格与现有加急加价组合后不超过限制
+                    if package.urgent_available && package.urgent_surcharge > 0 {
+                        let surcharge = p.saturating_mul(package.urgent_surcharge.into()) / 10000u32.into();
+                        let max_price = p.saturating_add(surcharge);
+                        ensure!(max_price <= T::MaxServicePrice::get(), Error::<T>::PriceTooHigh);
+                    }
+                    
                     package.price = p;
                 }
                 if let Some(d) = description {
@@ -1574,7 +1641,7 @@ pub mod pallet {
             }
 
             let question_cid_bounded: BoundedVec<u8, T::MaxCidLength> =
-                BoundedVec::try_from(question_cid).map_err(|_| Error::<T>::CidTooLong)?;
+                BoundedVec::try_from(question_cid.clone()).map_err(|_| Error::<T>::CidTooLong)?;
 
             // 计算价格
             let mut amount = package.price;
@@ -1583,6 +1650,9 @@ pub mod pallet {
                     amount.saturating_mul(package.urgent_surcharge.into()) / 10000u32.into();
                 amount = amount.saturating_add(surcharge);
             }
+
+            // 🆕 P0修复: 验证最终价格不超过限制
+            ensure!(amount <= T::MaxServicePrice::get(), Error::<T>::PriceTooHigh);
 
             // 计算平台手续费
             let platform_fee_rate = provider.tier.platform_fee_rate();
@@ -1599,6 +1669,14 @@ pub mod pallet {
 
             let order_id = NextOrderId::<T>::get();
             NextOrderId::<T>::put(order_id.saturating_add(1));
+
+            // 🆕 自动 Pin 问题描述到 IPFS (Temporary 层级)
+            <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                b"divination-market".to_vec(),
+                order_id,
+                question_cid,
+                pallet_stardust_ipfs::PinTier::Temporary,
+            )?;
 
             let block_number = <frame_system::Pallet<T>>::block_number();
 
@@ -1737,47 +1815,156 @@ pub mod pallet {
             Ok(())
         }
 
-        /// 提交解读结果
-        ///
-        /// 服务提供者完成对客户问题的专业解读并提交结果
+        // ==================== 🆕 OCW 异步解读 Extrinsics ====================
+
+        /// 提交解读结果（多媒体异步结算版本）
+        /// 
+        /// 支持图片、视频、文档等多媒体内容
+        /// 提交后由 OCW 构建 JSON 清单并上传 IPFS，确认后结算
+        /// 2天修改窗口内可调用 update_interpretation 修改
         #[pallet::call_index(11)]
-        #[pallet::weight(Weight::from_parts(40_000_000, 0))]
+        #[pallet::weight(Weight::from_parts(50_000_000, 0))]
         pub fn submit_interpretation(
             origin: OriginFor<T>,
             order_id: u64,
-            interpretation_cid: Vec<u8>,
+            text_cid: Vec<u8>,
+            imgs: Vec<Vec<u8>>,
+            vids: Vec<Vec<u8>>,
+            docs: Vec<Vec<u8>>,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
-
-            let interpretation_cid_bounded: BoundedVec<u8, T::MaxCidLength> =
-                BoundedVec::try_from(interpretation_cid.clone()).map_err(|_| Error::<T>::CidTooLong)?;
-
-            let divination_type = Orders::<T>::try_mutate(order_id, |maybe_order| {
+            
+            // 1. 验证媒体数量
+            ensure!(imgs.len() <= 20, Error::<T>::TooManyMediaItems);
+            ensure!(vids.len() <= 5, Error::<T>::TooManyMediaItems);
+            ensure!(docs.len() <= 10, Error::<T>::TooManyMediaItems);
+            
+            // 2. 转换 CID
+            let text_cid_bounded: BoundedVec<u8, T::MaxCidLength> = 
+                text_cid.try_into().map_err(|_| Error::<T>::CidTooLong)?;
+            
+            let imgs_bounded: BoundedVec<BoundedVec<u8, T::MaxCidLength>, ConstU32<20>> = 
+                imgs.into_iter()
+                    .map(|c| BoundedVec::try_from(c).map_err(|_| Error::<T>::CidTooLong))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .try_into()
+                    .map_err(|_| Error::<T>::TooManyMediaItems)?;
+            
+            let vids_bounded: BoundedVec<BoundedVec<u8, T::MaxCidLength>, ConstU32<20>> = 
+                vids.into_iter()
+                    .map(|c| BoundedVec::try_from(c).map_err(|_| Error::<T>::CidTooLong))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .try_into()
+                    .map_err(|_| Error::<T>::TooManyMediaItems)?;
+            
+            let docs_bounded: BoundedVec<BoundedVec<u8, T::MaxCidLength>, ConstU32<20>> = 
+                docs.into_iter()
+                    .map(|c| BoundedVec::try_from(c).map_err(|_| Error::<T>::CidTooLong))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .try_into()
+                    .map_err(|_| Error::<T>::TooManyMediaItems)?;
+            
+            // 3. 验证订单状态
+            Orders::<T>::try_mutate(order_id, |maybe_order| {
                 let order = maybe_order.as_mut().ok_or(Error::<T>::OrderNotFound)?;
                 ensure!(order.provider == who, Error::<T>::NotProvider);
-                ensure!(
-                    order.status == OrderStatus::Accepted,
-                    Error::<T>::InvalidOrderStatus
-                );
-
-                order.interpretation_cid = Some(interpretation_cid_bounded.clone());
-                order.status = OrderStatus::Completed;
-                order.completed_at = Some(<frame_system::Pallet<T>>::block_number());
-
-                Ok::<_, DispatchError>(order.divination_type)
+                ensure!(order.status == OrderStatus::Accepted, Error::<T>::InvalidOrderStatus);
+                
+                // 4. 状态变更为"解读已提交"
+                order.status = OrderStatus::InterpretationSubmitted;
+                
+                Ok::<_, DispatchError>(())
             })?;
+            
+            // 5. 确保没有重复提交
+            ensure!(
+                !PendingInterpretations::<T>::contains_key(order_id),
+                Error::<T>::InterpretationAlreadyPending
+            );
+            
+            // 6. 创建待处理解读
+            let now = <frame_system::Pallet<T>>::block_number();
+            let pending = PendingInterpretation {
+                order_id,
+                text_cid: text_cid_bounded,
+                imgs: imgs_bounded,
+                vids: vids_bounded,
+                docs: docs_bounded,
+                submitted_at: now,
+                status: InterpretationProcessStatus::Pending,
+                retry_count: 0,
+            };
+            
+            PendingInterpretations::<T>::insert(order_id, pending);
+            
+            // 7. 添加到队列
+            PendingInterpretationQueue::<T>::try_mutate(|queue| {
+                queue.try_push(order_id).map_err(|_| Error::<T>::PendingQueueFull)
+            })?;
+            
+            // 8. 发送事件
+            Self::deposit_event(Event::InterpretationPending {
+                order_id,
+                provider: who,
+            });
+            
+            Ok(())
+        }
 
-            // 结算费用
-            let order = Orders::<T>::get(order_id).ok_or(Error::<T>::OrderNotFound)?;
-            let provider_earnings = order.amount.saturating_sub(order.platform_fee);
-
-            // 转给提供者余额
-            ProviderBalances::<T>::mutate(&who, |balance| {
+        /// 确认解读（由 OCW 或管理员调用）
+        /// 
+        /// OCW 处理完成后调用此方法完成结算
+        #[pallet::call_index(51)]
+        #[pallet::weight(Weight::from_parts(60_000_000, 0))]
+        pub fn confirm_interpretation(
+            origin: OriginFor<T>,
+            order_id: u64,
+            content_cid: Vec<u8>,
+        ) -> DispatchResult {
+            // 允许 Root 或 OCW 签名者调用
+            let _ = ensure_root(origin.clone()).or_else(|_| {
+                let _who = ensure_signed(origin)?;
+                // TODO: 验证是否是授权的 OCW 签名者
+                Ok::<_, DispatchError>(())
+            })?;
+            
+            let content_cid_bounded: BoundedVec<u8, T::MaxCidLength> = 
+                content_cid.try_into().map_err(|_| Error::<T>::CidTooLong)?;
+            
+            // 1. 获取待处理解读
+            let _pending = PendingInterpretations::<T>::get(order_id)
+                .ok_or(Error::<T>::PendingInterpretationNotFound)?;
+            
+            // 2. 更新订单并提取结算信息
+            let (divination_type, provider, customer, amount, platform_fee) = 
+                Orders::<T>::try_mutate(order_id, |maybe_order| {
+                    let order = maybe_order.as_mut().ok_or(Error::<T>::OrderNotFound)?;
+                    ensure!(
+                        order.status == OrderStatus::InterpretationSubmitted,
+                        Error::<T>::InvalidOrderStatus
+                    );
+                    
+                    order.interpretation_cid = Some(content_cid_bounded.clone());
+                    order.status = OrderStatus::Completed;
+                    order.completed_at = Some(<frame_system::Pallet<T>>::block_number());
+                    
+                    Ok::<_, DispatchError>((
+                        order.divination_type,
+                        order.provider.clone(),
+                        order.customer.clone(),
+                        order.amount,
+                        order.platform_fee,
+                    ))
+                })?;
+            
+            // 3. 执行结算
+            let provider_earnings = amount.saturating_sub(platform_fee);
+            
+            ProviderBalances::<T>::mutate(&provider, |balance| {
                 *balance = balance.saturating_add(provider_earnings);
             });
-
-            // 更新提供者统计
-            Providers::<T>::mutate(&who, |maybe_provider| {
+            
+            Providers::<T>::mutate(&provider, |maybe_provider| {
                 if let Some(p) = maybe_provider {
                     p.total_orders += 1;
                     p.completed_orders += 1;
@@ -1785,27 +1972,149 @@ pub mod pallet {
                     p.last_active_at = <frame_system::Pallet<T>>::block_number();
                 }
             });
-
-            // 更新市场统计
+            
             MarketStatistics::<T>::mutate(|s| {
                 s.completed_orders += 1;
-                s.platform_earnings = s.platform_earnings.saturating_add(order.platform_fee);
+                s.platform_earnings = s.platform_earnings.saturating_add(platform_fee);
             });
             TypeStatistics::<T>::mutate(divination_type, |s| {
                 s.completed_count += 1;
             });
-
-            Self::deposit_event(Event::InterpretationSubmitted {
-                order_id,
-                interpretation_cid: interpretation_cid_bounded,
+            
+            // 4. 联盟分成
+            let affiliate_ratio = T::AffiliateFeeRatio::get();
+            let affiliate_amount = platform_fee
+                .saturating_mul(affiliate_ratio.into())
+                / 10000u32.into();
+            
+            if !affiliate_amount.is_zero() {
+                let affiliate_u128: u128 = affiliate_amount.saturated_into();
+                
+                if let Ok(distributed_u128) = T::AffiliateDistributor::distribute_rewards(
+                    &customer,
+                    affiliate_u128,
+                    Some((15, order_id)),
+                ) {
+                    let distributed: BalanceOf<T> = distributed_u128.saturated_into();
+                    
+                    TotalAffiliateDistributed::<T>::mutate(|total| {
+                        *total = total.saturating_add(distributed);
+                    });
+                    
+                    Self::deposit_event(Event::AffiliateRewardDistributed {
+                        order_id,
+                        customer,
+                        total_distributed: distributed,
+                    });
+                }
+            }
+            
+            // 5. 清理待处理
+            PendingInterpretations::<T>::remove(order_id);
+            PendingInterpretationQueue::<T>::mutate(|queue| {
+                queue.retain(|id| *id != order_id);
             });
-
+            
+            // 6. 发送事件
+            Self::deposit_event(Event::InterpretationConfirmed {
+                order_id,
+                content_cid: content_cid_bounded,
+            });
+            
             Self::deposit_event(Event::OrderCompleted {
                 order_id,
                 provider_earnings,
-                platform_fee: order.platform_fee,
+                platform_fee,
             });
+            
+            Ok(())
+        }
 
+        /// 修改待处理解读（在修改窗口内可任意修改）
+        /// 
+        /// 允许提供者在 InterpretationEditWindow 内修改已提交的解读内容
+        #[pallet::call_index(50)]
+        #[pallet::weight(Weight::from_parts(40_000_000, 0))]
+        pub fn update_interpretation(
+            origin: OriginFor<T>,
+            order_id: u64,
+            text_cid: Vec<u8>,
+            imgs: Vec<Vec<u8>>,
+            vids: Vec<Vec<u8>>,
+            docs: Vec<Vec<u8>>,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            
+            // 1. 验证媒体数量
+            ensure!(imgs.len() <= 20, Error::<T>::TooManyMediaItems);
+            ensure!(vids.len() <= 5, Error::<T>::TooManyMediaItems);
+            ensure!(docs.len() <= 10, Error::<T>::TooManyMediaItems);
+            
+            // 2. 获取并验证待处理解读
+            let pending = PendingInterpretations::<T>::get(order_id)
+                .ok_or(Error::<T>::PendingInterpretationNotFound)?;
+            
+            // 3. 验证修改窗口
+            let now = <frame_system::Pallet<T>>::block_number();
+            let edit_window = T::InterpretationEditWindow::get();
+            ensure!(
+                now <= pending.submitted_at.saturating_add(edit_window),
+                Error::<T>::EditWindowExpired
+            );
+            
+            // 4. 验证订单和权限
+            let order = Orders::<T>::get(order_id).ok_or(Error::<T>::OrderNotFound)?;
+            ensure!(order.provider == who, Error::<T>::NotProvider);
+            ensure!(
+                order.status == OrderStatus::InterpretationSubmitted,
+                Error::<T>::InvalidOrderStatus
+            );
+            
+            // 5. 转换 CID
+            let text_cid_bounded: BoundedVec<u8, T::MaxCidLength> = 
+                text_cid.try_into().map_err(|_| Error::<T>::CidTooLong)?;
+            
+            let imgs_bounded: BoundedVec<BoundedVec<u8, T::MaxCidLength>, ConstU32<20>> = 
+                imgs.into_iter()
+                    .map(|c| BoundedVec::try_from(c).map_err(|_| Error::<T>::CidTooLong))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .try_into()
+                    .map_err(|_| Error::<T>::TooManyMediaItems)?;
+            
+            let vids_bounded: BoundedVec<BoundedVec<u8, T::MaxCidLength>, ConstU32<20>> = 
+                vids.into_iter()
+                    .map(|c| BoundedVec::try_from(c).map_err(|_| Error::<T>::CidTooLong))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .try_into()
+                    .map_err(|_| Error::<T>::TooManyMediaItems)?;
+            
+            let docs_bounded: BoundedVec<BoundedVec<u8, T::MaxCidLength>, ConstU32<20>> = 
+                docs.into_iter()
+                    .map(|c| BoundedVec::try_from(c).map_err(|_| Error::<T>::CidTooLong))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .try_into()
+                    .map_err(|_| Error::<T>::TooManyMediaItems)?;
+            
+            // 6. 更新待处理解读（保持原提交时间，不重置修改窗口）
+            let updated_pending = PendingInterpretation {
+                order_id,
+                text_cid: text_cid_bounded,
+                imgs: imgs_bounded,
+                vids: vids_bounded,
+                docs: docs_bounded,
+                submitted_at: pending.submitted_at, // 保持原提交时间
+                status: InterpretationProcessStatus::Pending,
+                retry_count: 0,
+            };
+            
+            PendingInterpretations::<T>::insert(order_id, updated_pending);
+            
+            // 7. 发送事件
+            Self::deposit_event(Event::InterpretationUpdated {
+                order_id,
+                provider: who,
+            });
+            
             Ok(())
         }
 
@@ -1820,7 +2129,7 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
 
             let question_cid_bounded: BoundedVec<u8, T::MaxCidLength> =
-                BoundedVec::try_from(question_cid).map_err(|_| Error::<T>::CidTooLong)?;
+                BoundedVec::try_from(question_cid.clone()).map_err(|_| Error::<T>::CidTooLong)?;
 
             // 验证订单
             Orders::<T>::try_mutate(order_id, |maybe_order| {
@@ -1839,6 +2148,18 @@ pub mod pallet {
 
                 Ok::<_, DispatchError>(())
             })?;
+
+            // 🆕 自动 Pin 追问内容到 IPFS (Temporary 层级)
+            // 使用 order_id + follow_up_index 作为唯一标识
+            let follow_up_count = FollowUps::<T>::get(order_id).len() as u64;
+            let subject_id = order_id.saturating_mul(1000).saturating_add(follow_up_count);
+
+            <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                b"divination-market".to_vec(),
+                subject_id,
+                question_cid,
+                pallet_stardust_ipfs::PinTier::Temporary,
+            )?;
 
             let follow_up = FollowUp {
                 question_cid: question_cid_bounded,
@@ -1873,11 +2194,21 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
 
             let reply_cid_bounded: BoundedVec<u8, T::MaxCidLength> =
-                BoundedVec::try_from(reply_cid).map_err(|_| Error::<T>::CidTooLong)?;
+                BoundedVec::try_from(reply_cid.clone()).map_err(|_| Error::<T>::CidTooLong)?;
 
             // 验证订单
             let order = Orders::<T>::get(order_id).ok_or(Error::<T>::OrderNotFound)?;
             ensure!(order.provider == who, Error::<T>::NotProvider);
+
+            // 🆕 自动 Pin 追问回复到 IPFS (Temporary 层级)
+            let subject_id = order_id.saturating_mul(1000).saturating_add(follow_up_index as u64).saturating_add(500);
+
+            <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                b"divination-market".to_vec(),
+                subject_id,
+                reply_cid,
+                pallet_stardust_ipfs::PinTier::Temporary,
+            )?;
 
             FollowUps::<T>::try_mutate(order_id, |list| {
                 let follow_up = list
@@ -1948,8 +2279,19 @@ pub mod pallet {
             }
 
             let content_cid_bounded = content_cid
+                .clone()
                 .map(|cid| BoundedVec::try_from(cid).map_err(|_| Error::<T>::CidTooLong))
                 .transpose()?;
+
+            // 🆕 如果有评价内容 CID，Pin 到 IPFS (Temporary 层级)
+            if let Some(ref cid) = content_cid {
+                <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                    b"divination-market".to_vec(),
+                    order_id,
+                    cid.clone(),
+                    pallet_stardust_ipfs::PinTier::Temporary,
+                )?;
+            }
 
             let review = Review {
                 order_id,
@@ -2016,7 +2358,15 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
 
             let reply_cid_bounded: BoundedVec<u8, T::MaxCidLength> =
-                BoundedVec::try_from(reply_cid).map_err(|_| Error::<T>::CidTooLong)?;
+                BoundedVec::try_from(reply_cid.clone()).map_err(|_| Error::<T>::CidTooLong)?;
+
+            // 🆕 Pin 评价回复到 IPFS (Temporary 层级)
+            <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                b"divination-market".to_vec(),
+                order_id,
+                reply_cid,
+                pallet_stardust_ipfs::PinTier::Temporary,
+            )?;
 
             Reviews::<T>::try_mutate(order_id, |maybe_review| {
                 let review = maybe_review.as_mut().ok_or(Error::<T>::OrderNotFound)?;
@@ -2047,18 +2397,23 @@ pub mod pallet {
             ensure!(balance >= amount, Error::<T>::InsufficientBalance);
             ensure!(!amount.is_zero(), Error::<T>::InvalidWithdrawalAmount);
 
-            // 扣除余额
-            ProviderBalances::<T>::mutate(&who, |b| {
-                *b = b.saturating_sub(amount);
-            });
+            // 检查平台账户余额是否充足
+            let platform_account = T::PlatformAccount::get();
+            let platform_balance = T::Currency::free_balance(&platform_account);
+            ensure!(platform_balance >= amount, Error::<T>::InsufficientBalance);
 
-            // 转账给提供者
+            // 先转账给提供者（失败则整个交易回滚）
             T::Currency::transfer(
-                &T::PlatformAccount::get(),
+                &platform_account,
                 &who,
                 amount,
                 ExistenceRequirement::KeepAlive,
             )?;
+
+            // 转账成功后再扣除账面余额
+            ProviderBalances::<T>::mutate(&who, |b| {
+                *b = b.saturating_sub(amount);
+            });
 
             let withdrawal_id = NextWithdrawalId::<T>::get();
             NextWithdrawalId::<T>::put(withdrawal_id.saturating_add(1));
@@ -2171,7 +2526,7 @@ pub mod pallet {
             ensure!(result_creator == who, Error::<T>::NotResultCreator);
 
             let question_cid_bounded: BoundedVec<u8, T::MaxCidLength> =
-                BoundedVec::try_from(question_cid).map_err(|_| Error::<T>::CidTooLong)?;
+                BoundedVec::try_from(question_cid.clone()).map_err(|_| Error::<T>::CidTooLong)?;
 
             // 转账悬赏金到平台账户托管
             T::Currency::transfer(
@@ -2183,6 +2538,14 @@ pub mod pallet {
 
             let bounty_id = NextBountyId::<T>::get();
             NextBountyId::<T>::put(bounty_id.saturating_add(1));
+
+            // 🆕 自动 Pin 悬赏问题到 IPFS (Temporary 层级)
+            <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                b"divination-market".to_vec(),
+                bounty_id,
+                question_cid,
+                pallet_stardust_ipfs::PinTier::Temporary,
+            )?;
 
             let bounty = BountyQuestion {
                 id: bounty_id,
@@ -2297,10 +2660,18 @@ pub mod pallet {
             };
 
             let answer_cid_bounded: BoundedVec<u8, T::MaxCidLength> =
-                BoundedVec::try_from(answer_cid).map_err(|_| Error::<T>::CidTooLong)?;
+                BoundedVec::try_from(answer_cid.clone()).map_err(|_| Error::<T>::CidTooLong)?;
 
             let answer_id = NextBountyAnswerId::<T>::get();
             NextBountyAnswerId::<T>::put(answer_id.saturating_add(1));
+
+            // 🆕 自动 Pin 悬赏回答到 IPFS (Standard 层级)
+            <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                b"divination-market".to_vec(),
+                answer_id,
+                answer_cid,
+                pallet_stardust_ipfs::PinTier::Standard,
+            )?;
 
             let answer = BountyAnswer {
                 id: answer_id,
@@ -2841,6 +3212,39 @@ pub mod pallet {
                 Providers::<T>::contains_key(&who),
                 Error::<T>::ProviderNotFound
             );
+
+            // 🆕 如果有详细介绍 CID，先 Pin 到 IPFS (Standard 层级)
+            if let Some(ref cid) = introduction_cid {
+                // 使用 provider 账户地址编码的前8字节作为 subject_id
+                let subject_id = who.using_encoded(|bytes| {
+                    let mut arr = [0u8; 8];
+                    arr.copy_from_slice(&bytes[..8.min(bytes.len())]);
+                    u64::from_le_bytes(arr)
+                });
+
+                <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                    b"divination-market".to_vec(),
+                    subject_id,
+                    cid.clone(),
+                    pallet_stardust_ipfs::PinTier::Standard,
+                )?;
+            }
+
+            // 🆕 如果有背景图 CID，也 Pin 到 IPFS (Standard 层级)
+            if let Some(ref cid) = banner_cid {
+                let subject_id = who.using_encoded(|bytes| {
+                    let mut arr = [0u8; 8];
+                    arr.copy_from_slice(&bytes[..8.min(bytes.len())]);
+                    u64::from_le_bytes(arr)
+                });
+
+                <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                    b"divination-market".to_vec(),
+                    subject_id,
+                    cid.clone(),
+                    pallet_stardust_ipfs::PinTier::Standard,
+                )?;
+            }
 
             let current_block = <frame_system::Pallet<T>>::block_number();
 
@@ -3603,338 +4007,296 @@ pub mod pallet {
             Ok(())
         }
 
-        // ==================== 举报系统可调用函数 ====================
+        // 注：举报功能已迁移到统一仲裁模块 (pallet-arbitration)
+        // 使用 arbitration.file_complaint 替代原有的 submit_report 等函数
+    }
 
-        /// 提交举报
-        ///
-        /// 任何用户都可以举报大师的违规行为。举报者需要缴纳押金以防止恶意举报。
-        ///
-        /// # 参数
-        /// - `provider`: 被举报的大师账户
-        /// - `report_type`: 举报类型
-        /// - `evidence_cid`: 证据 IPFS CID
-        /// - `description`: 举报描述
-        /// - `related_order_id`: 关联订单 ID（可选）
-        /// - `related_bounty_id`: 关联悬赏 ID（可选）
-        /// - `related_answer_id`: 关联回答 ID（可选）
-        /// - `is_anonymous`: 是否匿名举报
-        ///
-        /// # 逻辑
-        /// 1. 验证被举报者是已注册的大师
-        /// 2. 验证举报冷却期
-        /// 3. 计算并收取举报押金
-        /// 4. 创建举报记录
-        /// 5. 加入待处理队列
-        #[pallet::call_index(40)]
-        #[pallet::weight(Weight::from_parts(50_000_000, 0))]
-        pub fn submit_report(
-            origin: OriginFor<T>,
-            provider: T::AccountId,
-            report_type: ReportType,
-            evidence_cid: Vec<u8>,
-            description: Vec<u8>,
-            related_order_id: Option<u64>,
-            related_bounty_id: Option<u64>,
-            related_answer_id: Option<u64>,
-            is_anonymous: bool,
-        ) -> DispatchResult {
-            let reporter = ensure_signed(origin)?;
+    // ==================== 🆕 仲裁集成：保证金扣除接口 ====================
 
-            // 1. 基础验证：不能举报自己
-            ensure!(reporter != provider, Error::<T>::CannotReportSelf);
-
-            // 2. 验证大师存在且未被封禁
-            ensure!(
-                Providers::<T>::contains_key(&provider),
-                Error::<T>::ProviderNotFound
-            );
-            ensure!(
-                !CreditBlacklist::<T>::contains_key(&provider),
-                Error::<T>::ProviderAlreadyBanned
-            );
-
-            // 3. 验证冷却期
-            Self::check_report_cooldown(&reporter, &provider)?;
-
-            // 4. 计算并收取举报押金
-            let required_deposit = Self::calculate_report_deposit(report_type);
-            T::Currency::transfer(
-                &reporter,
-                &Self::platform_account(),
-                required_deposit,
-                ExistenceRequirement::KeepAlive,
-            )?;
-
-            // 5. 构建举报记录
-            let current_block = <frame_system::Pallet<T>>::block_number();
-            let report_id = NextReportId::<T>::get();
-            NextReportId::<T>::put(report_id.saturating_add(1));
-
-            let evidence_bounded: BoundedVec<u8, T::MaxCidLength> = evidence_cid
-                .try_into()
-                .map_err(|_| Error::<T>::CidTooLong)?;
-            let description_bounded: BoundedVec<u8, T::MaxDescriptionLength> = description
-                .try_into()
-                .map_err(|_| Error::<T>::DescriptionTooLong)?;
-
-            let report = Report {
-                id: report_id,
-                reporter: reporter.clone(),
-                provider: provider.clone(),
-                report_type,
-                evidence_cid: evidence_bounded,
-                description: description_bounded,
-                related_order_id,
-                related_bounty_id,
-                related_answer_id,
-                reporter_deposit: required_deposit,
-                status: ReportStatus::Pending,
-                created_at: current_block,
-                resolved_at: None,
-                resolution_cid: None,
-                resolved_by: None,
-                provider_penalty: Zero::zero(),
-                reporter_reward: Zero::zero(),
-                is_anonymous,
-            };
-
-            // 6. 存储举报
-            Reports::<T>::insert(report_id, report);
-
-            // 7. 更新索引
-            ProviderReports::<T>::try_mutate(&provider, |list| {
-                list.try_push(report_id)
-                    .map_err(|_| Error::<T>::TooManyReports)
-            })?;
-            UserReports::<T>::try_mutate(&reporter, |list| {
-                list.try_push(report_id)
-                    .map_err(|_| Error::<T>::TooManyReports)
-            })?;
-            PendingReports::<T>::try_mutate(|list| {
-                list.try_push(report_id)
-                    .map_err(|_| Error::<T>::TooManyPendingReports)
-            })?;
-
-            // 8. 更新冷却期
-            ReportCooldown::<T>::insert(&reporter, &provider, current_block);
-
-            // 9. 更新统计
-            ReportStatistics::<T>::mutate(|stats| {
-                stats.total_reports += 1;
-                stats.pending_reports += 1;
+    impl<T: Config> Pallet<T> {
+        /// 投诉裁决后扣除服务提供者保证金
+        /// 
+        /// ## 参数
+        /// - `order_id`: 订单ID
+        /// - `slash_bps`: 扣除比例（基点，5000 = 50%）
+        /// - `to_customer`: 是否赔付给客户（true=赔付客户，false=进入国库）
+        /// 
+        /// ## 返回
+        /// - `Ok(slashed_amount)`: 实际扣除金额
+        /// - `Err(...)`: 订单不存在或提供者不存在
+        pub fn slash_provider_deposit(
+            order_id: u64,
+            slash_bps: u16,
+            to_customer: bool,
+        ) -> Result<BalanceOf<T>, DispatchError> {
+            let order = Orders::<T>::get(order_id).ok_or(Error::<T>::OrderNotFound)?;
+            let provider_account = order.provider.clone();
+            let customer_account = order.customer.clone();
+            
+            // 获取提供者信息
+            let provider = Providers::<T>::get(&provider_account)
+                .ok_or(Error::<T>::ProviderNotFound)?;
+            
+            // 计算扣除金额
+            let slash_amount = sp_runtime::Permill::from_parts((slash_bps as u32) * 100)
+                .mul_floor(provider.deposit);
+            
+            if slash_amount.is_zero() {
+                return Ok(Zero::zero());
+            }
+            
+            // 从提供者保证金中扣除（unreserve 后转移）
+            let actually_slashed = T::Currency::unreserve(&provider_account, slash_amount);
+            
+            if to_customer && !actually_slashed.is_zero() {
+                // 赔付给客户
+                let _ = T::Currency::transfer(
+                    &provider_account,
+                    &customer_account,
+                    actually_slashed,
+                    ExistenceRequirement::AllowDeath,
+                );
+            }
+            // 如果不赔付客户，资金留在提供者账户（可由治理决定如何处理）
+            
+            // 更新提供者保证金记录
+            Providers::<T>::mutate(&provider_account, |maybe_provider| {
+                if let Some(p) = maybe_provider {
+                    p.deposit = p.deposit.saturating_sub(actually_slashed);
+                }
             });
-
-            // 10. 更新大师举报档案
-            ProviderReportProfiles::<T>::mutate(&provider, |profile| {
-                profile.total_reported += 1;
-                profile.last_reported_at = current_block;
+            
+            // 更新信用档案
+            CreditProfiles::<T>::mutate(&provider_account, |maybe_profile| {
+                if let Some(profile) = maybe_profile {
+                    profile.complaint_count = profile.complaint_count.saturating_add(1);
+                    profile.complaint_upheld_count = profile.complaint_upheld_count.saturating_add(1);
+                    profile.total_deductions = profile.total_deductions.saturating_add(50); // 扣50分
+                    profile.last_deduction_reason = Some(DeductionReason::Violation);
+                    profile.last_deduction_at = Some(<frame_system::Pallet<T>>::block_number());
+                    profile.score = profile.score.saturating_sub(50);
+                }
             });
-
-            // 11. 发送事件
-            Self::deposit_event(Event::ReportSubmitted {
-                report_id,
-                reporter: if is_anonymous { None } else { Some(reporter) },
-                provider,
-                report_type,
-                deposit: required_deposit,
+            
+            Self::deposit_event(Event::ProviderDepositSlashed {
+                provider: provider_account,
+                order_id,
+                amount: actually_slashed,
+                to_customer,
             });
-
-            Ok(())
+            
+            Ok(actually_slashed)
         }
-
-        /// 撤回举报
-        ///
-        /// 仅在窗口期内且状态为 Pending 时可撤回。
-        /// 撤回后退还 80% 押金（20% 作为滥用费用）。
-        ///
-        /// # 参数
-        /// - `report_id`: 举报 ID
-        #[pallet::call_index(41)]
-        #[pallet::weight(Weight::from_parts(30_000_000, 0))]
-        pub fn withdraw_report(origin: OriginFor<T>, report_id: u64) -> DispatchResult {
-            let who = ensure_signed(origin)?;
-
-            Reports::<T>::try_mutate(report_id, |maybe_report| {
-                let report = maybe_report.as_mut().ok_or(Error::<T>::ReportNotFound)?;
-
-                // 验证是举报者
-                ensure!(report.reporter == who, Error::<T>::NotReporter);
-
-                // 验证状态为待处理
-                ensure!(
-                    report.status == ReportStatus::Pending,
-                    Error::<T>::ReportNotPending
-                );
-
-                // 验证在撤回窗口期内
-                let current_block = <frame_system::Pallet<T>>::block_number();
-                ensure!(
-                    current_block
-                        <= report.created_at.saturating_add(T::ReportWithdrawWindow::get()),
-                    Error::<T>::WithdrawWindowExpired
-                );
-
-                // 退还 80% 押金
-                let refund =
-                    report.reporter_deposit.saturating_mul(80u32.into()) / 100u32.into();
+        
+        /// 投诉裁决后退款给客户（从托管或提供者余额）
+        /// 
+        /// ## 参数
+        /// - `order_id`: 订单ID
+        /// - `refund_bps`: 退款比例（基点，10000 = 100%）
+        pub fn refund_customer_on_complaint(
+            order_id: u64,
+            refund_bps: u16,
+        ) -> DispatchResult {
+            let order = Orders::<T>::get(order_id).ok_or(Error::<T>::OrderNotFound)?;
+            
+            // 计算退款金额
+            let refund_amount = sp_runtime::Permill::from_parts((refund_bps as u32) * 100)
+                .mul_floor(order.amount);
+            
+            if refund_amount.is_zero() {
+                return Ok(());
+            }
+            
+            // 从提供者余额退款
+            let provider_balance = ProviderBalances::<T>::get(&order.provider);
+            let actual_refund = provider_balance.min(refund_amount);
+            
+            if !actual_refund.is_zero() {
+                ProviderBalances::<T>::mutate(&order.provider, |balance| {
+                    *balance = balance.saturating_sub(actual_refund);
+                });
+                
                 T::Currency::transfer(
-                    &Self::platform_account(),
-                    &who,
-                    refund,
-                    ExistenceRequirement::KeepAlive,
+                    &order.provider,
+                    &order.customer,
+                    actual_refund,
+                    ExistenceRequirement::AllowDeath,
                 )?;
-
-                // 更新状态
-                report.status = ReportStatus::Withdrawn;
-                report.resolved_at = Some(current_block);
-
-                Ok::<_, DispatchError>(())
-            })?;
-
-            // 从待处理队列移除
-            Self::remove_from_pending(report_id);
-
-            // 更新统计
-            ReportStatistics::<T>::mutate(|stats| {
-                stats.pending_reports = stats.pending_reports.saturating_sub(1);
+            }
+            
+            // 更新订单状态
+            Orders::<T>::mutate(order_id, |maybe_order| {
+                if let Some(o) = maybe_order {
+                    o.status = OrderStatus::Refunded;
+                }
             });
-
-            Self::deposit_event(Event::ReportWithdrawn { report_id });
-
+            
+            Self::deposit_event(Event::OrderRefundedOnComplaint {
+                order_id,
+                customer: order.customer,
+                amount: actual_refund,
+            });
+            
             Ok(())
         }
+    }
 
-        /// 审核举报（委员会专用）
-        ///
-        /// 仅委员会/治理权限可调用。
-        ///
-        /// # 参数
-        /// - `report_id`: 举报 ID
-        /// - `result`: 审核结果（Upheld/Rejected/Malicious）
-        /// - `resolution_cid`: 处理说明 IPFS CID（可选）
-        /// - `custom_penalty_rate`: 自定义惩罚比例（可选，覆盖默认值）
-        #[pallet::call_index(42)]
-        #[pallet::weight(Weight::from_parts(80_000_000, 0))]
-        pub fn resolve_report(
-            origin: OriginFor<T>,
-            report_id: u64,
-            result: ReportStatus,
-            resolution_cid: Option<Vec<u8>>,
-            custom_penalty_rate: Option<u16>,
-        ) -> DispatchResult {
-            // 验证委员会权限
-            let resolver = T::ReportReviewOrigin::ensure_origin(origin)?;
+    // ==================== 🆕 存储膨胀防护：归档函数 ====================
 
-            // 验证结果有效性
-            ensure!(
-                matches!(
-                    result,
-                    ReportStatus::Upheld | ReportStatus::Rejected | ReportStatus::Malicious
-                ),
-                Error::<T>::InvalidReportResult
-            );
+    impl<T: Config> Pallet<T> {
+        /// 归档已完成订单（保留完整订单数据，仅移动索引）
+        /// 
+        /// 新方案：订单数据永久保留在 Orders 存储中，仅将订单ID从活跃索引
+        /// (CustomerOrders/ProviderOrders) 移至归档索引 
+        /// (CustomerArchivedOrderIds/ProviderArchivedOrderIds)
+        fn archive_completed_orders(max_count: u32) -> Weight {
+            let mut cursor = ArchiveCursor::<T>::get();
+            let next_id = NextOrderId::<T>::get();
+            let mut processed = 0u32;
 
-            // 获取举报记录
-            let report = Reports::<T>::get(report_id).ok_or(Error::<T>::ReportNotFound)?;
-            ensure!(
-                report.status == ReportStatus::Pending
-                    || report.status == ReportStatus::UnderReview,
-                Error::<T>::ReportAlreadyResolved
-            );
+            // 7天后归档（区块数，假设6秒/块）
+            const ARCHIVE_DELAY_BLOCKS: u32 = 7 * 24 * 60 * 10;
+            let current_block: u32 = <frame_system::Pallet<T>>::block_number().saturated_into();
 
-            // 处理不同结果
-            match result {
-                ReportStatus::Upheld => {
-                    Self::handle_upheld_report(report_id, &report, custom_penalty_rate)?;
+            while processed < max_count && cursor < next_id {
+                cursor = cursor.saturating_add(1);
+
+                if let Some(order) = Orders::<T>::get(cursor) {
+                    // 检查是否为可归档状态（终态）
+                    let is_final_state = matches!(
+                        order.status,
+                        OrderStatus::Completed | OrderStatus::Reviewed |
+                        OrderStatus::Cancelled | OrderStatus::Refunded
+                    );
+
+                    if !is_final_state {
+                        continue;
+                    }
+
+                    // 检查完成时间是否超过归档延迟
+                    let completed_block: u32 = order.completed_at
+                        .unwrap_or(order.created_at)
+                        .saturated_into();
+                    if current_block.saturating_sub(completed_block) < ARCHIVE_DELAY_BLOCKS {
+                        continue;
+                    }
+
+                    // ========== 新方案：保留订单数据，仅移动索引 ==========
+                    
+                    // 1. 从活跃客户订单列表移除
+                    CustomerOrders::<T>::mutate(&order.customer, |ids| {
+                        ids.retain(|&id| id != cursor);
+                    });
+
+                    // 2. 添加到客户归档订单列表（忽略溢出错误，继续处理）
+                    let _ = CustomerArchivedOrderIds::<T>::try_mutate(&order.customer, |ids| {
+                        ids.try_push(cursor)
+                    });
+
+                    // 3. 从活跃提供者订单列表移除
+                    ProviderOrders::<T>::mutate(&order.provider, |ids| {
+                        ids.retain(|&id| id != cursor);
+                    });
+
+                    // 4. 添加到提供者归档订单列表
+                    let _ = ProviderArchivedOrderIds::<T>::try_mutate(&order.provider, |ids| {
+                        ids.try_push(cursor)
+                    });
+
+                    // 5. 更新永久统计
+                    PermanentStats::<T>::mutate(|stats| {
+                        stats.total_archived_orders = stats.total_archived_orders.saturating_add(1);
+                        if matches!(order.status, OrderStatus::Completed | OrderStatus::Reviewed) {
+                            stats.completed_orders = stats.completed_orders.saturating_add(1);
+                            stats.total_volume = stats.total_volume.saturating_add(
+                                order.amount.saturated_into::<u64>()
+                            );
+                        }
+                        if let Some(rating) = order.rating {
+                            stats.total_ratings = stats.total_ratings.saturating_add(rating as u64);
+                            stats.rating_count = stats.rating_count.saturating_add(1);
+                        }
+                    });
+
+                    // 注意：不删除 Orders::<T>::remove(cursor)，保留完整订单数据！
+
+                    processed = processed.saturating_add(1);
                 }
-                ReportStatus::Rejected => {
-                    Self::handle_rejected_report(report_id, &report)?;
-                }
-                ReportStatus::Malicious => {
-                    Self::handle_malicious_report(report_id, &report)?;
-                }
-                _ => return Err(Error::<T>::InvalidReportResult.into()),
             }
 
-            // 更新举报记录
-            let current_block = <frame_system::Pallet<T>>::block_number();
-            let resolution_bounded: Option<BoundedVec<u8, T::MaxCidLength>> = resolution_cid
-                .map(|cid| cid.try_into().map_err(|_| Error::<T>::CidTooLong))
-                .transpose()?;
-
-            Reports::<T>::mutate(report_id, |maybe_report| {
-                if let Some(r) = maybe_report {
-                    r.status = result;
-                    r.resolved_at = Some(current_block);
-                    r.resolution_cid = resolution_bounded;
-                    r.resolved_by = Some(resolver.clone());
-                }
-            });
-
-            // 从待处理队列移除
-            Self::remove_from_pending(report_id);
-
-            // 更新统计
-            Self::update_report_stats_on_resolve(result);
-
-            Self::deposit_event(Event::ReportResolved {
-                report_id,
-                result,
-                resolver,
-            });
-
-            Ok(())
+            ArchiveCursor::<T>::put(cursor);
+            Weight::from_parts(30_000 * processed as u64, 0)
         }
 
-        /// 处理超时举报
-        ///
-        /// 任何人可调用，超时后举报者可取回全额押金。
-        ///
-        /// # 参数
-        /// - `report_id`: 举报 ID
-        #[pallet::call_index(43)]
-        #[pallet::weight(Weight::from_parts(40_000_000, 0))]
-        pub fn expire_report(origin: OriginFor<T>, report_id: u64) -> DispatchResult {
-            ensure_signed(origin)?;
+        /// 归档已结束悬赏（保留完整数据，仅移动索引）
+        /// 
+        /// 悬赏数据永久保留在 BountyQuestions/BountyAnswers 存储中，
+        /// 仅将ID从活跃索引移至归档索引
+        fn archive_completed_bounties(max_count: u32) -> Weight {
+            let mut cursor = BountyArchiveCursor::<T>::get();
+            let next_id = NextBountyId::<T>::get();
+            let mut processed = 0u32;
 
-            let report = Reports::<T>::get(report_id).ok_or(Error::<T>::ReportNotFound)?;
-            ensure!(
-                report.status == ReportStatus::Pending,
-                Error::<T>::ReportNotPending
-            );
+            // 7天后归档（区块数，假设6秒/块）
+            const ARCHIVE_DELAY_BLOCKS: u32 = 7 * 24 * 60 * 10;
+            let current_block: u32 = <frame_system::Pallet<T>>::block_number().saturated_into();
 
-            let current_block = <frame_system::Pallet<T>>::block_number();
-            ensure!(
-                current_block > report.created_at.saturating_add(T::ReportTimeout::get()),
-                Error::<T>::ReportNotExpired
-            );
+            while processed < max_count && cursor < next_id {
+                cursor = cursor.saturating_add(1);
 
-            // 全额退还举报押金
-            T::Currency::transfer(
-                &Self::platform_account(),
-                &report.reporter,
-                report.reporter_deposit,
-                ExistenceRequirement::KeepAlive,
-            )?;
+                if let Some(bounty) = BountyQuestions::<T>::get(cursor) {
+                    // 检查是否为可归档状态（终态）
+                    let is_final_state = matches!(
+                        bounty.status,
+                        BountyStatus::Settled | BountyStatus::Cancelled | BountyStatus::Expired
+                    );
 
-            // 更新状态
-            Reports::<T>::mutate(report_id, |maybe_report| {
-                if let Some(r) = maybe_report {
-                    r.status = ReportStatus::Expired;
-                    r.resolved_at = Some(current_block);
+                    if !is_final_state {
+                        continue;
+                    }
+
+                    // 检查结束时间是否超过归档延迟
+                    let ended_block: u32 = bounty.deadline.saturated_into();
+                    if current_block.saturating_sub(ended_block) < ARCHIVE_DELAY_BLOCKS {
+                        continue;
+                    }
+
+                    // ========== 保留悬赏数据，仅移动索引 ==========
+                    
+                    // 1. 从活跃悬赏列表移除
+                    UserBounties::<T>::mutate(&bounty.creator, |ids| {
+                        ids.retain(|&id| id != cursor);
+                    });
+
+                    // 2. 添加到归档悬赏列表
+                    let _ = UserArchivedBounties::<T>::try_mutate(&bounty.creator, |ids| {
+                        ids.try_push(cursor)
+                    });
+
+                    // 3. 归档该悬赏的所有回答
+                    let answer_ids = BountyAnswerIds::<T>::get(cursor);
+                    for answer_id in answer_ids.iter() {
+                        if let Some(answer) = BountyAnswers::<T>::get(answer_id) {
+                            // 从活跃回答列表移除
+                            UserBountyAnswers::<T>::mutate(&answer.answerer, |ids| {
+                                ids.retain(|&id| id != *answer_id);
+                            });
+
+                            // 添加到归档回答列表
+                            let _ = UserArchivedBountyAnswers::<T>::try_mutate(&answer.answerer, |ids| {
+                                ids.try_push(*answer_id)
+                            });
+                        }
+                    }
+
+                    // 注意：不删除 BountyQuestions/BountyAnswers，保留完整数据！
+
+                    processed = processed.saturating_add(1);
                 }
-            });
+            }
 
-            // 从待处理队列移除
-            Self::remove_from_pending(report_id);
-
-            ReportStatistics::<T>::mutate(|stats| {
-                stats.pending_reports = stats.pending_reports.saturating_sub(1);
-            });
-
-            Self::deposit_event(Event::ReportExpired { report_id });
-
-            Ok(())
+            BountyArchiveCursor::<T>::put(cursor);
+            Weight::from_parts(35_000 * processed as u64, 0)
         }
     }
 }

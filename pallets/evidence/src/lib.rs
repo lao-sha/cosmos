@@ -36,7 +36,8 @@ pub mod pallet {
     use scale_info::TypeInfo;
     use sp_core::blake2_256;
     use sp_core::H256;
-    use sp_runtime::traits::{Saturating, AtLeast32BitUnsigned};
+    use sp_runtime::traits::{Saturating, AtLeast32BitUnsigned, SaturatedConversion};
+    use frame_support::weights::Weight;
     // 导入共享媒体工具库
     use media_utils::{
         HashHelper, IpfsHelper, MediaError
@@ -61,6 +62,32 @@ pub mod pallet {
         Mixed,
         /// 纯文本描述
         Text,
+    }
+
+    /// 存储膨胀防护：归档证据摘要（精简版，~50字节）
+    /// 
+    /// 函数级详细中文注释：
+    /// - 原始 Evidence 结构约 200+ 字节
+    /// - 归档后仅保留关键摘要信息
+    /// - 存储降低约 75%
+    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, Debug, Default)]
+    pub struct ArchivedEvidence {
+        /// 证据ID
+        pub id: u64,
+        /// 所属域
+        pub domain: u8,
+        /// 目标ID
+        pub target_id: u64,
+        /// 内容哈希摘要（blake2_256(content_cid)）
+        pub content_hash: H256,
+        /// 内容类型
+        pub content_type: u8,
+        /// 创建时间（区块号，u32足够）
+        pub created_at: u32,
+        /// 归档时间（区块号）
+        pub archived_at: u32,
+        /// 年月（YYMM格式，便于按月统计）
+        pub year_month: u16,
     }
 
     /// Phase 1.5优化：共享证据记录结构（CID化版本）
@@ -109,9 +136,9 @@ pub mod pallet {
     > {
         /// 证据唯一ID
         pub id: u64,
-        /// 所属域（1=Grave, 2=Deceased, etc.）
+        /// 所属域（1=Evidence, 2=OtcOrder, 3=General, etc.）
         pub domain: u8,
-        /// 目标ID（如deceased_id）
+        /// 目标ID（如subject_id）
         pub target_id: u64,
         /// 证据所有者
         pub owner: AccountId,
@@ -191,7 +218,6 @@ pub mod pallet {
         #[pallet::constant]
         type MaxListLen: Get<u32>;
         type WeightInfo: WeightInfo;
-        type FamilyVerifier: FamilyRelationVerifier<Self::AccountId>;
         
         // ============= IPFS自动Pin相关配置 =============
         /// 函数级详细中文注释：IPFS自动pin提供者，供证据CID自动固定
@@ -205,7 +231,7 @@ pub mod pallet {
         /// - commit: 提交证据时自动pin所有CID
         /// 
         /// 注意：
-        /// - 证据通常关联到deceased_id（通过target_id）
+        /// - 证据通常关联到target_id（如subject_id）
         /// - 由Runtime注入实现（pallet_stardust_ipfs::Pallet<Runtime>）
         type IpfsPinner: pallet_stardust_ipfs::IpfsPinner<Self::AccountId, Self::Balance>;
         
@@ -215,6 +241,10 @@ pub mod pallet {
         /// 函数级中文注释：默认IPFS存储单价（每副本每月）
         #[pallet::constant]
         type DefaultStoragePrice: Get<Self::Balance>;
+
+        /// 🆕 证据修改窗口（区块数，28800 ≈ 2天，按6秒/块计算）
+        #[pallet::constant]
+        type EvidenceEditWindow: Get<BlockNumberFor<Self>>;
     }
 
     #[pallet::pallet]
@@ -320,6 +350,106 @@ pub mod pallet {
         OptionQuery,
     >;
 
+    // ==================== 存储膨胀防护：归档机制 ====================
+
+    /// 归档证据存储（精简摘要，~50字节/条）
+    #[pallet::storage]
+    pub type ArchivedEvidences<T: Config> =
+        StorageMap<_, Blake2_128Concat, u64, ArchivedEvidence, OptionQuery>;
+
+    /// 归档游标：记录已扫描到的证据ID
+    #[pallet::storage]
+    pub type EvidenceArchiveCursor<T: Config> = StorageValue<_, u64, ValueQuery>;
+
+    /// 归档统计
+    #[pallet::storage]
+    pub type ArchiveStats<T: Config> = StorageValue<_, ArchiveStatistics, ValueQuery>;
+
+    // ==================== 证据追加链 ====================
+
+    /// 证据追加关系：子证据 → 父证据
+    /// 用于追溯证据链，支持补充证据功能
+    #[pallet::storage]
+    pub type EvidenceParent<T: Config> = StorageMap<_, Blake2_128Concat, u64, u64, OptionQuery>;
+
+    /// 证据子项列表：父证据 → 子证据列表
+    /// 用于查询某证据的所有补充证据
+    #[pallet::storage]
+    pub type EvidenceChildren<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,
+        BoundedVec<u64, ConstU32<100>>, // 最多100个补充证据
+        ValueQuery,
+    >;
+
+    /// 归档统计结构
+    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, Debug, Default)]
+    pub struct ArchiveStatistics {
+        /// 已归档证据总数
+        pub total_archived: u64,
+        /// 释放的存储字节数（估算）
+        pub bytes_saved: u64,
+        /// 最后归档时间
+        pub last_archive_block: u32,
+    }
+
+    // ==================== 🆕 待处理清单（2天修改窗口）====================
+
+    /// 待处理清单状态
+    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, Debug, Default)]
+    pub enum ManifestStatus {
+        /// 待处理（可修改）
+        #[default]
+        Pending,
+        /// 处理中（OCW 已获取）
+        Processing,
+        /// 已确认
+        Confirmed,
+        /// 处理失败
+        Failed,
+    }
+
+    /// 待处理清单结构
+    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, Debug)]
+    #[scale_info(skip_type_params(MaxCidLen, MaxMediaCount, MaxMemoLen))]
+    pub struct PendingManifest<AccountId, BlockNumber, MaxCidLen: Get<u32>, MaxMediaCount: Get<u32>, MaxMemoLen: Get<u32>> {
+        /// 证据ID
+        pub evidence_id: u64,
+        /// 图片 CID 列表
+        pub imgs: BoundedVec<BoundedVec<u8, MaxCidLen>, MaxMediaCount>,
+        /// 视频 CID 列表
+        pub vids: BoundedVec<BoundedVec<u8, MaxCidLen>, MaxMediaCount>,
+        /// 文档 CID 列表
+        pub docs: BoundedVec<BoundedVec<u8, MaxCidLen>, MaxMediaCount>,
+        /// 备注
+        pub memo: Option<BoundedVec<u8, MaxMemoLen>>,
+        /// 提交者
+        pub owner: AccountId,
+        /// 创建区块
+        pub created_at: BlockNumber,
+        /// 处理状态
+        pub status: ManifestStatus,
+    }
+
+    /// 待处理清单存储
+    #[pallet::storage]
+    pub type PendingManifests<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64, // evidence_id
+        PendingManifest<T::AccountId, BlockNumberFor<T>, T::MaxCidLen, T::MaxImg, T::MaxMemoLen>,
+        OptionQuery,
+    >;
+
+    /// 待处理队列
+    #[pallet::storage]
+    pub type PendingManifestQueue<T: Config> = StorageValue<
+        _,
+        BoundedVec<u64, T::MaxListLen>,
+        ValueQuery,
+    >;
+
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
     pub enum Event<T: Config> {
@@ -400,6 +530,42 @@ pub mod pallet {
             user: T::AccountId,
             key_type: u8,
         },
+
+        // === 归档事件 ===
+        /// 证据已归档
+        EvidenceArchived {
+            id: u64,
+            domain: u8,
+            target_id: u64,
+        },
+
+        /// 补充证据已追加
+        EvidenceAppended {
+            /// 新证据ID
+            id: u64,
+            /// 父证据ID（被补充的原始证据）
+            parent_id: u64,
+            /// 所属域
+            domain: u8,
+            /// 目标ID
+            target_id: u64,
+            /// 提交者
+            owner: T::AccountId,
+        },
+
+        // ==================== 🆕 待处理清单事件 ====================
+
+        /// 证据清单已更新（在修改窗口内）
+        EvidenceManifestUpdated {
+            evidence_id: u64,
+            owner: T::AccountId,
+        },
+
+        /// 证据清单已确认（OCW 处理完成）
+        EvidenceManifestConfirmed {
+            evidence_id: u64,
+            manifest_cid: BoundedVec<u8, T::MaxContentCidLen>,
+        },
     }
 
     #[pallet::error]
@@ -422,8 +588,6 @@ pub mod pallet {
         TooManyAuthorizedUsers,
         /// 无效的加密密钥格式
         InvalidEncryptedKey,
-        /// 家庭关系验证失败
-        FamilyVerificationFailed,
         /// 密钥类型不支持
         UnsupportedKeyType,
         /// 图片数量超过上限
@@ -446,6 +610,21 @@ pub mod pallet {
         TooManyForSubject,
         /// 全局 CID 去重命中（Plain 模式）
         DuplicateCidGlobal,
+        /// 父证据不存在
+        ParentEvidenceNotFound,
+        /// 补充证据数量超过上限
+        TooManySupplements,
+        /// 不能追加到已归档的证据
+        CannotAppendToArchived,
+
+        // ==================== 🆕 待处理清单错误 ====================
+
+        /// 待处理清单不存在
+        PendingManifestNotFound,
+        /// 修改窗口已过期
+        EditWindowExpired,
+        /// 待处理队列已满
+        PendingQueueFull,
     }
 
     #[allow(deprecated)]
@@ -492,8 +671,8 @@ pub mod pallet {
                 id
             });
             
-            // TODO: Phase 1.5 完整实施 - 将 imgs/vids/docs 打包为JSON上传IPFS，返回content_cid
-            // 临时方案：使用第一个img的CID作为content_cid（需要类型转换）
+            // 🔮 Phase 1.5 计划：将 imgs/vids/docs 打包为JSON上传IPFS，返回content_cid
+            // 当前临时方案：使用第一个媒体的CID作为content_cid
             let temp_vec: Vec<u8> = if !imgs.is_empty() {
                 imgs[0].clone().into_inner()
             } else if !vids.is_empty() {
@@ -524,8 +703,8 @@ pub mod pallet {
             // 计数 + 去重索引落库
             EvidenceCountByTarget::<T>::insert((domain, target_id), cnt.saturating_add(1));
             
-            // TODO: Phase 1.5 完整实施 - 从 content_cid 指向的JSON解析出所有CID进行去重和pin
-            // 临时方案：对当前的content_cid进行去重和pin
+            // 🔮 Phase 1.5 计划：从 content_cid 指向的JSON解析出所有CID进行去重和pin
+            // 当前临时方案：对当前的content_cid进行去重和pin
             if T::EnableGlobalCidDedup::get() {
                 let h = H256::from(blake2_256(&ev.content_cid.clone().into_inner()));
                 if CidHashIndex::<T>::get(h).is_none() {
@@ -533,16 +712,16 @@ pub mod pallet {
                 }
             }
 
-            // 函数级详细中文注释：自动pin证据CID到IPFS
-            // TODO: Phase 1.5 完整实施 - pin content_cid及其包含的所有媒体CID
-            // 临时方案：只pin content_cid本身
-            let deceased_id_u64 = target_id;
+            // 函数级详细中文注释：自动pin证据CID到IPFS（P1重构：使用证据专用接口）
+            // 🔮 Phase 1.5 计划：pin content_cid及其包含的所有媒体CID
+            // 当前方案：使用 pin_cid_for_subject（Evidence 类型，默认 Critical 级别）
             let cid_vec: Vec<u8> = ev.content_cid.clone().into_inner();
-            if let Err(e) = T::IpfsPinner::pin_cid_for_deceased(
+            if let Err(e) = T::IpfsPinner::pin_cid_for_subject(
                 who.clone(),
-                deceased_id_u64,
+                pallet_stardust_ipfs::SubjectType::Evidence,
+                id,  // 使用 evidence_id
                 cid_vec,
-                None, // 使用默认Standard层级（3副本）
+                None, // 使用默认层级
             ) {
                 log::warn!(
                     target: "evidence",
@@ -827,14 +1006,6 @@ pub mod pallet {
                 );
             }
 
-            // 家庭成员访问策略验证
-            if let private_content::AccessPolicy::FamilyMembers(deceased_id) = &access_policy {
-                ensure!(
-                    T::FamilyVerifier::is_authorized_for_deceased(&who, *deceased_id),
-                    Error::<T>::FamilyVerificationFailed
-                );
-            }
-
             let content_id = NextPrivateContentId::<T>::mutate(|id| {
                 let current = *id;
                 *id = id.saturating_add(1);
@@ -1037,6 +1208,207 @@ pub mod pallet {
             })
         }
 
+        /// 追加补充证据
+        /// 
+        /// 函数级中文注释：为已存在的证据追加补充材料
+        /// - 原证据保持不可变
+        /// - 新证据与原证据形成父子关系
+        /// - 可追溯完整证据链
+        /// 
+        /// # 参数
+        /// - `parent_id`: 父证据ID（被补充的原始证据）
+        /// - `imgs`: 补充图片CID列表
+        /// - `vids`: 补充视频CID列表
+        /// - `docs`: 补充文档CID列表
+        /// - `memo`: 补充说明（可选）
+        #[pallet::call_index(11)]
+        #[allow(deprecated)]
+        #[pallet::weight(T::WeightInfo::commit(imgs.len() as u32, vids.len() as u32, docs.len() as u32))]
+        pub fn append_evidence(
+            origin: OriginFor<T>,
+            parent_id: u64,
+            imgs: Vec<BoundedVec<u8, T::MaxCidLen>>,
+            vids: Vec<BoundedVec<u8, T::MaxCidLen>>,
+            docs: Vec<BoundedVec<u8, T::MaxCidLen>>,
+            _memo: Option<BoundedVec<u8, T::MaxMemoLen>>,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            
+            // 1. 验证父证据存在
+            let parent = Evidences::<T>::get(parent_id)
+                .ok_or(Error::<T>::ParentEvidenceNotFound)?;
+            
+            // 2. 验证父证据未被归档
+            ensure!(
+                !ArchivedEvidences::<T>::contains_key(parent_id),
+                Error::<T>::CannotAppendToArchived
+            );
+            
+            // 3. 验证权限（同命名空间）
+            let ns = T::EvidenceNsBytes::get();
+            ensure!(
+                <T as Config>::Authorizer::is_authorized(ns, &who),
+                Error::<T>::NotAuthorized
+            );
+            
+            // 4. 验证补充数量限制
+            let children = EvidenceChildren::<T>::get(parent_id);
+            ensure!(
+                children.len() < 100,
+                Error::<T>::TooManySupplements
+            );
+            
+            // 5. 限频检查
+            let now = <frame_system::Pallet<T>>::block_number();
+            Self::touch_window(&who, now)?;
+            
+            // 6. 校验 CID
+            Self::validate_cid_vec(&imgs)?;
+            Self::validate_cid_vec(&vids)?;
+            Self::validate_cid_vec(&docs)?;
+            
+            // 7. 生成新证据ID
+            let id = NextEvidenceId::<T>::mutate(|n| {
+                let id = *n;
+                *n = n.saturating_add(1);
+                id
+            });
+            
+            // 8. 构建补充证据（继承父证据的domain和target_id）
+            let temp_vec: Vec<u8> = if !imgs.is_empty() {
+                imgs[0].clone().into_inner()
+            } else if !vids.is_empty() {
+                vids[0].clone().into_inner()
+            } else if !docs.is_empty() {
+                docs[0].clone().into_inner()
+            } else {
+                b"QmPlaceholder".to_vec()
+            };
+            let content_cid: BoundedVec<u8, T::MaxContentCidLen> = temp_vec.try_into()
+                .map_err(|_| Error::<T>::InvalidCidFormat)?;
+            
+            let ev = Evidence {
+                id,
+                domain: parent.domain,
+                target_id: parent.target_id,
+                owner: who.clone(),
+                content_cid,
+                content_type: ContentType::Mixed,
+                created_at: now,
+                is_encrypted: false,
+                encryption_scheme: None,
+                commit: None,
+                ns: Some(ns),
+            };
+            
+            // 9. 存储证据
+            Evidences::<T>::insert(id, &ev);
+            EvidenceByTarget::<T>::insert((parent.domain, parent.target_id), id, ());
+            
+            // 10. 建立父子关系
+            EvidenceParent::<T>::insert(id, parent_id);
+            EvidenceChildren::<T>::mutate(parent_id, |children| {
+                let _ = children.try_push(id);
+            });
+            
+            // 11. 自动pin证据CID
+            let cid_vec: Vec<u8> = ev.content_cid.clone().into_inner();
+            if let Err(e) = T::IpfsPinner::pin_cid_for_subject(
+                who.clone(),
+                pallet_stardust_ipfs::SubjectType::Evidence,
+                id,
+                cid_vec,
+                None,
+            ) {
+                log::warn!(
+                    target: "evidence",
+                    "Auto-pin content cid failed for appended evidence {:?}: {:?}",
+                    id,
+                    e
+                );
+            }
+            
+            // 12. 发送事件
+            Self::deposit_event(Event::EvidenceAppended {
+                id,
+                parent_id,
+                domain: parent.domain,
+                target_id: parent.target_id,
+                owner: who,
+            });
+            
+            Ok(())
+        }
+
+        // ==================== 🆕 2天修改窗口 Extrinsics ====================
+
+        /// 修改待处理证据清单（在修改窗口内可任意修改）
+        /// 
+        /// 允许证据提交者在 EvidenceEditWindow 内修改已提交的清单内容
+        #[pallet::call_index(12)]
+        #[allow(deprecated)]
+        #[pallet::weight(T::WeightInfo::commit(imgs.len() as u32, vids.len() as u32, docs.len() as u32))]
+        pub fn update_evidence_manifest(
+            origin: OriginFor<T>,
+            evidence_id: u64,
+            imgs: Vec<BoundedVec<u8, T::MaxCidLen>>,
+            vids: Vec<BoundedVec<u8, T::MaxCidLen>>,
+            docs: Vec<BoundedVec<u8, T::MaxCidLen>>,
+            memo: Option<BoundedVec<u8, T::MaxMemoLen>>,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            
+            // 1. 获取待处理清单
+            let pending = PendingManifests::<T>::get(evidence_id)
+                .ok_or(Error::<T>::PendingManifestNotFound)?;
+            
+            // 2. 验证修改窗口
+            let now = <frame_system::Pallet<T>>::block_number();
+            let edit_window = T::EvidenceEditWindow::get();
+            ensure!(
+                now <= pending.created_at.saturating_add(edit_window),
+                Error::<T>::EditWindowExpired
+            );
+            
+            // 3. 验证权限
+            ensure!(pending.owner == who, Error::<T>::NotAuthorized);
+            
+            // 4. 校验 CID
+            Self::validate_cid_vec(&imgs)?;
+            Self::validate_cid_vec(&vids)?;
+            Self::validate_cid_vec(&docs)?;
+            
+            // 5. 转换媒体列表
+            let imgs_bounded: BoundedVec<BoundedVec<u8, T::MaxCidLen>, T::MaxImg> = 
+                imgs.try_into().map_err(|_| Error::<T>::TooManyImages)?;
+            let vids_bounded: BoundedVec<BoundedVec<u8, T::MaxCidLen>, T::MaxImg> = 
+                vids.try_into().map_err(|_| Error::<T>::TooManyVideos)?;
+            let docs_bounded: BoundedVec<BoundedVec<u8, T::MaxCidLen>, T::MaxImg> = 
+                docs.try_into().map_err(|_| Error::<T>::TooManyDocs)?;
+            
+            // 6. 更新清单（保持原创建时间，不重置窗口）
+            let updated = PendingManifest {
+                evidence_id,
+                imgs: imgs_bounded,
+                vids: vids_bounded,
+                docs: docs_bounded,
+                memo,
+                owner: who.clone(),
+                created_at: pending.created_at, // 保持原时间，不重置窗口
+                status: ManifestStatus::Pending,
+            };
+            
+            PendingManifests::<T>::insert(evidence_id, updated);
+            
+            // 7. 发送事件
+            Self::deposit_event(Event::EvidenceManifestUpdated {
+                evidence_id,
+                owner: who,
+            });
+            
+            Ok(())
+        }
+
         // 只读接口应放置在 inherent impl 中，而非 extrinsics 块。
     }
 
@@ -1117,14 +1489,6 @@ pub mod pallet {
         fn is_authorized(ns: [u8; 8], who: &AccountId) -> bool;
     }
 
-    /// 家庭关系验证接口
-    pub trait FamilyRelationVerifier<AccountId> {
-        /// 验证用户是否为指定逝者的家庭成员
-        fn is_family_member(user: &AccountId, deceased_id: u64) -> bool;
-        /// 验证用户是否为逝者的授权管理员
-        fn is_authorized_for_deceased(user: &AccountId, deceased_id: u64) -> bool;
-    }
-
     /// 只读查询 trait 占位：供其他 pallet 低耦合读取证据（可在 runtime 或外部实现）。
     pub trait EvidenceProvider<AccountId> {
         /// 返回指定 ID 的证据；本 Pallet 不提供默认实现，避免类型推断问题。
@@ -1155,9 +1519,6 @@ pub mod pallet {
                     private_content::AccessPolicy::OwnerOnly => false,
                     private_content::AccessPolicy::SharedWith(users) => {
                         users.iter().any(|u| u == user)
-                    }
-                    private_content::AccessPolicy::FamilyMembers(deceased_id) => {
-                        T::FamilyVerifier::is_family_member(user, *deceased_id)
                     }
                     private_content::AccessPolicy::TimeboxedAccess { users, expires_at } => {
                         let now = <frame_system::Pallet<T>>::block_number();
@@ -1278,6 +1639,109 @@ pub mod pallet {
             }
             Ok(())
         }
+
+        // ==================== 存储膨胀防护：归档辅助函数 ====================
+
+        /// 函数级中文注释：归档旧证据
+        /// 
+        /// 参数：
+        /// - max_count: 每次最多处理的证据数量
+        /// 
+        /// 返回：已归档的证据数量
+        /// 
+        /// 归档条件：证据创建时间超过 90 天（1_296_000 区块）
+        pub fn archive_old_evidences(max_count: u32) -> u32 {
+            let now: u32 = frame_system::Pallet::<T>::block_number().saturated_into();
+            // 归档延迟：90天 = 1_296_000 区块（6秒/块）
+            let archive_delay: u32 = 1_296_000;
+            let mut archived_count = 0u32;
+            let mut cursor = EvidenceArchiveCursor::<T>::get();
+            let max_id = NextEvidenceId::<T>::get();
+
+            while archived_count < max_count && cursor < max_id {
+                if let Some(evidence) = Evidences::<T>::get(cursor) {
+                    let created_at: u32 = evidence.created_at.saturated_into();
+                    
+                    // 检查是否可归档：创建时间 + 归档延迟 <= 当前时间
+                    if now.saturating_sub(created_at) >= archive_delay {
+                        // 计算内容哈希
+                        let content_hash = H256::from(blake2_256(&evidence.content_cid.clone().into_inner()));
+                        
+                        // 创建归档记录
+                        let archived = ArchivedEvidence {
+                            id: cursor,
+                            domain: evidence.domain,
+                            target_id: evidence.target_id,
+                            content_hash,
+                            content_type: match evidence.content_type {
+                                ContentType::Image => 0,
+                                ContentType::Video => 1,
+                                ContentType::Document => 2,
+                                ContentType::Mixed => 3,
+                                ContentType::Text => 4,
+                            },
+                            created_at,
+                            archived_at: now,
+                            year_month: Self::block_to_year_month(now),
+                        };
+
+                        // 存储归档记录
+                        ArchivedEvidences::<T>::insert(cursor, archived);
+
+                        // 移除原始证据记录（释放存储）
+                        Evidences::<T>::remove(cursor);
+
+                        // 更新统计（估算每条证据节省约 150 字节）
+                        ArchiveStats::<T>::mutate(|stats| {
+                            stats.total_archived = stats.total_archived.saturating_add(1);
+                            stats.bytes_saved = stats.bytes_saved.saturating_add(150);
+                            stats.last_archive_block = now;
+                        });
+
+                        Self::deposit_event(Event::EvidenceArchived {
+                            id: cursor,
+                            domain: evidence.domain,
+                            target_id: evidence.target_id,
+                        });
+
+                        archived_count = archived_count.saturating_add(1);
+                    }
+                }
+                cursor = cursor.saturating_add(1);
+            }
+
+            EvidenceArchiveCursor::<T>::put(cursor);
+            archived_count
+        }
+
+        /// 函数级中文注释：将区块号转换为年月格式（YYMM）
+        fn block_to_year_month(block: u32) -> u16 {
+            // 假设区块0对应2024年1月，每月约432000个区块（6秒/块）
+            let blocks_per_month: u32 = 432_000;
+            let months_since_start = block / blocks_per_month;
+            let year = 24u16 + (months_since_start / 12) as u16;
+            let month = 1u16 + (months_since_start % 12) as u16;
+            year * 100 + month
+        }
+    }
+
+    // ==================== 存储膨胀防护：Hooks 实现 ====================
+
+    #[pallet::hooks]
+    impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+        /// 函数级中文注释：空闲时间归档旧证据
+        fn on_idle(_now: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
+            let mut weight_used = Weight::zero();
+            let base_weight = Weight::from_parts(15_000, 0);
+
+            // 确保有足够权重处理至少 1 条归档
+            if remaining_weight.ref_time() > base_weight.ref_time() * 10 {
+                let archived = Self::archive_old_evidences(10);
+                weight_used = weight_used.saturating_add(base_weight.saturating_mul(archived as u64));
+            }
+
+            weight_used
+        }
     }
 }
 
@@ -1336,4 +1800,5 @@ impl<T: pallet::Config> Pallet<T> {
     pub fn count_by_ns(ns: [u8; 8], subject_id: u64) -> u32 {
         pallet::EvidenceCountByNs::<T>::get((ns, subject_id))
     }
+
 }

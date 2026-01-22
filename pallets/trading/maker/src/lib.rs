@@ -37,6 +37,7 @@ pub mod pallet {
     use frame_support::{
         traits::{Currency, ReservableCurrency, Get, ExistenceRequirement, UnixTime},
         BoundedVec,
+        weights::Weight,
     };
     use sp_runtime::traits::{Saturating, SaturatedConversion};
     
@@ -104,6 +105,47 @@ pub mod pallet {
         pub appealed: bool,
         /// 申诉结果
         pub appeal_result: Option<bool>,
+    }
+
+    /// 🆕 归档惩罚记录（L2精简版，~24字节）
+    /// 用于长期存储历史惩罚记录，减少链上存储占用
+    #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen, Default)]
+    pub struct ArchivedPenaltyL2 {
+        /// 惩罚记录ID
+        pub penalty_id: u64,
+        /// 做市商ID
+        pub maker_id: u64,
+        /// 扣除的USD价值
+        pub usd_value: u64,
+        /// 惩罚类型代码 (0=OtcTimeout, 1=BridgeTimeout, 2=ArbitrationLoss, 3=LowCredit, 4=Malicious)
+        pub penalty_type_code: u8,
+        /// 申诉结果 (0=未申诉, 1=申诉成功, 2=申诉失败)
+        pub appeal_status: u8,
+    }
+
+    impl ArchivedPenaltyL2 {
+        /// 从完整记录创建归档版本
+        pub fn from_full<T: Config>(penalty_id: u64, record: &PenaltyRecord<T>) -> Self {
+            let penalty_type_code = match &record.penalty_type {
+                PenaltyType::OtcTimeout { .. } => 0,
+                PenaltyType::BridgeTimeout { .. } => 1,
+                PenaltyType::ArbitrationLoss { .. } => 2,
+                PenaltyType::LowCreditScore { .. } => 3,
+                PenaltyType::MaliciousBehavior { .. } => 4,
+            };
+            let appeal_status = match (record.appealed, record.appeal_result) {
+                (false, _) => 0,
+                (true, Some(true)) => 1,
+                (true, _) => 2,
+            };
+            Self {
+                penalty_id,
+                maker_id: record.maker_id,
+                usd_value: record.usd_value,
+                penalty_type_code,
+                appeal_status,
+            }
+        }
     }
     
     // ===== 数据结构 =====
@@ -209,10 +251,6 @@ pub mod pallet {
         pub masked_payment_info: BoundedVec<u8, ConstU32<512>>,
         /// 微信号（显示给用户）
         pub wechat_id: BoundedVec<u8, ConstU32<64>>,
-        /// EPAY商户号（可选）
-        pub epay_no: Option<BoundedVec<u8, ConstU32<32>>>,
-        /// EPAY密钥（可选，加密存储）
-        pub epay_key_cid: Option<Cid>,
         /// 押金目标USD价值（固定1000 USDT，精度10^6）
         pub target_deposit_usd: u64,
         /// 上次价格检查时间
@@ -295,6 +333,22 @@ pub mod pallet {
         
         /// 权重信息
         type WeightInfo: WeightInfo;
+
+        /// 🆕 P3: IPFS 内容注册接口（用于自动 Pin 做市商资料）
+        /// 
+        /// 集成 pallet-stardust-ipfs 的 ContentRegistry trait，
+        /// 在做市商注册/更新资料时自动 Pin 内容到 IPFS。
+        /// 
+        /// Pin 策略：
+        /// - 做市商公开资料：Standard 层级
+        /// - 做市商私密资料：Standard 层级
+        /// - 申诉证据：Standard 层级
+        type ContentRegistry: pallet_stardust_ipfs::ContentRegistry;
+
+        /// 🆕 国库账户（用于接收无受益人时的扣款）
+        /// 
+        /// 当做市商押金扣除但无指定受益人时，扣除的金额将转入国库账户
+        type TreasuryAccount: Get<Self::AccountId>;
     }
     
     // ===== 存储 =====
@@ -359,6 +413,55 @@ pub mod pallet {
         BoundedVec<u64, ConstU32<100>>, // penalty_ids
         ValueQuery,
     >;
+
+    /// 🆕 押金自动补充检查游标
+    /// 用于 on_idle 中追踪上次检查到哪个 maker_id
+    #[pallet::storage]
+    pub type DepositCheckCursor<T: Config> = StorageValue<_, u64, ValueQuery>;
+
+    /// 🆕 惩罚记录归档游标
+    /// 用于 on_idle 中追踪上次归档到哪个 penalty_id
+    #[pallet::storage]
+    pub type PenaltyArchiveCursor<T: Config> = StorageValue<_, u64, ValueQuery>;
+
+    /// 🆕 已归档的惩罚记录（L2精简版，按年月索引）
+    /// 保留最少信息用于历史查询
+    #[pallet::storage]
+    pub type ArchivedPenalties<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u32, // year_month (YYMM格式)
+        BoundedVec<ArchivedPenaltyL2, ConstU32<1000>>,
+        ValueQuery,
+    >;
+    
+    // ===== Hooks =====
+
+    #[pallet::hooks]
+    impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+        /// 🆕 空闲时自动检查并补充做市商押金 + 归档旧惩罚记录
+        ///
+        /// 每次最多检查 max_count 个做市商，避免阻塞区块
+        fn on_idle(now: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
+            let base_weight = Weight::from_parts(25_000, 0);
+            
+            // 确保有足够权重执行检查
+            if remaining_weight.ref_time() < base_weight.ref_time() * 10 {
+                return Weight::zero();
+            }
+            
+            let mut consumed = Weight::zero();
+            
+            // 1. 押金自动补充检查（5个做市商）
+            consumed = consumed.saturating_add(Self::auto_check_and_replenish_deposits(5));
+            
+            // 2. 惩罚记录归档（3条记录，30天以上的记录）
+            let archive_weight = Self::archive_old_penalty_records(now, 3, 30 * 14400);
+            consumed = consumed.saturating_add(archive_weight);
+            
+            consumed
+        }
+    }
     
     // ===== 事件 =====
     
@@ -443,6 +546,13 @@ pub mod pallet {
             maker_id: u64,
             refunded_amount: BalanceOf<T>,
         },
+
+        /// 🆕 惩罚记录已归档
+        PenaltyArchived {
+            penalty_id: u64,
+            maker_id: u64,
+            year_month: u32,
+        },
     }
     
     // ===== 错误 =====
@@ -464,8 +574,6 @@ pub mod pallet {
         InsufficientBalance,
         /// 无效的 TRON 地址
         InvalidTronAddress,
-        /// 无效的 EPAY 配置
-        InvalidEpayConfig,
         /// 编码错误
         EncodingError,
         /// 提现请求不存在
@@ -501,6 +609,33 @@ pub mod pallet {
     
     #[pallet::call]
     impl<T: Config> Pallet<T> {
+        /// 🆕 治理强制补充做市商押金
+        ///
+        /// 当做市商未主动补充且押金严重不足时，治理可强制触发
+        ///
+        /// # 参数
+        /// - `origin`: 治理权限
+        /// - `maker_id`: 做市商ID
+        #[pallet::call_index(11)]
+        #[pallet::weight(T::WeightInfo::lock_deposit())]
+        pub fn force_replenish_deposit(
+            origin: OriginFor<T>,
+            maker_id: u64,
+        ) -> DispatchResult {
+            T::GovernanceOrigin::ensure_origin(origin)?;
+            
+            // 检查做市商是否需要补充
+            ensure!(
+                Self::needs_deposit_replenishment(maker_id)?,
+                Error::<T>::InsufficientDeposit
+            );
+            
+            // 执行补充
+            let _amount = Self::replenish_maker_deposit(maker_id)?;
+            
+            Ok(())
+        }
+
         /// 函数级详细中文注释：锁定做市商押金
         ///
         /// # 参数
@@ -524,8 +659,6 @@ pub mod pallet {
         /// - `birthday`: 生日（YYYY-MM-DD）
         /// - `tron_address`: TRON 地址
         /// - `wechat_id`: 微信号
-        /// - `epay_no`: EPAY 商户号（可选）
-        /// - `epay_key`: EPAY 密钥（可选）
         ///
         /// # 返回
         /// - `DispatchResult`: 成功或错误
@@ -538,8 +671,6 @@ pub mod pallet {
             birthday: sp_std::vec::Vec<u8>,
             tron_address: sp_std::vec::Vec<u8>,
             wechat_id: sp_std::vec::Vec<u8>,
-            epay_no: Option<sp_std::vec::Vec<u8>>,
-            epay_key: Option<sp_std::vec::Vec<u8>>,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
             Self::do_submit_info(
@@ -549,8 +680,6 @@ pub mod pallet {
                 birthday,
                 tron_address,
                 wechat_id,
-                epay_no,
-                epay_key,
             )
         }
         
@@ -795,8 +924,6 @@ pub mod pallet {
                 masked_birthday: BoundedVec::default(),
                 masked_payment_info: BoundedVec::default(),
                 wechat_id: BoundedVec::default(),
-                epay_no: None,
-                epay_key_cid: None,
                 target_deposit_usd: T::TargetDepositUsd::get(), // 新增：目标USD价值
                 last_price_check: frame_system::Pallet::<T>::block_number(), // 新增：价格检查时间
                 deposit_warning: false, // 新增：警告状态
@@ -825,8 +952,6 @@ pub mod pallet {
         /// - birthday: 生日（格式：YYYY-MM-DD）
         /// - tron_address: TRON地址
         /// - wechat_id: 微信号
-        /// - epay_no: EPAY商户号（可选）
-        /// - epay_key: EPAY密钥（可选）
         /// 
         /// # 返回
         /// - DispatchResult
@@ -837,10 +962,8 @@ pub mod pallet {
             birthday: sp_std::vec::Vec<u8>,
             tron_address: sp_std::vec::Vec<u8>,
             wechat_id: sp_std::vec::Vec<u8>,
-            epay_no: Option<sp_std::vec::Vec<u8>>,
-            epay_key: Option<sp_std::vec::Vec<u8>>,
         ) -> DispatchResult {
-            use pallet_trading_common::{is_valid_tron_address, is_valid_epay_config};
+            use pallet_trading_common::is_valid_tron_address;
             use pallet_trading_common::{mask_name, mask_id_card, mask_birthday};
             
             // 获取做市商ID
@@ -861,12 +984,6 @@ pub mod pallet {
                 ensure!(
                     is_valid_tron_address(&tron_address),
                     Error::<T>::InvalidTronAddress
-                );
-                
-                // 验证 EPAY 配置
-                ensure!(
-                    is_valid_epay_config(&epay_no, &epay_key),
-                    Error::<T>::InvalidEpayConfig
                 );
                 
                 // 脱敏处理
@@ -894,13 +1011,24 @@ pub mod pallet {
                 app.wechat_id = BoundedVec::try_from(wechat_id)
                     .map_err(|_| Error::<T>::EncodingError)?;
                 
-                // 处理 EPAY 配置
-                if let Some(no) = epay_no {
-                    app.epay_no = Some(BoundedVec::try_from(no)
-                        .map_err(|_| Error::<T>::EncodingError)?);
+                // 🆕 P3: 自动 Pin 做市商资料到 IPFS（Standard 层级）
+                // 公开资料和私密资料都需要长期保存
+                if !app.public_cid.is_empty() {
+                    let _ = <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                        b"trading-maker".to_vec(),
+                        maker_id,
+                        app.public_cid.to_vec(),
+                        pallet_stardust_ipfs::PinTier::Standard,
+                    );
                 }
-                
-                // TODO: 将完整资料上传到 IPFS 并存储 CID
+                if !app.private_cid.is_empty() {
+                    let _ = <T::ContentRegistry as pallet_stardust_ipfs::ContentRegistry>::register_content(
+                        b"trading-maker".to_vec(),
+                        maker_id.saturating_add(1000000), // 私密资料使用偏移ID
+                        app.private_cid.to_vec(),
+                        pallet_stardust_ipfs::PinTier::Standard,
+                    );
+                }
                 
                 Ok(())
             })?;
@@ -1378,9 +1506,15 @@ pub mod pallet {
                     )?;
                 },
                 None => {
-                    // 转入国库或销毁
+                    // 转入国库账户
                     T::Currency::unreserve(&app.owner, deduct_dust);
-                    // TODO: 转入国库账户
+                    let treasury = T::TreasuryAccount::get();
+                    T::Currency::transfer(
+                        &app.owner,
+                        &treasury,
+                        deduct_dust,
+                        ExistenceRequirement::AllowDeath,
+                    )?;
                 }
             }
 
@@ -1503,10 +1637,167 @@ pub mod pallet {
         }
 
         /// 函数级详细中文注释：查询做市商是否需要补充押金
-        pub fn needs_deposit_replenishment(maker_id: u64) -> bool {
+        pub fn needs_deposit_replenishment(maker_id: u64) -> Result<bool, DispatchError> {
             Self::check_deposit_sufficiency(maker_id)
                 .map(|sufficient| !sufficient)
-                .unwrap_or(true)
+        }
+
+        /// 🆕 自动检查并补充做市商押金
+        ///
+        /// 从游标位置开始，检查 max_count 个活跃做市商的押金状态
+        /// 如果押金不足且做市商账户余额充足，自动触发补充
+        ///
+        /// # 参数
+        /// - `max_count`: 每次最多检查的做市商数量
+        ///
+        /// # 返回
+        /// - 消耗的权重
+        fn auto_check_and_replenish_deposits(max_count: u32) -> Weight {
+            let next_id = NextMakerId::<T>::get();
+            if next_id == 0 {
+                return Weight::from_parts(5_000, 0);
+            }
+
+            let mut cursor = DepositCheckCursor::<T>::get();
+            let mut checked_count = 0u32;
+            let mut replenished_count = 0u32;
+            let mut warning_count = 0u32;
+
+            // 从游标位置开始循环检查
+            for _ in 0..max_count {
+                // 跳过 maker_id = 0（无效）
+                if cursor == 0 {
+                    cursor = 1;
+                }
+
+                // 循环回到起点
+                if cursor >= next_id {
+                    cursor = 1;
+                }
+
+                // 获取做市商信息
+                if let Some(app) = MakerApplications::<T>::get(cursor) {
+                    // 只检查活跃的做市商
+                    if app.status == ApplicationStatus::Active {
+                        checked_count = checked_count.saturating_add(1);
+
+                        // 检查是否需要补充押金
+                        if let Ok(true) = Self::needs_deposit_replenishment(cursor) {
+                            // 尝试自动补充
+                            match Self::replenish_maker_deposit(cursor) {
+                                Ok(amount) if !amount.is_zero() => {
+                                    replenished_count = replenished_count.saturating_add(1);
+                                },
+                                _ => {
+                                    // 补充失败，发出警告
+                                    let _ = Self::trigger_deposit_replenishment_warning(cursor);
+                                    warning_count = warning_count.saturating_add(1);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                cursor = cursor.saturating_add(1);
+            }
+
+            // 更新游标
+            DepositCheckCursor::<T>::put(cursor);
+
+            // 发出检查完成事件
+            if checked_count > 0 {
+                Self::deposit_event(Event::DepositCheckCompleted {
+                    checked_count,
+                    insufficient_count: warning_count,
+                });
+            }
+
+            // 返回消耗的权重
+            Weight::from_parts(
+                (checked_count as u64) * 50_000 + (replenished_count as u64) * 100_000 + 10_000,
+                0
+            )
+        }
+
+        /// 🆕 归档旧惩罚记录
+        ///
+        /// 将超过 age_threshold 区块的惩罚记录从完整存储迁移到归档存储
+        ///
+        /// # 参数
+        /// - `now`: 当前区块号
+        /// - `max_count`: 每次最多归档的记录数
+        /// - `age_threshold`: 归档阈值（区块数，超过此时间的记录将被归档）
+        ///
+        /// # 返回
+        /// - 消耗的权重
+        fn archive_old_penalty_records(
+            now: BlockNumberFor<T>,
+            max_count: u32,
+            age_threshold: u32,
+        ) -> Weight {
+            let next_id = NextPenaltyId::<T>::get();
+            if next_id == 0 {
+                return Weight::from_parts(5_000, 0);
+            }
+
+            let mut cursor = PenaltyArchiveCursor::<T>::get();
+            let mut archived_count = 0u32;
+            let threshold_block = now.saturating_sub(age_threshold.into());
+
+            // 从游标位置开始检查
+            for _ in 0..max_count {
+                if cursor >= next_id {
+                    // 所有记录都已检查，重置游标
+                    cursor = 0;
+                    break;
+                }
+
+                // 获取惩罚记录
+                if let Some(record) = PenaltyRecords::<T>::get(cursor) {
+                    // 检查是否超过归档阈值
+                    if record.deducted_at < threshold_block {
+                        // 创建归档版本
+                        let archived = ArchivedPenaltyL2::from_full::<T>(cursor, &record);
+                        
+                        // 计算年月（简化：使用区块号除以每月区块数）
+                        let block_num: u32 = record.deducted_at.saturated_into();
+                        let year_month = block_num / (30 * 14400); // 约30天
+                        
+                        // 添加到归档存储
+                        ArchivedPenalties::<T>::mutate(year_month, |list| {
+                            let _ = list.try_push(archived);
+                        });
+                        
+                        // 删除完整记录
+                        PenaltyRecords::<T>::remove(cursor);
+                        
+                        // 从做市商的惩罚列表中移除
+                        MakerPenalties::<T>::mutate(record.maker_id, |ids| {
+                            ids.retain(|&id| id != cursor);
+                        });
+                        
+                        archived_count = archived_count.saturating_add(1);
+                        
+                        // 发出归档事件
+                        Self::deposit_event(Event::PenaltyArchived {
+                            penalty_id: cursor,
+                            maker_id: record.maker_id,
+                            year_month,
+                        });
+                    }
+                }
+
+                cursor = cursor.saturating_add(1);
+            }
+
+            // 更新游标
+            PenaltyArchiveCursor::<T>::put(cursor);
+
+            // 返回消耗的权重
+            Weight::from_parts(
+                (archived_count as u64) * 80_000 + 10_000,
+                0
+            )
         }
     }
 

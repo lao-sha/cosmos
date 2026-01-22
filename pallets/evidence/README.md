@@ -8,7 +8,7 @@
 
 - **CID 化设计（Phase 1.5）**：链上仅存储单一 `content_cid` 引用，实际内容存 IPFS，降低 74.5% 存储成本
 - **双模式支持**：Plain 模式适用于公开证据，Commit 模式适用于隐私保护场景（KYC、OTC 等）
-- **低耦合架构**：通过 trait 适配器（`EvidenceAuthorizer`、`FamilyVerifier`）实现模块间解耦
+- **低耦合架构**：通过 trait 适配器（`EvidenceAuthorizer`）实现模块间解耦
 - **自动化集成**：与 `pallet-stardust-ipfs` 集成，自动 pin 证据 CID 到 IPFS
 
 ### 核心特性
@@ -17,10 +17,10 @@
 - ✅ **双模式支持**：Plain 模式（公开证据）+ Commit 模式（承诺哈希）
 - ✅ **私密内容管理**：端到端加密、访问控制、密钥轮换、CID 去重
 - ✅ **IPFS 自动 Pin**：证据 CID 自动固定到 IPFS，确保内容持久化
-- ✅ **家庭关系验证**：基于 FamilyVerifier 的访问控制
 - ✅ **限频控制**：账户级 + 目标级双重限频，防止滥用
-- ✅ **CID 加密验证**：L-4 修复，除特殊场景外强制 CID 加密
-- ✅ **命名空间隔离**：支持多域证据管理（墓地、逝者、OTC、KYC 等）
+- ✅ **CID 加密验证**：L-4 修复，私密内容强制 CID 加密验证
+- ✅ **命名空间隔离**：支持多域证据管理（OTC、KYC 等）
+- ✅ **存储膨胀防护**：自动归档 90 天前的旧证据，存储降低约 75%
 
 ---
 
@@ -28,7 +28,7 @@
 
 ### 1. Plain 模式：公开证据提交
 
-#### `commit`（提交证据）
+#### `commit`（提交证据）- call_index(0)
 
 **调用方**：授权账户（通过 `EvidenceAuthorizer` 验证）
 
@@ -50,9 +50,9 @@
   "domain": 2,
   "target_id": 456,
   "content": {
-    "images": ["QmXxx1", "QmXxx2", ...],
-    "videos": ["QmYyy1", ...],
-    "documents": ["QmZzz1", ...],
+    "images": ["QmXxx1", "QmXxx2"],
+    "videos": ["QmYyy1"],
+    "documents": ["QmZzz1"],
     "memo": "可选文字说明"
   },
   "metadata": {
@@ -72,21 +72,22 @@
 1. 验证权限（EvidenceAuthorizer）
 2. 限频检查（账户级 + 目标级）
 3. 检查主体配额（MaxPerSubjectTarget）
-4. 验证 CID 格式、去重
+4. 验证 CID 格式、去重（使用 `media_utils::IpfsHelper`）
 5. 可选全局 CID 去重（EnableGlobalCidDedup）
 6. 生成 EvidenceId
-7. 打包内容到 IPFS，获取 content_cid
-8. 创建证据记录，存储到链上
-9. 自动 Pin content_cid 到 IPFS
-10. 触发 `EvidenceCommitted` 事件
+7. 创建证据记录，存储到链上
+8. 自动 Pin content_cid 到 IPFS（使用 `pin_cid_for_subject`）
+9. 触发 `EvidenceCommitted` 事件
 
 **函数签名**：
 
 ```rust
+#[pallet::call_index(0)]
+#[pallet::weight(T::WeightInfo::commit(imgs.len() as u32, vids.len() as u32, docs.len() as u32))]
 pub fn commit(
     origin: OriginFor<T>,
-    domain: u8,                                    // 域代码（1=Grave, 2=Deceased, ...）
-    target_id: u64,                                // 目标 ID（如 deceased_id）
+    domain: u8,                                    // 域代码（业务域标识）
+    target_id: u64,                                // 目标 ID（如 order_id）
     imgs: Vec<BoundedVec<u8, T::MaxCidLen>>,       // 图片 CID 列表
     vids: Vec<BoundedVec<u8, T::MaxCidLen>>,       // 视频 CID 列表
     docs: Vec<BoundedVec<u8, T::MaxCidLen>>,       // 文档 CID 列表
@@ -94,17 +95,11 @@ pub fn commit(
 ) -> DispatchResult
 ```
 
-**权重计算**：
-
-```rust
-#[pallet::weight(T::WeightInfo::commit(imgs.len() as u32, vids.len() as u32, docs.len() as u32))]
-```
-
 ---
 
 ### 2. Commit 模式：承诺哈希提交
 
-#### `commit_hash`（仅登记承诺哈希）
+#### `commit_hash`（仅登记承诺哈希）- call_index(1)
 
 **调用方**：授权账户
 
@@ -134,6 +129,8 @@ commit = blake2b256(ns || subject_id || cid_enc || salt || ver)
 **函数签名**：
 
 ```rust
+#[pallet::call_index(1)]
+#[pallet::weight(T::WeightInfo::commit_hash())]
 pub fn commit_hash(
     origin: OriginFor<T>,
     ns: [u8; 8],                                   // 8 字节命名空间（如 b"kyc_____", b"otc_ord_"）
@@ -156,20 +153,17 @@ pub fn commit_hash(
 
 ### 3. 证据链接/取消链接
 
-#### `link`（链接证据到目标）
+#### `link`（链接证据到目标）- call_index(2)
 
 **调用方**：授权账户
 
 **功能**：为目标链接已存在的证据（允许复用）。
 
-**使用场景**：
-- 多个墓地共享同一证据
-- 跨域证据复用
-- 证据关联管理
-
 **函数签名**：
 
 ```rust
+#[pallet::call_index(2)]
+#[pallet::weight(T::WeightInfo::link())]
 pub fn link(
     origin: OriginFor<T>,
     domain: u8,        // 域代码
@@ -178,15 +172,30 @@ pub fn link(
 ) -> DispatchResult
 ```
 
-#### `unlink`（取消链接）
+#### `link_by_ns`（按命名空间链接）- call_index(3)
+
+**功能**：V2 版本，按命名空间与主体链接证据。
+
+```rust
+#[pallet::call_index(3)]
+#[pallet::weight(T::WeightInfo::link_by_ns())]
+pub fn link_by_ns(
+    origin: OriginFor<T>,
+    ns: [u8; 8],       // 命名空间
+    subject_id: u64,   // 主体 ID
+    id: u64,           // 证据 ID
+) -> DispatchResult
+```
+
+#### `unlink`（取消链接）- call_index(4)
 
 **调用方**：授权账户
 
 **功能**：取消目标与证据的链接。
 
-**函数签名**：
-
 ```rust
+#[pallet::call_index(4)]
+#[pallet::weight(T::WeightInfo::unlink())]
 pub fn unlink(
     origin: OriginFor<T>,
     domain: u8,        // 域代码
@@ -195,20 +204,11 @@ pub fn unlink(
 ) -> DispatchResult
 ```
 
-#### `link_by_ns` / `unlink_by_ns`（按命名空间链接/取消链接）
-
-**功能**：V2 版本，按命名空间与主体链接/取消链接。
-
-**函数签名**：
+#### `unlink_by_ns`（按命名空间取消链接）- call_index(5)
 
 ```rust
-pub fn link_by_ns(
-    origin: OriginFor<T>,
-    ns: [u8; 8],       // 命名空间
-    subject_id: u64,   // 主体 ID
-    id: u64,           // 证据 ID
-) -> DispatchResult
-
+#[pallet::call_index(5)]
+#[pallet::weight(T::WeightInfo::unlink_by_ns())]
 pub fn unlink_by_ns(
     origin: OriginFor<T>,
     ns: [u8; 8],       // 命名空间
@@ -221,7 +221,7 @@ pub fn unlink_by_ns(
 
 ### 4. 私密内容管理
 
-#### `register_public_key`（注册用户公钥）
+#### `register_public_key`（注册用户公钥）- call_index(6)
 
 **调用方**：用户
 
@@ -238,6 +238,8 @@ pub fn unlink_by_ns(
 **函数签名**：
 
 ```rust
+#[pallet::call_index(6)]
+#[pallet::weight(10_000)]
 pub fn register_public_key(
     origin: OriginFor<T>,
     key_data: BoundedVec<u8, T::MaxKeyLen>,  // 公钥数据
@@ -245,7 +247,7 @@ pub fn register_public_key(
 ) -> DispatchResult
 ```
 
-#### `store_private_content`（存储私密内容）
+#### `store_private_content`（存储私密内容）- call_index(7)
 
 **调用方**：授权账户
 
@@ -254,14 +256,15 @@ pub fn register_public_key(
 **处理流程**：
 
 1. 验证权限（EvidenceAuthorizer）
-2. CID 去重检查（PrivateContentByCid）
-3. 验证创建者有加密密钥
-4. 验证所有授权用户已注册公钥
-5. 家庭成员访问策略验证（FamilyVerifier）
-6. 生成 content_id
-7. 创建私密内容记录
-8. 存储到链上
-9. 触发 `PrivateContentStored` 事件
+2. **CID 加密验证**（使用 `cid_validator::DefaultCidValidator::is_encrypted`）
+3. CID 格式验证（使用 `media_utils::IpfsHelper::validate_cid`）
+4. CID 去重检查（PrivateContentByCid）
+5. 验证创建者有加密密钥
+6. 验证所有授权用户已注册公钥
+7. 生成 content_id
+8. 创建私密内容记录
+9. 存储到链上
+10. 触发 `PrivateContentStored` 事件
 
 **访问策略类型**：
 
@@ -272,9 +275,6 @@ pub enum AccessPolicy<T: Config> {
 
     /// 指定用户列表
     SharedWith(AuthorizedUsers<T>),
-
-    /// 家庭成员（关联逝者ID）
-    FamilyMembers(u64),
 
     /// 定时访问（到期后自动撤销）
     TimeboxedAccess {
@@ -293,6 +293,8 @@ pub enum AccessPolicy<T: Config> {
 **函数签名**：
 
 ```rust
+#[pallet::call_index(7)]
+#[pallet::weight(10_000)]
 pub fn store_private_content(
     origin: OriginFor<T>,
     ns: [u8; 8],                                    // 命名空间
@@ -305,7 +307,7 @@ pub fn store_private_content(
 ) -> DispatchResult
 ```
 
-#### `grant_access`（授予访问权限）
+#### `grant_access`（授予访问权限）- call_index(8)
 
 **调用方**：创建者
 
@@ -314,6 +316,8 @@ pub fn store_private_content(
 **函数签名**：
 
 ```rust
+#[pallet::call_index(8)]
+#[pallet::weight(10_000)]
 pub fn grant_access(
     origin: OriginFor<T>,
     content_id: u64,                                // 内容 ID
@@ -322,7 +326,7 @@ pub fn grant_access(
 ) -> DispatchResult
 ```
 
-#### `revoke_access`（撤销访问权限）
+#### `revoke_access`（撤销访问权限）- call_index(9)
 
 **调用方**：创建者
 
@@ -333,6 +337,8 @@ pub fn grant_access(
 **函数签名**：
 
 ```rust
+#[pallet::call_index(9)]
+#[pallet::weight(10_000)]
 pub fn revoke_access(
     origin: OriginFor<T>,
     content_id: u64,       // 内容 ID
@@ -340,7 +346,7 @@ pub fn revoke_access(
 ) -> DispatchResult
 ```
 
-#### `rotate_content_keys`（轮换内容加密密钥）
+#### `rotate_content_keys`（轮换内容加密密钥）- call_index(10)
 
 **调用方**：创建者
 
@@ -354,11 +360,16 @@ pub fn revoke_access(
 **函数签名**：
 
 ```rust
+#[pallet::call_index(10)]
+#[pallet::weight(10_000)]
 pub fn rotate_content_keys(
     origin: OriginFor<T>,
-    content_id: u64,                                                              // 内容 ID
-    new_content_hash: H256,                                                       // 重新加密后的内容哈希
-    new_encrypted_keys: BoundedVec<(T::AccountId, BoundedVec<u8, ConstU32<512>>), T::MaxAuthorizedUsers>,  // 新的加密密钥包
+    content_id: u64,                                // 内容 ID
+    new_content_hash: H256,                         // 重新加密后的内容哈希
+    new_encrypted_keys: BoundedVec<
+        (T::AccountId, BoundedVec<u8, ConstU32<512>>),
+        T::MaxAuthorizedUsers
+    >,                                              // 新的加密密钥包
 ) -> DispatchResult
 ```
 
@@ -407,13 +418,11 @@ fn touch_window(who: &T::AccountId, now: BlockNumberFor<T>) -> Result<(), Error<
 
 #### 目标级配额
 
-**机制**：每个目标（如墓地、逝者）最多允许的证据数量
+**机制**：每个目标最多允许的证据数量
 
 **参数**：
 - `MaxPerSubjectTarget`: 每个目标最多证据数（Plain 模式）
 - `MaxPerSubjectNs`: 每个命名空间主体最多证据数（Commit 模式）
-
-**用途**：防止单个目标被刷证据
 
 ---
 
@@ -425,22 +434,21 @@ fn touch_window(who: &T::AccountId, now: BlockNumberFor<T>) -> Result<(), Error<
 
 **规则**：不允许重复 CID
 
-**实现**：
+**实现**（使用 `media_utils::IpfsHelper` 进行规范验证）：
 
 ```rust
 fn validate_cid_vec(list: &Vec<BoundedVec<u8, T::MaxCidLen>>) -> Result<(), Error<T>> {
     let mut set: BTreeSet<Vec<u8>> = BTreeSet::new();
     for cid in list.iter() {
-        // 检查 CID 格式
         if cid.is_empty() {
             return Err(Error::<T>::InvalidCidFormat);
         }
-        // 检查可见 ASCII（0x21..=0x7E）
-        for b in cid.iter() {
-            if *b < 0x21 || *b > 0x7E {
-                return Err(Error::<T>::InvalidCidFormat);
-            }
-        }
+        // 转换为字符串进行IPFS规范验证
+        let cid_str = core::str::from_utf8(cid.as_slice())
+            .map_err(|_| Error::<T>::InvalidCidFormat)?;
+        // 使用 media_utils 的 IpfsHelper 进行规范验证
+        IpfsHelper::validate_cid(cid_str)
+            .map_err(|_| Error::<T>::InvalidCidFormat)?;
         // 检查重复
         let v: Vec<u8> = cid.clone().into_inner();
         if !set.insert(v) {
@@ -460,26 +468,55 @@ fn validate_cid_vec(list: &Vec<BoundedVec<u8, T::MaxCidLen>>) -> Result<(), Erro
 - 检查 `CidHashIndex` 是否存在
 - 首次出现时写入索引
 
-**用途**：
-- Plain 模式：防止重复上传相同证据
-- 节省 IPFS 存储空间
+---
 
-**实现**：
+### 7. 存储膨胀防护：证据归档
+
+#### 自动归档机制
+
+**功能**：自动归档 90 天前的旧证据，将完整记录转换为精简摘要，释放链上存储。
+
+**归档条件**：
+- 证据创建时间超过 90 天（1,296,000 区块，按 6 秒/块计算）
+- 通过 `on_idle` hook 在空闲时间自动处理
+
+**存储优化效果**：
+
+| 指标 | 原始 Evidence | ArchivedEvidence | 节省 |
+|------|--------------|------------------|------|
+| 单条记录 | ~200 字节 | ~50 字节 | **75%** |
+| 1万条证据 | 2 MB | 500 KB | **1.5 MB** |
+
+**ArchivedEvidence 结构**：
 
 ```rust
-fn ensure_global_cid_unique(list_groups: [&Vec<BoundedVec<u8, T::MaxCidLen>>; 3]) -> Result<(), Error<T>> {
-    if !T::EnableGlobalCidDedup::get() {
-        return Ok(());
-    }
-    for list in list_groups.into_iter() {
-        for cid in list.iter() {
-            let h = H256::from(blake2_256(&cid.clone().into_inner()));
-            if CidHashIndex::<T>::get(h).is_some() {
-                return Err(Error::<T>::DuplicateCidGlobal);
-            }
-        }
-    }
-    Ok(())
+pub struct ArchivedEvidence {
+    /// 证据ID
+    pub id: u64,
+    /// 所属域
+    pub domain: u8,
+    /// 目标ID
+    pub target_id: u64,
+    /// 内容哈希摘要（blake2_256(content_cid)）
+    pub content_hash: H256,
+    /// 内容类型 (0=Image, 1=Video, 2=Document, 3=Mixed, 4=Text)
+    pub content_type: u8,
+    /// 创建时间（区块号）
+    pub created_at: u32,
+    /// 归档时间（区块号）
+    pub archived_at: u32,
+    /// 年月（YYMM格式，便于按月统计）
+    pub year_month: u16,
+}
+```
+
+**on_idle 处理逻辑**：
+
+```rust
+fn on_idle(_now: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
+    // 每次最多归档 10 条证据
+    let archived = Self::archive_old_evidences(10);
+    // ...
 }
 ```
 
@@ -494,10 +531,10 @@ pub struct Evidence<AccountId, BlockNumber, MaxContentCidLen, MaxSchemeLen> {
     /// 证据唯一 ID
     pub id: u64,
 
-    /// 所属域（0=Default, 1=Grave, 2=Deceased, ...）
+    /// 所属域（业务域标识）
     pub domain: u8,
 
-    /// 目标 ID（如 deceased_id）
+    /// 目标 ID（如 order_id）
     pub target_id: u64,
 
     /// 证据所有者
@@ -587,10 +624,7 @@ pub struct PrivateContent<T: Config> {
     pub access_policy: AccessPolicy<T>,
 
     /// 每个授权用户的加密密钥包
-    pub encrypted_keys: BoundedVec<
-        (T::AccountId, BoundedVec<u8, T::MaxKeyLen>),
-        T::MaxAuthorizedUsers
-    >,
+    pub encrypted_keys: EncryptedKeyBundles<T>,
 
     /// 创建时间
     pub created_at: BlockNumberFor<T>,
@@ -634,6 +668,30 @@ pub struct KeyRotationRecord<T: Config> {
 }
 ```
 
+### WindowInfo（限频窗口信息）
+
+```rust
+pub struct WindowInfo<BlockNumber> {
+    /// 窗口起始区块
+    pub window_start: BlockNumber,
+    /// 窗口内提交计数
+    pub count: u32,
+}
+```
+
+### ArchiveStatistics（归档统计）
+
+```rust
+pub struct ArchiveStatistics {
+    /// 已归档证据总数
+    pub total_archived: u64,
+    /// 释放的存储字节数（估算）
+    pub bytes_saved: u64,
+    /// 最后归档时间
+    pub last_archive_block: u32,
+}
+```
+
 ---
 
 ## 🗄️ 存储项
@@ -667,6 +725,14 @@ pub struct KeyRotationRecord<T: Config> {
 | `PrivateContentBySubject` | `StorageDoubleMap<([u8; 8], u64), u64, ()>` | 按主体索引私密内容（ns, subject_id → content_id） |
 | `UserPublicKeys` | `StorageMap<AccountId, UserPublicKey>` | 用户公钥存储 |
 | `KeyRotationHistory` | `StorageDoubleMap<u64, u32, KeyRotationRecord>` | 密钥轮换历史（content_id, rotation_round → record） |
+
+### 归档存储
+
+| 存储项 | 类型 | 说明 |
+|-------|------|-----|
+| `ArchivedEvidences` | `StorageMap<u64, ArchivedEvidence>` | 归档证据存储（精简摘要） |
+| `EvidenceArchiveCursor` | `StorageValue<u64>` | 归档游标（已扫描到的证据ID） |
+| `ArchiveStats` | `StorageValue<ArchiveStatistics>` | 归档统计信息 |
 
 ---
 
@@ -780,6 +846,17 @@ PublicKeyRegistered {
 }
 ```
 
+### 归档事件
+
+```rust
+/// 证据已归档
+EvidenceArchived {
+    id: u64,
+    domain: u8,
+    target_id: u64,
+}
+```
+
 ---
 
 ## ❌ 错误定义
@@ -809,9 +886,6 @@ pub enum Error<T> {
 
     /// 无效的加密密钥格式
     InvalidEncryptedKey,
-
-    /// 家庭关系验证失败
-    FamilyVerificationFailed,
 
     /// 密钥类型不支持
     UnsupportedKeyType,
@@ -852,6 +926,68 @@ pub enum Error<T> {
 
 ## ⚙️ 配置参数
 
+### Config Trait 定义
+
+```rust
+#[pallet::config]
+pub trait Config: frame_system::Config + TypeInfo + core::fmt::Debug {
+    type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
+    
+    // Phase 1.5优化：新的泛型参数（CID化版本）
+    /// 内容CID最大长度（IPFS CID，建议64字节）
+    #[pallet::constant]
+    type MaxContentCidLen: Get<u32>;
+    /// 加密方案描述最大长度（建议32字节）
+    #[pallet::constant]
+    type MaxSchemeLen: Get<u32>;
+    
+    // 旧版泛型参数（保留以向后兼容旧API）
+    #[pallet::constant]
+    type MaxCidLen: Get<u32>;
+    #[pallet::constant]
+    type MaxImg: Get<u32>;
+    #[pallet::constant]
+    type MaxVid: Get<u32>;
+    #[pallet::constant]
+    type MaxDoc: Get<u32>;
+    #[pallet::constant]
+    type MaxMemoLen: Get<u32>;
+    #[pallet::constant]
+    type MaxAuthorizedUsers: Get<u32>;
+    #[pallet::constant]
+    type MaxKeyLen: Get<u32>;
+    #[pallet::constant]
+    type EvidenceNsBytes: Get<[u8; 8]>;
+    
+    /// 授权验证器
+    type Authorizer: EvidenceAuthorizer<Self::AccountId>;
+    
+    #[pallet::constant]
+    type MaxPerSubjectTarget: Get<u32>;
+    #[pallet::constant]
+    type MaxPerSubjectNs: Get<u32>;
+    #[pallet::constant]
+    type WindowBlocks: Get<BlockNumberFor<Self>>;
+    #[pallet::constant]
+    type MaxPerWindow: Get<u32>;
+    #[pallet::constant]
+    type EnableGlobalCidDedup: Get<bool>;
+    #[pallet::constant]
+    type MaxListLen: Get<u32>;
+    
+    type WeightInfo: WeightInfo;
+    
+    // IPFS自动Pin相关配置
+    /// IPFS自动pin提供者
+    type IpfsPinner: pallet_stardust_ipfs::IpfsPinner<Self::AccountId, Self::Balance>;
+    /// 余额类型（用于IPFS存储费用支付）
+    type Balance: Parameter + Member + AtLeast32BitUnsigned + Default + Copy + MaxEncodedLen;
+    /// 默认IPFS存储单价（每副本每月）
+    #[pallet::constant]
+    type DefaultStoragePrice: Get<Self::Balance>;
+}
+```
+
 ### Runtime 配置示例
 
 ```rust
@@ -881,7 +1017,6 @@ impl pallet_evidence::Config for Runtime {
 
     // 授权与验证
     type Authorizer = AllowAllEvidenceAuthorizer;
-    type FamilyVerifier = FamilyVerifierAdapter;
 
     // 配额与限频
     type MaxPerSubjectTarget = ConstU32<10_000>;
@@ -932,6 +1067,129 @@ impl pallet_evidence::Config for Runtime {
 
 ---
 
+## 🔧 辅助函数
+
+### 承诺哈希计算与验证
+
+```rust
+/// 计算 Evidence 承诺哈希
+/// 使用 media_utils::HashHelper 计算标准格式的承诺哈希:
+/// H(ns || subject_id || cid || salt || version)
+pub fn compute_evidence_commitment(
+    ns: &[u8; 8],
+    subject_id: u64,
+    cid: &[u8],
+    salt: &[u8],
+    version: u32,
+) -> H256
+
+/// 验证承诺哈希是否正确
+pub fn verify_evidence_commitment(
+    ns: &[u8; 8],
+    subject_id: u64,
+    cid: &[u8],
+    salt: &[u8],
+    version: u32,
+    expected_commit: &H256,
+) -> bool
+
+/// 验证单个 CID 格式
+pub fn validate_single_cid(cid: &[u8]) -> Result<(), Error<T>>
+
+/// 验证内容完整性
+pub fn verify_content_integrity(content_data: &[u8], cid: &str) -> bool
+```
+
+### 私密内容查询
+
+```rust
+/// 检查用户是否有访问特定私密内容的权限
+pub fn can_access_private_content(content_id: u64, user: &T::AccountId) -> bool
+
+/// 获取用户的加密密钥包
+pub fn get_encrypted_key_for_user(
+    content_id: u64,
+    user: &T::AccountId,
+) -> Option<BoundedVec<u8, T::MaxKeyLen>>
+
+/// 通过CID查找私密内容
+pub fn get_private_content_by_cid(
+    cid: &BoundedVec<u8, T::MaxCidLen>,
+) -> Option<PrivateContent<T>>
+
+/// 获取主体下的所有私密内容ID
+pub fn get_private_content_ids_by_subject(ns: [u8; 8], subject_id: u64) -> Vec<u64>
+```
+
+### 证据查询
+
+```rust
+/// 按 (domain, target) 分页列出 evidence id
+pub fn list_ids_by_target(
+    domain: u8,
+    target_id: u64,
+    start_id: u64,
+    limit: u32,
+) -> Vec<u64>
+
+/// 按 (ns, subject_id) 分页列出 evidence id
+pub fn list_ids_by_ns(
+    ns: [u8; 8],
+    subject_id: u64,
+    start_id: u64,
+    limit: u32,
+) -> Vec<u64>
+
+/// 获取主体证据数量
+pub fn count_by_target(domain: u8, target_id: u64) -> u32
+pub fn count_by_ns(ns: [u8; 8], subject_id: u64) -> u32
+```
+
+### 归档函数
+
+```rust
+/// 归档旧证据（每次最多处理 max_count 条）
+/// 归档条件：证据创建时间超过 90 天（1_296_000 区块）
+pub fn archive_old_evidences(max_count: u32) -> u32
+```
+
+---
+
+## 🔗 Trait 定义
+
+### EvidenceAuthorizer（授权适配接口）
+
+```rust
+/// 授权适配接口：由 runtime 实现并桥接到 pallet-authorizer
+pub trait EvidenceAuthorizer<AccountId> {
+    /// 校验某账户是否在给定命名空间下被授权提交/链接证据
+    fn is_authorized(ns: [u8; 8], who: &AccountId) -> bool;
+}
+```
+
+### EvidenceProvider（只读查询接口）
+
+```rust
+/// 只读查询 trait：供其他 pallet 低耦合读取证据
+pub trait EvidenceProvider<AccountId> {
+    fn get(id: u64) -> Option<()>;
+}
+```
+
+### PrivateContentProvider（私密内容查询接口）
+
+```rust
+/// 私密内容查询接口：供其他 pallet 使用
+pub trait PrivateContentProvider<AccountId> {
+    /// 检查用户是否可以访问指定的私密内容
+    fn can_access(content_id: u64, user: &AccountId) -> bool;
+    /// 获取用户的解密密钥
+    fn get_decryption_key(content_id: u64, user: &AccountId) -> Option<Vec<u8>>;
+}
+```
+
+---
+
 ## 💻 使用示例
 
 ### Rust 代码示例
@@ -940,7 +1198,6 @@ impl pallet_evidence::Config for Runtime {
 
 ```rust
 use frame_support::dispatch::DispatchResult;
-use sp_runtime::traits::StaticLookup;
 
 // 准备图片 CID
 let img_cids = vec![
@@ -951,8 +1208,8 @@ let img_cids = vec![
 // 提交证据
 let result = Evidence::commit(
     RuntimeOrigin::signed(owner_account),
-    2,                  // domain: Deceased
-    deceased_id,        // target_id
+    1,                  // domain: OTC
+    order_id,           // target_id
     img_cids,           // imgs
     vec![],             // vids (空)
     vec![],             // docs (空)
@@ -963,8 +1220,8 @@ let result = Evidence::commit(
 System::assert_has_event(
     Event::Evidence(pallet_evidence::Event::EvidenceCommitted {
         id: evidence_id,
-        domain: 2,
-        target_id: deceased_id,
+        domain: 1,
+        target_id: order_id,
         owner: owner_account,
     })
 );
@@ -982,14 +1239,14 @@ let cid_enc = b"enc-QmEncryptedContent";
 let salt = b"random_salt_12345678";
 let ver = 1u32;
 
-let mut preimage = Vec::new();
-preimage.extend_from_slice(&ns);
-preimage.extend_from_slice(&subject_id.to_le_bytes());
-preimage.extend_from_slice(cid_enc);
-preimage.extend_from_slice(salt);
-preimage.extend_from_slice(&ver.to_le_bytes());
-
-let commit = H256::from(blake2_256(&preimage));
+// 使用模块提供的辅助函数计算承诺哈希
+let commit = Evidence::compute_evidence_commitment(
+    &ns,
+    subject_id,
+    cid_enc,
+    salt,
+    ver,
+);
 
 // 提交承诺哈希
 let result = Evidence::commit_hash(
@@ -999,23 +1256,11 @@ let result = Evidence::commit_hash(
     commit,
     None,  // memo (无)
 )?;
-
-// 监听事件
-System::assert_has_event(
-    Event::Evidence(pallet_evidence::Event::EvidenceCommittedV2 {
-        id: evidence_id,
-        ns,
-        subject_id,
-        owner: submitter,
-    })
-);
 ```
 
 #### 示例 3：注册公钥并存储私密内容
 
 ```rust
-use sp_core::crypto::Ss58Codec;
-
 // 步骤 1: 注册用户公钥
 let rsa_public_key = /* RSA-2048 公钥 DER 格式 */;
 let key_data = BoundedVec::try_from(rsa_public_key).unwrap();
@@ -1026,12 +1271,12 @@ Evidence::register_public_key(
     1,  // key_type: RSA-2048
 )?;
 
-// 步骤 2: 准备加密内容
+// 步骤 2: 准备加密内容（CID 必须带加密前缀）
 let encrypted_content_cid = BoundedVec::try_from(b"enc-QmEncryptedContent".to_vec()).unwrap();
 let content_hash = H256::from(blake2_256(b"original_content"));
 
-// 步骤 3: 准备访问策略（家庭成员）
-let access_policy = AccessPolicy::FamilyMembers(deceased_id);
+// 步骤 3: 准备访问策略（指定用户）
+let access_policy = AccessPolicy::SharedWith(authorized_users);
 
 // 步骤 4: 准备加密密钥包
 let encrypted_key = /* 使用用户公钥加密的 AES 密钥 */;
@@ -1042,25 +1287,14 @@ let encrypted_keys = BoundedVec::try_from(vec![
 // 步骤 5: 存储私密内容
 Evidence::store_private_content(
     RuntimeOrigin::signed(creator_account),
-    *b"priv_med",      // ns: 私密医疗记录
-    deceased_id,        // subject_id
+    *b"priv_otc",      // ns: OTC订单私密内容
+    order_id,           // subject_id
     encrypted_content_cid,
     content_hash,
     1,                  // encryption_method: AES256-GCM
     access_policy,
     encrypted_keys,
 )?;
-
-// 监听事件
-System::assert_has_event(
-    Event::Evidence(pallet_evidence::Event::PrivateContentStored {
-        content_id,
-        ns: *b"priv_med",
-        subject_id: deceased_id,
-        cid: encrypted_content_cid,
-        creator: creator_account,
-    })
-);
 ```
 
 #### 示例 4：授予和撤销访问权限
@@ -1102,15 +1336,6 @@ Evidence::rotate_content_keys(
     new_content_hash,
     new_encrypted_keys,
 )?;
-
-// 监听事件
-System::assert_has_event(
-    Event::Evidence(pallet_evidence::Event::KeysRotated {
-        content_id,
-        rotation_round: 1,
-        rotated_by: creator_account,
-    })
-);
 ```
 
 #### 示例 6：查询证据
@@ -1125,25 +1350,20 @@ println!("Is Encrypted: {}", evidence.is_encrypted);
 
 // 查询目标的所有证据 ID
 let evidence_ids = Evidence::list_ids_by_target(
-    2,              // domain: Deceased
-    deceased_id,    // target_id
+    1,              // domain: OTC
+    order_id,       // target_id
     0,              // start_id
     100,            // limit
 );
-println!("Evidence IDs: {:?}", evidence_ids);
 
 // 查询证据数量
-let count = Evidence::count_by_target(2, deceased_id);
-println!("Evidence count: {}", count);
+let count = Evidence::count_by_target(1, order_id);
 
 // 查询私密内容
 let private_content = Evidence::private_contents(content_id).unwrap();
-println!("Creator: {:?}", private_content.creator);
-println!("Access Policy: {:?}", private_content.access_policy);
 
 // 检查访问权限
 let can_access = Evidence::can_access_private_content(content_id, &user_account);
-println!("Can access: {}", can_access);
 
 // 获取加密密钥包
 if let Some(encrypted_key) = Evidence::get_encrypted_key_for_user(content_id, &user_account) {
@@ -1171,8 +1391,8 @@ const owner = keyring.addFromUri('//Alice');
 
 // 提交证据
 const commitTx = api.tx.evidence.commit(
-  2,                                   // domain: Deceased
-  deceasedId,                          // target_id
+  1,                                   // domain: OTC
+  orderId,                             // target_id
   ['QmImage1', 'QmImage2'],            // imgs
   [],                                  // vids
   [],                                  // docs
@@ -1187,7 +1407,7 @@ await commitTx.signAndSend(owner, ({ status, events }) => {
     events.forEach(({ event }) => {
       if (api.events.evidence.EvidenceCommitted.is(event)) {
         const [id, domain, targetId, ownerAccount] = event.data;
-        console.log(`Evidence committed: ID=${id.toNumber()}, Domain=${domain}, Target=${targetId}`);
+        console.log(`Evidence committed: ID=${id.toNumber()}`);
       }
     });
   }
@@ -1224,11 +1444,7 @@ const commitHashTx = api.tx.evidence.commitHash(
   null
 );
 
-await commitHashTx.signAndSend(submitter, ({ status }) => {
-  if (status.isInBlock) {
-    console.log(`Commit hash transaction in block`);
-  }
-});
+await commitHashTx.signAndSend(submitter);
 ```
 
 #### 示例 3：查询证据
@@ -1242,118 +1458,42 @@ if (evidence.isSome) {
   console.log('Content CID:', ev.contentCid.toUtf8());
   console.log('Content Type:', ev.contentType.toString());
   console.log('Is Encrypted:', ev.isEncrypted.toHuman());
-  console.log('Encryption Scheme:', ev.encryptionScheme.toHuman());
 }
 
 // 查询目标的所有证据
-const evidenceEntries = await api.query.evidence.evidenceByTarget.entries([2, deceasedId]);
+const evidenceEntries = await api.query.evidence.evidenceByTarget.entries([1, orderId]);
 const evidenceIds = evidenceEntries.map(([key, _]) => key.args[1].toNumber());
-console.log('Evidence IDs:', evidenceIds);
 
 // 查询证据数量
-const count = await api.query.evidence.evidenceCountByTarget([2, deceasedId]);
-console.log('Evidence count:', count.toNumber());
+const count = await api.query.evidence.evidenceCountByTarget([1, orderId]);
 ```
 
 #### 示例 4：注册公钥并存储私密内容
 
 ```typescript
-import { generateKeyPair } from 'crypto';
-import { promisify } from 'util';
-
-// 生成 RSA-2048 密钥对
-const generateKeyPairAsync = promisify(generateKeyPair);
-const { publicKey } = await generateKeyPairAsync('rsa', {
-  modulusLength: 2048,
-  publicKeyEncoding: { type: 'spki', format: 'der' },
-});
-
 // 注册公钥
 const registerKeyTx = api.tx.evidence.registerPublicKey(
-  Array.from(publicKey),
+  Array.from(publicKeyDer),
   1  // key_type: RSA-2048
 );
 await registerKeyTx.signAndSend(userAccount);
 
-// 存储私密内容
+// 存储私密内容（CID 必须带加密前缀）
 const storePrivateTx = api.tx.evidence.storePrivateContent(
-  [112, 114, 105, 118, 95, 109, 101, 100], // ns: "priv_med"
-  deceasedId,
-  'enc-QmEncryptedContent',
+  [112, 114, 105, 118, 95, 111, 116, 99], // ns: "priv_otc"
+  orderId,
+  'enc-QmEncryptedContent',  // 加密前缀
   contentHash,
   1,  // encryption_method: AES256-GCM
-  { FamilyMembers: deceasedId },  // access_policy
-  [
-    [userAccount.address, encryptedKeyBytes]
-  ]
+  { SharedWith: [userAccount.address] },
+  [[userAccount.address, encryptedKeyBytes]]
 );
 await storePrivateTx.signAndSend(creatorAccount);
-```
-
-#### 示例 5：授予和撤销访问权限
-
-```typescript
-// 授予访问权限
-const grantAccessTx = api.tx.evidence.grantAccess(
-  contentId,
-  newUserAccount.address,
-  encryptedKeyForNewUser
-);
-await grantAccessTx.signAndSend(creatorAccount);
-
-// 撤销访问权限
-const revokeAccessTx = api.tx.evidence.revokeAccess(
-  contentId,
-  oldUserAccount.address
-);
-await revokeAccessTx.signAndSend(creatorAccount);
 ```
 
 ---
 
 ## 🎯 Plain 模式 vs Commit 模式
-
-### Plain 模式（公开证据）
-
-**特点**：
-- 证据内容可查询（通过 content_cid）
-- 支持全局 CID 去重（可选）
-- 自动 Pin 到 IPFS
-- 适合公开透明场景
-
-**使用场景**：
-- 墓地照片证据
-- 逝者档案文档
-- 纪念馆供奉记录
-- 公开仲裁证据
-
-**调用方法**：`commit(domain, target_id, imgs, vids, docs, memo)`
-
-**存储索引**：`EvidenceByTarget<(domain, target_id), evidence_id>`
-
----
-
-### Commit 模式（承诺哈希）
-
-**特点**：
-- 链上只存储承诺哈希
-- 无法通过链上数据反推原始内容
-- 防止承诺哈希重复提交
-- 适合隐私保护场景
-
-**使用场景**：
-- KYC 身份认证证据
-- OTC 订单交易证据
-- 隐私医疗记录
-- 敏感仲裁证据
-
-**调用方法**：`commit_hash(ns, subject_id, commit, memo)`
-
-**存储索引**：
-- `EvidenceByNs<(ns, subject_id), evidence_id>`
-- `CommitIndex<commit_hash, evidence_id>`（防重）
-
----
 
 ### 对比表
 
@@ -1361,13 +1501,13 @@ await revokeAccessTx.signAndSend(creatorAccount);
 |-----|----------|------------|
 | **链上存储** | content_cid（可查询） | commit_hash（不可逆） |
 | **隐私保护** | 低（内容可查） | 高（仅承诺哈希） |
-| **CID 去重** | 支持（可选） | 不适用 |
+| **CID 去重** | 支持（CidHashIndex） | 不支持 |
 | **IPFS Pin** | 自动 Pin | 不 Pin（无 CID） |
 | **防重机制** | CidHashIndex | CommitIndex |
 | **查询索引** | EvidenceByTarget | EvidenceByNs |
 | **配额参数** | MaxPerSubjectTarget | MaxPerSubjectNs |
 | **适用场景** | 公开证据 | 隐私证据 |
-| **典型用途** | 墓地照片、纪念馆记录 | KYC、OTC、医疗记录 |
+| **典型用途** | 订单证据、公开记录 | KYC、OTC、医疗记录 |
 
 ---
 
@@ -1388,17 +1528,10 @@ await revokeAccessTx.signAndSend(creatorAccount);
 ```
 创建者 → 生成随机 AES 密钥（256-bit）
        → 使用 AES 加密原始内容
-       → 上传加密内容到 IPFS → 获得 CID
+       → 上传加密内容到 IPFS → 获得 CID（必须带加密前缀）
        → 为每个授权用户用其公钥加密 AES 密钥
        → 提交到链上（store_private_content）
 ```
-
-**链上存储**：
-- 加密内容 CID
-- 内容哈希（用于完整性验证）
-- 加密方法标识（1=AES256-GCM）
-- 访问策略
-- 每个用户的加密密钥包
 
 #### 3. 用户访问私密内容
 
@@ -1412,217 +1545,13 @@ await revokeAccessTx.signAndSend(creatorAccount);
 
 ### 访问控制策略
 
-#### OwnerOnly（仅创建者）
-
-```rust
-AccessPolicy::OwnerOnly
-```
-
-**适用场景**：个人私密日记、遗嘱草稿
-
----
-
-#### SharedWith（指定用户列表）
-
-```rust
-AccessPolicy::SharedWith(vec![user1, user2, user3])
-```
-
-**适用场景**：与特定用户分享的照片、家庭文档
-
----
-
-#### FamilyMembers（家庭成员）
-
-```rust
-AccessPolicy::FamilyMembers(deceased_id)
-```
-
-**验证逻辑**：
-```rust
-T::FamilyVerifier::is_family_member(&user, deceased_id)
-```
-
-**适用场景**：逝者的医疗记录、家庭照片、遗嘱
-
----
-
-#### TimeboxedAccess（限时访问）
-
-```rust
-AccessPolicy::TimeboxedAccess {
-    users: vec![user1, user2],
-    expires_at: block_number + 1000,  // 1000 个块后过期
-}
-```
-
-**适用场景**：临时分享、限时查看权限
-
----
-
-#### GovernanceControlled（治理控制）
-
-```rust
-AccessPolicy::GovernanceControlled
-```
-
-**适用场景**：仲裁证据、法律文档（需要治理投票才能访问）
-
----
-
-#### RoleBased（基于角色）
-
-```rust
-AccessPolicy::RoleBased(b"admin".to_vec())
-```
-
-**适用场景**：企业文档、组织内部资料
-
----
-
-### 密钥轮换机制
-
-**触发场景**：
-- 用户公钥泄露
-- 定期安全维护
-- 调整授权用户列表
-
-**轮换流程**：
-
-```
-创建者 → 生成新的 AES 密钥
-       → 使用新密钥重新加密内容
-       → 上传新加密内容到 IPFS → 获得新 CID
-       → 为所有用户用新密钥生成新的加密密钥包
-       → 调用 rotate_content_keys
-       → 链上记录轮换历史（KeyRotationHistory）
-```
-
-**轮换历史**：
-
-```rust
-KeyRotationRecord {
-    content_id: 123,
-    rotation_round: 2,  // 第 2 次轮换
-    rotated_at: block_number,
-    rotated_by: creator_account,
-}
-```
-
----
-
-## 🛡️ 访问控制策略
-
-### 权限检查逻辑
-
-```rust
-pub fn can_access_private_content(content_id: u64, user: &T::AccountId) -> bool {
-    if let Some(content) = PrivateContents::<T>::get(content_id) {
-        // 1. 检查是否是创建者
-        if &content.creator == user {
-            return true;
-        }
-
-        // 2. 检查访问策略
-        match &content.access_policy {
-            AccessPolicy::OwnerOnly => false,
-
-            AccessPolicy::SharedWith(users) => {
-                users.iter().any(|u| u == user)
-            }
-
-            AccessPolicy::FamilyMembers(deceased_id) => {
-                T::FamilyVerifier::is_family_member(user, *deceased_id)
-            }
-
-            AccessPolicy::TimeboxedAccess { users, expires_at } => {
-                let now = <frame_system::Pallet<T>>::block_number();
-                now <= *expires_at && users.iter().any(|u| u == user)
-            }
-
-            AccessPolicy::GovernanceControlled => {
-                // TODO: 实现治理权限检查
-                false
-            }
-
-            AccessPolicy::RoleBased(_role) => {
-                // TODO: 实现基于角色的权限检查
-                false
-            }
-        }
-    } else {
-        false
-    }
-}
-```
-
-### 授权管理最佳实践
-
-#### 1. 最小权限原则
-
-只授予必要的用户访问权限，避免过度授权。
-
-```rust
-// 好的做法：只授予直系亲属
-AccessPolicy::SharedWith(vec![spouse, child1, child2])
-
-// 不好的做法：授予所有联系人
-AccessPolicy::SharedWith(all_contacts)  // ❌
-```
-
-#### 2. 定期审查权限
-
-定期检查授权用户列表，撤销不必要的权限。
-
-```typescript
-// 查询私密内容
-const content = await api.query.evidence.privateContents(contentId);
-
-// 检查授权用户
-const authorizedUsers = content.unwrap().encryptedKeys.map(([user, _]) => user.toString());
-console.log('Authorized users:', authorizedUsers);
-
-// 撤销不再需要的权限
-for (const user of usersToRevoke) {
-  await api.tx.evidence.revokeAccess(contentId, user).signAndSend(creator);
-}
-```
-
-#### 3. 使用限时访问
-
-对于临时分享，使用 `TimeboxedAccess` 策略。
-
-```rust
-AccessPolicy::TimeboxedAccess {
-    users: vec![temp_user],
-    expires_at: current_block + 1000,  // 约 100 分钟后过期（6s/块）
-}
-```
-
-#### 4. 密钥轮换
-
-定期轮换密钥，或在用户公钥泄露时立即轮换。
-
-```typescript
-// 每 3 个月轮换一次
-const rotationInterval = 30 * 24 * 60 * 10;  // 30 天，每块 6s
-
-if (blocksSinceLastRotation >= rotationInterval) {
-  // 重新加密内容
-  const newEncryptedContent = await reEncryptContent(content);
-  const newContentHash = blake2AsHex(newEncryptedContent);
-
-  // 为所有用户生成新的密钥包
-  const newEncryptedKeys = await generateNewKeyBundles(authorizedUsers);
-
-  // 轮换密钥
-  await api.tx.evidence.rotateContentKeys(
-    contentId,
-    newContentHash,
-    newEncryptedKeys
-  ).signAndSend(creator);
-}
-```
+| 策略 | 说明 | 适用场景 |
+|-----|------|---------|
+| `OwnerOnly` | 仅创建者可访问 | 个人私密日记、遗嘱草稿 |
+| `SharedWith` | 指定用户列表 | 与特定用户分享的照片、家庭文档 |
+| `TimeboxedAccess` | 限时访问 | 临时分享、限时查看权限 |
+| `GovernanceControlled` | 治理控制 | 仲裁证据、法律文档 |
+| `RoleBased` | 基于角色 | 企业文档、组织内部资料 |
 
 ---
 
@@ -1633,13 +1562,14 @@ if (blocksSinceLastRotation >= rotationInterval) {
 **自动 Pin 机制**：
 
 ```rust
-// 证据提交时自动 Pin
+// 证据提交时自动 Pin（使用 pin_cid_for_subject）
 let cid_vec: Vec<u8> = ev.content_cid.clone().into_inner();
-if let Err(e) = T::IpfsPinner::pin_cid_for_deceased(
+if let Err(e) = T::IpfsPinner::pin_cid_for_subject(
     who.clone(),
-    deceased_id_u64,
+    pallet_stardust_ipfs::SubjectType::Evidence,
+    id,  // 使用 evidence_id
     cid_vec,
-    None,  // 使用默认 Standard 层级（3 副本）
+    None,  // 使用默认层级
 ) {
     log::warn!(
         target: "evidence",
@@ -1650,124 +1580,35 @@ if let Err(e) = T::IpfsPinner::pin_cid_for_deceased(
 }
 ```
 
-**配置示例**：
+### 与 media_utils 集成
+
+**CID 验证**：
 
 ```rust
-impl pallet_evidence::Config for Runtime {
-    type IpfsPinner = StardustIpfs;
-    type Balance = Balance;
-    type DefaultStoragePrice = ConstU128<1_000_000_000_000>;  // 1 DUST/副本/月
-}
+// 使用 media_utils::IpfsHelper 进行 CID 格式验证
+let cid_str = core::str::from_utf8(cid.as_slice())
+    .map_err(|_| Error::<T>::InvalidCidFormat)?;
+IpfsHelper::validate_cid(cid_str)
+    .map_err(|_| Error::<T>::InvalidCidFormat)?;
 ```
 
----
-
-### 与 pallet-deceased 集成
-
-**家庭关系验证**：
+**承诺哈希计算**：
 
 ```rust
-// FamilyVerifier trait 实现
-pub struct FamilyVerifierAdapter;
-
-impl pallet_evidence::FamilyRelationVerifier<AccountId> for FamilyVerifierAdapter {
-    fn is_family_member(user: &AccountId, deceased_id: u64) -> bool {
-        // 调用 pallet-deceased 的家庭关系检查
-        if let Some(deceased) = Deceased::deceased_records(deceased_id) {
-            deceased.family_members.contains(user)
-        } else {
-            false
-        }
-    }
-
-    fn is_authorized_for_deceased(user: &AccountId, deceased_id: u64) -> bool {
-        // 检查是否是创建者或管理员
-        if let Some(deceased) = Deceased::deceased_records(deceased_id) {
-            &deceased.creator == user || deceased.admins.contains(user)
-        } else {
-            false
-        }
-    }
-}
+// 使用 media_utils::HashHelper 计算承诺哈希
+let commit = HashHelper::evidence_commitment(ns, subject_id, cid, salt, version);
 ```
 
-**配置示例**：
+### 与 cid_validator 模块集成
+
+**私密内容 CID 加密验证**（L-4 修复）：
 
 ```rust
-impl pallet_evidence::Config for Runtime {
-    type FamilyVerifier = FamilyVerifierAdapter;
-}
-```
-
----
-
-### 与 pallet-arbitration 集成
-
-**仲裁证据提交**：
-
-```rust
-// 仲裁案件证据（Commit 模式）
-pub fn submit_arbitration_evidence(
-    origin: OriginFor<T>,
-    case_id: u64,
-    evidence_commit: H256,
-) -> DispatchResult {
-    let submitter = ensure_signed(origin)?;
-
-    // 提交证据承诺哈希
-    Evidence::commit_hash(
-        origin,
-        *b"arb_case",  // ns: 仲裁案件
-        case_id,       // subject_id
-        evidence_commit,
-        None,
-    )?;
-
-    // 记录到仲裁案件
-    ArbitrationCases::<T>::mutate(case_id, |case| {
-        if let Some(c) = case {
-            c.evidence_ids.push(evidence_id);
-        }
-    });
-
-    Ok(())
-}
-```
-
----
-
-### 与 pallet-otc-order 集成
-
-**OTC 订单证据（Commit 模式）**：
-
-```rust
-// OTC 订单支付证据
-pub fn submit_payment_proof(
-    origin: OriginFor<T>,
-    order_id: u64,
-    payment_proof_commit: H256,
-) -> DispatchResult {
-    let buyer = ensure_signed(origin)?;
-
-    // 提交支付证据承诺哈希
-    Evidence::commit_hash(
-        origin,
-        *b"otc_ord_",  // ns: OTC 订单
-        order_id,      // subject_id
-        payment_proof_commit,
-        None,
-    )?;
-
-    // 更新订单状态
-    OtcOrders::<T>::mutate(order_id, |order| {
-        if let Some(o) = order {
-            o.payment_proof_id = Some(evidence_id);
-            o.status = OrderStatus::PendingVerification;
-        }
-    });
-
-    Ok(())
-}
+// 私密内容必须使用加密 CID
+ensure!(
+    crate::cid_validator::DefaultCidValidator::is_encrypted(cid_bytes),
+    Error::<T>::InvalidCidFormat
+);
 ```
 
 ---
@@ -1788,13 +1629,11 @@ pub fn submit_payment_proof(
 - ✅ 链下验证需求
 - ❌ 需要链上查询内容
 
----
-
 ### 2. CID 格式规范
 
 **格式要求**：
 - 非空
-- 全部为可见 ASCII（0x21..=0x7E）
+- 符合 IPFS CID 规范（使用 `media_utils::IpfsHelper` 验证）
 - 无重复（同次提交）
 
 **推荐格式**：
@@ -1804,15 +1643,13 @@ bafxxx... (IPFS CIDv1)
 bagxxx... (IPFS CIDv1 base32)
 ```
 
-**加密 CID 前缀**（L-4 修复）：
+**加密 CID 前缀**（私密内容必须）：
 ```
 enc-QmXxx...       (通用加密前缀)
 sealed-bafxxx...   (密封加密)
 priv-bagxxx...     (私有加密)
 encrypted-cidxxx   (完整单词前缀)
 ```
-
----
 
 ### 3. 限频策略建议
 
@@ -1822,47 +1659,11 @@ encrypted-cidxxx   (完整单词前缀)
 - 管理员：不限制（或极高限额）
 
 **目标级配额**：
-- 普通墓地：最多 100 条证据
-- 高级墓地：最多 1000 条证据
-- 纪念馆：最多 10000 条证据
+- 普通目标：最多 100 条证据
+- 高级目标：最多 1000 条证据
+- 特殊目标：最多 10000 条证据
 
----
-
-### 4. IPFS 存储优化
-
-**Phase 1.5 CID 化设计**：
-- ✅ 链上只存储 content_cid（64 字节）
-- ✅ 实际内容存 IPFS（JSON 格式）
-- ✅ 降低 74.5% 存储成本
-
-**IPFS JSON 结构**：
-```json
-{
-  "version": "1.0",
-  "evidence_id": 123,
-  "domain": 2,
-  "target_id": 456,
-  "content": {
-    "images": ["QmXxx1", "QmXxx2"],
-    "videos": ["QmYyy1"],
-    "documents": ["QmZzz1"],
-    "memo": "证据说明"
-  },
-  "metadata": {
-    "created_at": 1234567890,
-    "owner": "5GrwvaEF...",
-    "encryption": {
-      "enabled": true,
-      "scheme": "aes256-gcm",
-      "key_bundles": {...}
-    }
-  }
-}
-```
-
----
-
-### 5. 私密内容安全建议
+### 4. 私密内容安全建议
 
 **密钥管理**：
 - ✅ 使用强随机数生成器生成 AES 密钥
@@ -1876,15 +1677,7 @@ encrypted-cidxxx   (完整单词前缀)
 - ✅ 使用限时访问（临时分享）
 - ❌ 避免过度授权
 
-**加密方法**：
-- ✅ 优先使用 AES-256-GCM（加密+认证）
-- ✅ 或使用 XChaCha20-Poly1305（高性能）
-- ✅ 验证内容哈希（完整性检查）
-- ❌ 不要使用弱加密算法（如 DES、RC4）
-
----
-
-### 6. 错误处理
+### 5. 错误处理
 
 **常见错误及解决方案**：
 
@@ -1895,51 +1688,17 @@ encrypted-cidxxx   (完整单词前缀)
 | `TooManyForSubject` | 配额超限 | 清理旧证据或扩大配额 |
 | `DuplicateCid` | CID 重复 | 检查提交的 CID 列表 |
 | `DuplicateCidGlobal` | 全局 CID 重复 | 关闭全局去重或使用新 CID |
-| `InvalidCidFormat` | CID 格式错误 | 检查 CID 格式（非空、可见 ASCII） |
+| `InvalidCidFormat` | CID 格式错误 | 检查 CID 格式（IPFS 规范） |
 | `CommitAlreadyExists` | 承诺哈希重复 | 修改 salt 或 ver 重新计算 |
 | `PublicKeyNotRegistered` | 用户未注册公钥 | 先调用 register_public_key |
 | `AccessDenied` | 无权访问 | 联系创建者授予权限 |
-| `FamilyVerificationFailed` | 家庭关系验证失败 | 检查 FamilyVerifier 配置 |
 
 ---
 
-### 7. 性能优化建议
+## 🧪 测试建议
 
-**查询优化**：
-```rust
-// ❌ 不好的做法：遍历所有证据
-let all_evidences = Evidences::<T>::iter().collect::<Vec<_>>();
+### 单元测试
 
-// ✅ 好的做法：使用索引查询
-let evidence_ids = Evidence::list_ids_by_target(domain, target_id, 0, 100);
-```
-
-**批量操作**：
-```typescript
-// ❌ 不好的做法：逐个提交
-for (const cid of cids) {
-  await api.tx.evidence.commit(domain, targetId, [cid], [], [], null).signAndSend(owner);
-}
-
-// ✅ 好的做法：批量提交
-await api.tx.evidence.commit(domain, targetId, cids, [], [], null).signAndSend(owner);
-```
-
-**限制查询范围**：
-```typescript
-// ❌ 不好的做法：查询所有证据
-const allEvidences = await api.query.evidence.evidenceByTarget.entries([domain, targetId]);
-
-// ✅ 好的做法：分页查询
-const page1 = await api.rpc.evidence.listIdsByTarget(domain, targetId, 0, 100);
-const page2 = await api.rpc.evidence.listIdsByTarget(domain, targetId, 100, 100);
-```
-
----
-
-### 8. 测试建议
-
-**单元测试**：
 ```rust
 #[test]
 fn test_commit_evidence() {
@@ -1977,23 +1736,68 @@ fn test_commit_evidence() {
         assert!(Evidence::evidences(0).is_some());
     });
 }
+
+#[test]
+fn test_commit_hash() {
+    new_test_ext().execute_with(|| {
+        let submitter = 1;
+        let ns = *b"test_ns_";
+        let subject_id = 100;
+        let commit = H256::from([1u8; 32]);
+
+        assert_ok!(Evidence::commit_hash(
+            RuntimeOrigin::signed(submitter),
+            ns,
+            subject_id,
+            commit,
+            None,
+        ));
+
+        // 验证承诺索引
+        assert_eq!(CommitIndex::<Test>::get(commit), Some(0));
+    });
+}
+
+#[test]
+fn test_private_content_access() {
+    new_test_ext().execute_with(|| {
+        // 注册公钥
+        let user = 1;
+        let key_data = vec![0u8; 32]; // Ed25519 公钥
+        assert_ok!(Evidence::register_public_key(
+            RuntimeOrigin::signed(user),
+            BoundedVec::try_from(key_data).unwrap(),
+            2, // Ed25519
+        ));
+
+        // 存储私密内容
+        // ...
+
+        // 验证访问权限
+        assert!(Evidence::can_access_private_content(0, &user));
+    });
+}
 ```
 
-**集成测试**：
+### 集成测试
+
 ```typescript
 describe('Evidence Pallet', () => {
   it('should commit evidence and auto-pin to IPFS', async () => {
     // 提交证据
-    const tx = api.tx.evidence.commit(2, deceasedId, ['QmImage1'], [], [], null);
+    const tx = api.tx.evidence.commit(1, orderId, ['QmImage1'], [], [], null);
     await tx.signAndSend(owner);
 
     // 验证证据已创建
     const evidence = await api.query.evidence.evidences(0);
     expect(evidence.isSome).toBe(true);
+  });
 
-    // 验证 IPFS 自动 Pin
-    const pinStatus = await api.query.stardustIpfs.pinRecords('QmImage1');
-    expect(pinStatus.isSome).toBe(true);
+  it('should archive old evidences', async () => {
+    // 等待归档条件满足（90天）
+    // 验证归档统计
+    const stats = await api.query.evidence.archiveStats();
+    expect(stats.totalArchived.toNumber()).toBeGreaterThan(0);
   });
 });
 ```
@@ -2009,40 +1813,17 @@ describe('Evidence Pallet', () => {
 **待完成**：
 1. ✅ 定义 Evidence 结构（content_cid, content_type, is_encrypted, encryption_scheme）
 2. ⏳ 实现 IPFS JSON 打包功能
-   - 前端打包：imgs/vids/docs → JSON → IPFS → content_cid
-   - 链端接收：content_cid（64 字节）
 3. ⏳ 实现 IPFS JSON 解析功能
-   - 前端查询：content_cid → IPFS → JSON → 解析 imgs/vids/docs
-4. ⏳ 更新自动 Pin 逻辑
-   - Pin content_cid 本身
-   - 解析 JSON，Pin 所有媒体 CID
+4. ⏳ 更新自动 Pin 逻辑（Pin content_cid 及其包含的所有媒体 CID）
 5. ⏳ 前端 UI 适配
-   - 上传流程：选择文件 → 上传 IPFS → 打包 JSON → 提交 content_cid
-   - 查看流程：查询 content_cid → 下载 JSON → 解析并展示
-
----
 
 ### 潜在改进方向
 
-1. **zkSNARK 零知识证明**
-   - 证明拥有证据但不公开内容
-   - 适用于 KYC、合规检查
-
-2. **多签授权**
-   - 多个管理员共同管理私密内容
-   - 适用于企业文档、遗产管理
-
-3. **链上治理集成**
-   - 通过投票决定访问权限
-   - 适用于敏感仲裁证据
-
-4. **跨链证据验证**
-   - 支持跨链证据互认
-   - 适用于多链生态
-
-5. **AI 内容审核**
-   - 自动检测违规内容
-   - 保护平台合规性
+1. **zkSNARK 零知识证明**：证明拥有证据但不公开内容
+2. **多签授权**：多个管理员共同管理私密内容
+3. **链上治理集成**：通过投票决定访问权限
+4. **跨链证据验证**：支持跨链证据互认
+5. **AI 内容审核**：自动检测违规内容
 
 ---
 
@@ -2051,8 +1832,6 @@ describe('Evidence Pallet', () => {
 - [Polkadot SDK 文档](https://docs.substrate.io/)
 - [IPFS 文档](https://docs.ipfs.tech/)
 - [pallet-stardust-ipfs README](../stardust-ipfs/README.md)
-- [pallet-deceased README](../deceased/README.md)
-- [pallet-arbitration README](../arbitration/README.md)
 - [Stardust 项目总览](../../README.md)
 
 ---
@@ -2082,6 +1861,6 @@ Unlicense
 
 ---
 
-**最后更新**：2025-11-11
-**版本**：v0.1.0
+**最后更新**：2025-01-15
+**版本**：v0.2.0
 **维护者**：Stardust Team
