@@ -364,12 +364,6 @@ impl frame_support::traits::Randomness<Hash, BlockNumber> for CollectiveFlipRand
 	}
 }
 
-parameter_types! {
-	pub const StorageDepositPerKb: u128 = UNIT / 10;
-	pub const MinStorageDeposit: u128 = UNIT / 100;
-	pub const MaxStorageDeposit: u128 = 100 * UNIT;
-}
-
 impl pallet_meihua::Config for Runtime {
 	type Currency = Balances;
 	type Randomness = CollectiveFlipRandomness;
@@ -380,9 +374,6 @@ impl pallet_meihua::Config for Runtime {
 	type AiInterpretationFee = ConstU128<UNIT>;
 	type TreasuryAccount = TreasuryAccountId;
 	type AiOracleOrigin = frame_system::EnsureRoot<AccountId>;
-	type StorageDepositPerKb = StorageDepositPerKb;
-	type MinStorageDeposit = MinStorageDeposit;
-	type MaxStorageDeposit = MaxStorageDeposit;
 }
 
 // -------------------- Bazi (八字) --------------------
@@ -443,9 +434,6 @@ impl pallet_bazi_chart::Config for Runtime {
 	type MaxDaYunSteps = ConstU32<12>;
 	type MaxCangGan = ConstU32<3>;
 	type Currency = Balances;
-	type StorageDepositPerKb = StorageDepositPerKb;
-	type MinStorageDeposit = MinStorageDeposit;
-	type MaxStorageDeposit = MaxStorageDeposit;
 	type PrivacyProvider = BaziPrivacyProvider;
 }
 
@@ -460,9 +448,6 @@ impl pallet_liuyao::Config for Runtime {
 	type MaxDailyGuas = ConstU32<100>;
 	type MaxCidLen = ConstU32<64>;
 	type MaxEncryptedLen = ConstU32<512>;
-	type StorageDepositPerKb = StorageDepositPerKb;
-	type MinStorageDeposit = MinStorageDeposit;
-	type MaxStorageDeposit = MaxStorageDeposit;
 }
 
 // -------------------- Qimen (奇门遁甲) --------------------
@@ -479,9 +464,6 @@ impl pallet_qimen::Config for Runtime {
 	type AiOracleOrigin = frame_system::EnsureRoot<AccountId>;
 	type MaxCidLen = ConstU32<64>;
 	type MaxEncryptedLen = ConstU32<512>;
-	type StorageDepositPerKb = StorageDepositPerKb;
-	type MinStorageDeposit = MinStorageDeposit;
-	type MaxStorageDeposit = MaxStorageDeposit;
 }
 
 // -------------------- Ziwei (紫微斗数) --------------------
@@ -498,9 +480,6 @@ impl pallet_ziwei::Config for Runtime {
 	type AiOracleOrigin = frame_system::EnsureRoot<AccountId>;
 	type MaxCidLen = ConstU32<64>;
 	type MaxEncryptedLen = ConstU32<512>;
-	type StorageDepositPerKb = StorageDepositPerKb;
-	type MinStorageDeposit = MinStorageDeposit;
-	type MaxStorageDeposit = MaxStorageDeposit;
 }
 
 // -------------------- Xiaoliuren (小六壬) --------------------
@@ -517,9 +496,6 @@ impl pallet_xiaoliuren::Config for Runtime {
 	type AiInterpretationFee = ConstU128<UNIT>;
 	type TreasuryAccount = TreasuryAccountId;
 	type AiOracleOrigin = frame_system::EnsureRoot<AccountId>;
-	type StorageDepositPerKb = StorageDepositPerKb;
-	type MinStorageDeposit = MinStorageDeposit;
-	type MaxStorageDeposit = MaxStorageDeposit;
 }
 
 // -------------------- Daliuren (大六壬) --------------------
@@ -534,9 +510,6 @@ impl pallet_daliuren::Config for Runtime {
 	type AiInterpretationFee = ConstU128<UNIT>;
 	type AiSubmitter = frame_system::EnsureSigned<AccountId>;
 	type WeightInfo = ();
-	type StorageDepositPerKb = StorageDepositPerKb;
-	type MinStorageDeposit = MinStorageDeposit;
-	type MaxStorageDeposit = MaxStorageDeposit;
 }
 
 // -------------------- Tarot (塔罗牌) --------------------
@@ -552,9 +525,6 @@ impl pallet_tarot::Config for Runtime {
 	type AiInterpretationFee = ConstU128<UNIT>;
 	type TreasuryAccount = TreasuryAccountId;
 	type AiOracleOrigin = frame_system::EnsureRoot<AccountId>;
-	type StorageDepositPerKb = StorageDepositPerKb;
-	type MinStorageDeposit = MinStorageDeposit;
-	type MaxStorageDeposit = MaxStorageDeposit;
 }
 
 // ============================================================================

@@ -32,6 +32,9 @@ pallet-almanac = { path = "../almanac", default-features = false }
 # 隐私授权模块
 pallet-divination-privacy = { path = "../privacy", default-features = false }
 
+# OCW-TEE 模块
+pallet-divination-ocw-tee = { path = "../ocw-tee", default-features = false }
+
 # 可选依赖
 serde = { workspace = true, optional = true, features = ["derive"] }
 
@@ -55,6 +58,7 @@ std = [
     "pallet-divination-common/std",
     "pallet-almanac/std",
     "pallet-divination-privacy/std",
+    "pallet-divination-ocw-tee/std",
     "serde/std",
 ]
 runtime-benchmarks = [

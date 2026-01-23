@@ -943,3 +943,182 @@ pub fn calculate_xiang_gui(gua_shen: DiZhi) -> [DiZhi; 2] {
 
     result
 }
+
+// ============================================================================
+// OCW-TEE 集成辅助函数
+// ============================================================================
+
+/// 从数字生成六爻（OCW-TEE 用）
+pub fn generate_yao_from_number(num: u32) -> [u8; 6] {
+    let mut result = [1u8; 6]; // 默认少阳
+    for i in 0..6 {
+        let byte = ((num >> (i * 4)) & 0x0F) as u8;
+        result[i] = byte % 4; // 0-3: 老阴、少阳、少阴、老阳
+    }
+    result
+}
+
+/// 从时间生成六爻（OCW-TEE 用）
+pub fn generate_yao_from_time(year: u16, month: u8, day: u8, hour: u8) -> [u8; 6] {
+    // 简化实现：使用时间参数生成六爻
+    let seed = (year as u32) * 10000 + (month as u32) * 100 + (day as u32);
+    let mut result = [1u8; 6];
+    for i in 0..6 {
+        let val = ((seed >> (i * 3)) + (hour as u32) + (i as u32)) % 4;
+        result[i] = val as u8;
+    }
+    result
+}
+
+/// 从六爻值计算卦象（OCW-TEE 用）
+/// 
+/// # 参数
+/// - `yao_values`: 六爻数据，每个值 0-3
+///   - 0: 老阴（变）
+///   - 1: 少阳
+///   - 2: 少阴
+///   - 3: 老阳（变）
+///
+/// # 返回
+/// (本卦上卦, 本卦下卦, 变卦上卦, 变卦下卦, 动爻掩码)
+pub fn calculate_gua_from_yao(yao_values: &[u8; 6]) -> (u8, u8, u8, u8, u8) {
+    let mut ben_inner: u8 = 0;
+    let mut ben_outer: u8 = 0;
+    let mut bian_inner: u8 = 0;
+    let mut bian_outer: u8 = 0;
+    let mut dong_mask: u8 = 0;
+
+    for i in 0..6 {
+        let is_yang = yao_values[i] == 1 || yao_values[i] == 3; // 少阳或老阳
+        let is_moving = yao_values[i] == 0 || yao_values[i] == 3; // 老阴或老阳
+
+        // 本卦
+        let ben_bit = if is_yang { 1 } else { 0 };
+        // 变卦（动爻变化）
+        let bian_bit = if is_moving { 1 - ben_bit } else { ben_bit };
+
+        if i < 3 {
+            ben_inner |= ben_bit << i;
+            bian_inner |= bian_bit << i;
+        } else {
+            ben_outer |= ben_bit << (i - 3);
+            bian_outer |= bian_bit << (i - 3);
+        }
+
+        if is_moving {
+            dong_mask |= 1 << i;
+        }
+    }
+
+    // 二进制转八卦索引
+    let ben_xia = binary_to_trigram_index(ben_inner);
+    let ben_shang = binary_to_trigram_index(ben_outer);
+    let bian_xia = binary_to_trigram_index(bian_inner);
+    let bian_shang = binary_to_trigram_index(bian_outer);
+
+    (ben_shang, ben_xia, bian_shang, bian_xia, dong_mask)
+}
+
+/// 二进制转八卦索引
+fn binary_to_trigram_index(bin: u8) -> u8 {
+    // 先天八卦二进制到索引映射
+    // 乾(111)=0, 兑(110)=1, 离(101)=2, 震(100)=3
+    // 巽(011)=4, 坎(010)=5, 艮(001)=6, 坤(000)=7
+    match bin & 0x07 {
+        0b111 => 0, // 乾
+        0b110 => 1, // 兑
+        0b101 => 2, // 离
+        0b100 => 3, // 震
+        0b011 => 4, // 巽
+        0b010 => 5, // 坎
+        0b001 => 6, // 艮
+        0b000 => 7, // 坤
+        _ => 7,
+    }
+}
+
+/// 计算世应位置（OCW-TEE 用）
+/// 
+/// # 返回
+/// (世爻位置, 应爻位置, 卦宫索引)
+pub fn calculate_shi_ying(shang: u8, xia: u8) -> (u8, u8, u8) {
+    let inner = Trigram::from_index(xia);
+    let outer = Trigram::from_index(shang);
+    let (gua_xu, gong) = calculate_shi_ying_gong(inner, outer);
+    
+    let shi = gua_xu.shi_yao_pos();
+    let ying = gua_xu.ying_yao_pos();
+    
+    (shi, ying, gong.index())
+}
+
+/// 计算纳甲数据（OCW-TEE 用）
+/// 
+/// # 返回
+/// 六爻纳甲数据 [[天干索引, 地支索引, 六亲索引]; 6]
+pub fn calculate_najia_data(shang: u8, xia: u8, gong: u8) -> [[u8; 3]; 6] {
+    let inner = Trigram::from_index(xia);
+    let outer = Trigram::from_index(shang);
+    let gong_trigram = Trigram::from_index(gong);
+    let gong_wx = gong_trigram.wu_xing();
+
+    let mut result = [[0u8; 3]; 6];
+
+    // 内卦（初爻到三爻）
+    for i in 0..3 {
+        let (gan, zhi) = get_inner_najia(inner, i as u8);
+        let yao_wx = zhi.wu_xing();
+        let liu_qin = calculate_liu_qin_from_wx(gong_wx, yao_wx);
+        result[i] = [gan.index(), zhi.index(), liu_qin as u8];
+    }
+
+    // 外卦（四爻到上爻）
+    for i in 0..3 {
+        let (gan, zhi) = get_outer_najia(outer, i as u8);
+        let yao_wx = zhi.wu_xing();
+        let liu_qin = calculate_liu_qin_from_wx(gong_wx, yao_wx);
+        result[i + 3] = [gan.index(), zhi.index(), liu_qin as u8];
+    }
+
+    result
+}
+
+/// 计算六亲（从五行）
+fn calculate_liu_qin_from_wx(gong_wx: WuXing, yao_wx: WuXing) -> LiuQin {
+    if gong_wx == yao_wx {
+        LiuQin::XiongDi
+    } else if gong_wx.generates() == yao_wx {
+        LiuQin::ZiSun
+    } else if yao_wx.generates() == gong_wx {
+        LiuQin::FuMu
+    } else if gong_wx.restrains() == yao_wx {
+        LiuQin::QiCai
+    } else {
+        LiuQin::GuanGui
+    }
+}
+
+/// 计算六神（OCW-TEE 用）
+/// 
+/// # 返回
+/// 六神索引数组 [6]
+pub fn calculate_liu_shen_u8(day_gan: u8) -> [u8; 6] {
+    let gan = TianGan::from_index(day_gan);
+    let liu_shen = calculate_liu_shen(gan);
+    let mut result = [0u8; 6];
+    for i in 0..6 {
+        result[i] = liu_shen[i] as u8;
+    }
+    result
+}
+
+/// 计算旬空（OCW-TEE 用）
+/// 
+/// # 返回
+/// 旬空地支索引 [2]
+pub fn calculate_xun_kong_u8(day_gan: u8, day_zhi: u8) -> [u8; 2] {
+    let gan = TianGan::from_index(day_gan);
+    let zhi = DiZhi::from_index(day_zhi);
+    let (kong1, kong2) = calculate_xun_kong(gan, zhi);
+    [kong1.index(), kong2.index()]
+}

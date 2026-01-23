@@ -1021,6 +1021,64 @@ MIT-0 License
 
 ---
 
+## 架构迁移说明
+
+### TEE 架构迁移 (v1.1.0)
+
+自 v1.1.0 起，加密相关功能已迁移至 `pallet-divination-ocw-tee` 和 `pallet-divination-privacy` 模块，采用 TEE (可信执行环境) 架构统一管理。
+
+#### 迁移的存储
+
+| 原存储 | 迁移至 | 说明 |
+|--------|--------|------|
+| `EncryptedChartById` | `ocw-tee::CompletedResults` | 加密八字存储 |
+| `UserEncryptedCharts` | `ocw-tee::UserRequests` | 用户加密八字索引 |
+| `EncryptedData` | IPFS 加密清单 | 加密敏感数据 |
+| `OwnerKeyBackup` | TEE 内部处理 | 密钥备份 |
+
+#### 迁移的事件
+
+| 原事件 | 迁移至 | 说明 |
+|--------|--------|------|
+| `EncryptedBaziChartCreated` | `ocw-tee::RequestCreated` | 加密八字创建 |
+| `EncryptedBaziChartDeleted` | `ocw-tee::RequestCancelled` | 加密八字删除 |
+| `BaziChartCreatedWithPrivacy` | `ocw-tee::ResultStored` | 隐私模式创建 |
+| `EncryptedDataUpdated` | `ocw-tee::DivinationUpdated` | 加密数据更新 |
+
+#### 迁移的错误
+
+| 原错误 | 迁移至 | 说明 |
+|--------|--------|------|
+| `EncryptedDataTooLong` | `ocw-tee::InputDataTooLong` | 加密数据过长 |
+| `EncryptedChartNotFound` | `ocw-tee::RequestNotFound` | 加密八字不存在 |
+| `InvalidPrivacyMode` | `ocw-tee::InvalidPrivacyMode` | 无效隐私模式 |
+| `EncryptedDataRequired` | `ocw-tee::UserPubkeyRequired` | 需要加密数据 |
+
+#### 迁移的 Extrinsics
+
+| 原接口 | 迁移至 | 说明 |
+|--------|--------|------|
+| `create_encrypted_chart` | `ocw-tee::create_encrypted_request` | 创建加密八字 |
+| `delete_encrypted_chart` | `ocw-tee::cancel_request` | 删除加密八字 |
+| `create_bazi_chart_encrypted` | `ocw-tee::create_encrypted_request` | 加密模式创建 |
+| `update_encrypted_data` | `ocw-tee::update_divination` | 更新加密数据 |
+
+#### 迁移的 Runtime API
+
+| 原 API | 迁移至 | 说明 |
+|--------|--------|------|
+| `get_encrypted_chart_interpretation` | 通过 `SiZhuIndex` 调用 `calculate_interpretation_from_index` | 加密八字解盘 |
+| `encrypted_chart_exists` | `ocw-tee::completed_results` | 检查加密八字存在 |
+| `get_encrypted_chart_owner` | `ocw-tee::completed_results` | 获取加密八字所有者 |
+
+#### 多方授权迁移
+
+多方授权相关功能已迁移至 `pallet-divination-privacy`：
+- `get_user_encryption_key` → `Privacy::get_user_public_key()`
+- `get_service_provider_json` → `Privacy::get_provider_info()`
+
+---
+
 ## 致谢
 
 感谢以下开源项目和社区的贡献：

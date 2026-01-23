@@ -238,6 +238,20 @@ impl WuXing {
             WuXing::Tu => (7, Some(8)),    // 艮7、坤8
         }
     }
+
+    /// 从卦数获取五行
+    /// 
+    /// 乾1、兑2属金，离3属火，震4、巽5属木，坎6属水，艮7、坤8属土
+    pub fn from_gua_num(num: u8) -> Self {
+        match num {
+            1 | 2 => WuXing::Jin,  // 乾、兑属金
+            3 => WuXing::Huo,      // 离属火
+            4 | 5 => WuXing::Mu,   // 震、巽属木
+            6 => WuXing::Shui,     // 坎属水
+            7 | 8 => WuXing::Tu,   // 艮、坤属土
+            _ => WuXing::Tu,       // 默认土
+        }
+    }
 }
 
 /// 季节枚举

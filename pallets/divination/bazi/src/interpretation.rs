@@ -1652,6 +1652,37 @@ pub fn build_full_bazi_chart_for_api<T: crate::pallet::Config>(
     }
 }
 
+/// 构建完整命盘用于 API 返回（从四柱索引）
+///
+/// Phase 10 优化：支持从精简存储的 SiZhuIndex 构建完整命盘。
+///
+/// # 参数
+/// - `sizhu_index`: 四柱索引
+/// - `gender`: 性别
+/// - `birth_year`: 出生年份
+/// - `input_calendar_type`: 输入日历类型
+pub fn build_full_bazi_chart_for_api_from_index(
+    sizhu_index: &crate::types::SiZhuIndex,
+    gender: Gender,
+    birth_year: u16,
+    input_calendar_type: crate::types::InputCalendarType,
+) -> FullBaziChartForApi {
+    let year_ganzhi = sizhu_index.year_ganzhi();
+    let month_ganzhi = sizhu_index.month_ganzhi();
+    let day_ganzhi = sizhu_index.day_ganzhi();
+    let hour_ganzhi = sizhu_index.hour_ganzhi();
+
+    build_full_bazi_chart_for_api_temp(
+        year_ganzhi,
+        month_ganzhi,
+        day_ganzhi,
+        hour_ganzhi,
+        gender,
+        birth_year,
+        input_calendar_type,
+    )
+}
+
 /// 构建完整命盘用于 API 返回（从临时计算的四柱）
 ///
 /// # 参数

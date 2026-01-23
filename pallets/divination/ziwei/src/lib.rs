@@ -43,6 +43,7 @@
 
 pub mod algorithm;
 pub mod interpretation;
+pub mod ocw_tee;
 pub mod runtime_api;
 pub mod types;
 
@@ -122,21 +123,6 @@ pub mod pallet {
         #[pallet::constant]
         type MaxEncryptedLen: Get<u32>;
 
-        // ================================
-        // 存储押金相关配置
-        // ================================
-
-        /// 每 KB 存储押金基础费率
-        #[pallet::constant]
-        type StorageDepositPerKb: Get<u128>;
-
-        /// 最小存储押金
-        #[pallet::constant]
-        type MinStorageDeposit: Get<u128>;
-
-        /// 最大存储押金
-        #[pallet::constant]
-        type MaxStorageDeposit: Get<u128>;
     }
 
     // ========================================================================
@@ -223,19 +209,6 @@ pub mod pallet {
         [u8; 80],
     >;
 
-    /// 存储押金记录
-    ///
-    /// 键：命盘记录 ID
-    /// 值：押金记录（金额、创建区块、数据大小、隐私模式）
-    #[pallet::storage]
-    #[pallet::getter(fn deposit_records)]
-    pub type DepositRecords<T: Config> = StorageMap<
-        _,
-        Blake2_128Concat,
-        u64,
-        pallet_divination_common::deposit::DepositRecord<BalanceOf<T>, BlockNumberFor<T>>,
-    >;
-
     // ========================================================================
     // 事件
     // ========================================================================
@@ -286,22 +259,6 @@ pub mod pallet {
             chart_id: u64,
             owner: T::AccountId,
         },
-        /// 存储押金已锁定
-        /// [命盘ID, 所有者, 押金金额, 隐私模式]
-        StorageDepositLocked {
-            chart_id: u64,
-            owner: T::AccountId,
-            deposit: BalanceOf<T>,
-            privacy_mode: u8,
-        },
-        /// 存储押金已返还
-        /// [命盘ID, 所有者, 返还金额, 国库金额]
-        StorageDepositRefunded {
-            chart_id: u64,
-            owner: T::AccountId,
-            refund: BalanceOf<T>,
-            treasury: BalanceOf<T>,
-        },
     }
 
     // ========================================================================
@@ -344,10 +301,6 @@ pub mod pallet {
         EncryptedDataTooLong,
         /// 加密数据不存在
         EncryptedDataNotFound,
-        /// 押金余额不足
-        InsufficientDepositBalance,
-        /// 押金记录未找到
-        DepositRecordNotFound,
     }
 
     // ========================================================================
@@ -1062,11 +1015,7 @@ pub mod pallet {
                 .ok_or(Error::<T>::ChartNotFound)?;
             ensure!(chart.creator == who, Error::<T>::NotChartOwner);
 
-            // 2. 返还押金（如果有押金记录）
-            let (refund, treasury) = Self::unreserve_storage_deposit(&who, chart_id)
-                .unwrap_or((BalanceOf::<T>::zero(), BalanceOf::<T>::zero()));
-
-            // 3. 从用户索引中移除
+            // 2. 从用户索引中移除
             UserCharts::<T>::mutate(&who, |charts| {
                 charts.retain(|&id| id != chart_id);
             });
@@ -1095,21 +1044,11 @@ pub mod pallet {
             // 9. 删除主命盘记录
             Charts::<T>::remove(chart_id);
 
-            // 10. 发送删除事件
+            // 8. 发送删除事件
             Self::deposit_event(Event::ChartDeleted {
                 chart_id,
-                owner: who.clone(),
+                owner: who,
             });
-
-            // 11. 发送押金返还事件（如果有押金）
-            if !refund.is_zero() || !treasury.is_zero() {
-                Self::deposit_event(Event::StorageDepositRefunded {
-                    chart_id,
-                    owner: who,
-                    refund,
-                    treasury,
-                });
-            }
 
             Ok(())
         }
@@ -1309,164 +1248,4 @@ pub mod pallet {
         }
     }
 
-    // ========================================================================
-    // 存储押金管理辅助函数
-    // ========================================================================
-
-    impl<T: Config> Pallet<T>
-    where
-        BalanceOf<T>: From<u32> + sp_runtime::traits::Saturating + core::ops::Div<Output = BalanceOf<T>> + sp_runtime::traits::Zero + PartialOrd + Copy,
-        BlockNumberFor<T>: From<u32> + sp_runtime::traits::Saturating + PartialOrd + Copy,
-    {
-        /// 计算存储押金
-        ///
-        /// 根据数据大小和隐私模式计算押金金额
-        ///
-        /// # 公式
-        /// ```text
-        /// 押金 = 基础费率 × ceil(数据大小 / 1024) × 隐私模式系数 / 100
-        /// ```
-        ///
-        /// # 参数
-        /// - `data_size`: 数据大小（字节）
-        /// - `privacy_mode`: 隐私模式
-        ///
-        /// # 返回
-        /// 押金金额（已限制在最小/最大范围内）
-        pub fn calculate_deposit(data_size: u32, privacy_mode: pallet_divination_common::deposit::PrivacyMode) -> BalanceOf<T> {
-            use sp_runtime::SaturatedConversion;
-
-            // 计算 KB 数（向上取整）
-            let size_kb = (data_size.saturating_add(1023)) / 1024;
-            let size_kb = if size_kb == 0 { 1 } else { size_kb };
-
-            // 获取隐私模式系数
-            let multiplier = privacy_mode.multiplier();
-
-            // 获取配置值（u128 类型）
-            let base_rate = T::StorageDepositPerKb::get();
-            let min_deposit = T::MinStorageDeposit::get();
-            let max_deposit = T::MaxStorageDeposit::get();
-
-            // 计算押金（u128）
-            let deposit_u128 = base_rate
-                .saturating_mul(size_kb as u128)
-                .saturating_mul(multiplier as u128)
-                / 100u128;
-
-            // 限制在最小/最大范围内
-            let clamped = if deposit_u128 < min_deposit {
-                min_deposit
-            } else if deposit_u128 > max_deposit {
-                max_deposit
-            } else {
-                deposit_u128
-            };
-
-            // 转换为 BalanceOf<T>
-            clamped.saturated_into()
-        }
-
-        /// 锁定存储押金
-        ///
-        /// 从用户余额中锁定存储押金
-        ///
-        /// # 参数
-        /// - `who`: 用户账户
-        /// - `chart_id`: 命盘记录 ID
-        /// - `data_size`: 数据大小（字节）
-        /// - `privacy_mode`: 隐私模式
-        ///
-        /// # 返回
-        /// - `Ok(押金金额)`: 锁定成功
-        /// - `Err`: 余额不足或其他错误
-        pub fn reserve_storage_deposit(
-            who: &T::AccountId,
-            chart_id: u64,
-            data_size: u32,
-            privacy_mode: pallet_divination_common::deposit::PrivacyMode,
-        ) -> Result<BalanceOf<T>, DispatchError> {
-            // 1. 计算押金
-            let deposit_amount = Self::calculate_deposit(data_size, privacy_mode);
-
-            // 2. 锁定押金
-            <T::Currency as ReservableCurrency<T::AccountId>>::reserve(
-                who,
-                deposit_amount,
-            ).map_err(|_| Error::<T>::InsufficientDepositBalance)?;
-
-            // 3. 记录押金信息
-            let current_block = <frame_system::Pallet<T>>::block_number();
-            let record = pallet_divination_common::deposit::DepositRecord {
-                amount: deposit_amount,
-                created_at: current_block,
-                data_size,
-                privacy_mode,
-            };
-            DepositRecords::<T>::insert(chart_id, record);
-
-            Ok(deposit_amount)
-        }
-
-        /// 返还存储押金
-        ///
-        /// 根据存储时长计算返还比例并释放押金
-        ///
-        /// # 参数
-        /// - `who`: 用户账户
-        /// - `chart_id`: 命盘记录 ID
-        ///
-        /// # 返回
-        /// - `Ok((返还金额, 国库金额))`: 返还成功
-        /// - `Err`: 押金记录不存在
-        pub fn unreserve_storage_deposit(
-            who: &T::AccountId,
-            chart_id: u64,
-        ) -> Result<(BalanceOf<T>, BalanceOf<T>), DispatchError> {
-            // 1. 获取押金记录
-            let record = DepositRecords::<T>::take(chart_id)
-                .ok_or(Error::<T>::DepositRecordNotFound)?;
-
-            // 2. 计算返还金额
-            let current_block = <frame_system::Pallet<T>>::block_number();
-            let (refund_amount, treasury_amount) = pallet_divination_common::deposit::calculate_refund_amount(
-                record.amount,
-                record.created_at,
-                current_block,
-            );
-
-            // 3. 释放押金（返还给用户）
-            let actually_unreserved = <T::Currency as ReservableCurrency<T::AccountId>>::unreserve(
-                who,
-                refund_amount,
-            );
-
-            // 4. 释放进入国库的部分（简化实现：直接释放）
-            if !treasury_amount.is_zero() {
-                let _ = <T::Currency as ReservableCurrency<T::AccountId>>::unreserve(
-                    who,
-                    treasury_amount,
-                );
-            }
-
-            // 返回实际返还和国库金额
-            Ok((refund_amount.saturating_sub(refund_amount.saturating_sub(actually_unreserved)), treasury_amount))
-        }
-
-        /// 估算特定隐私模式的押金
-        ///
-        /// 用于前端预估费用显示
-        ///
-        /// # 参数
-        /// - `privacy_mode`: 隐私模式 (0=Public, 1=Partial, 2=Private)
-        ///
-        /// # 返回
-        /// 估算的押金金额
-        pub fn estimate_deposit(privacy_mode: u8) -> Option<BalanceOf<T>> {
-            let mode = pallet_divination_common::deposit::PrivacyMode::from_u8(privacy_mode)?;
-            // 紫微斗数命盘数据估算大小: 1000 bytes（最复杂的占卜类型之一）
-            let data_size = pallet_divination_common::deposit::estimate_data_size(3, mode); // 3 = Ziwei
-            Some(Self::calculate_deposit(data_size, mode))
-        }
-    }
 }

@@ -6542,6 +6542,7 @@ dependencies = [
  "pallet-almanac",
  "pallet-balances",
  "pallet-divination-common",
+ "pallet-divination-ocw-tee",
  "pallet-divination-privacy",
  "parity-scale-codec",
  "scale-info",
@@ -6682,6 +6683,7 @@ dependencies = [
  "pallet-almanac",
  "pallet-balances",
  "pallet-divination-common",
+ "pallet-divination-ocw-tee",
  "pallet-divination-privacy",
  "pallet-timestamp",
  "parity-scale-codec",
@@ -6689,6 +6691,7 @@ dependencies = [
  "sp-core 39.0.0",
  "sp-io 44.0.0",
  "sp-runtime 45.0.0",
+ "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -6759,6 +6762,26 @@ dependencies = [
  "pallet-timestamp",
  "parity-scale-codec",
  "scale-info",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+ "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "pallet-divination-ocw-tee"
+version = "0.1.0"
+dependencies = [
+ "frame-support 45.0.0",
+ "frame-system 45.0.0",
+ "hex",
+ "log",
+ "pallet-divination-common",
+ "pallet-stardust-ipfs",
+ "pallet-tee-privacy",
+ "parity-scale-codec",
+ "scale-info",
+ "serde",
  "sp-core 39.0.0",
  "sp-io 44.0.0",
  "sp-runtime 45.0.0",
@@ -6856,6 +6879,7 @@ dependencies = [
  "pallet-almanac",
  "pallet-balances",
  "pallet-divination-common",
+ "pallet-divination-ocw-tee",
  "pallet-divination-privacy",
  "pallet-timestamp",
  "parity-scale-codec",
@@ -6896,6 +6920,7 @@ dependencies = [
  "pallet-almanac",
  "pallet-balances",
  "pallet-divination-common",
+ "pallet-divination-ocw-tee",
  "pallet-divination-privacy",
  "pallet-timestamp",
  "parity-scale-codec",
@@ -6984,6 +7009,7 @@ dependencies = [
  "pallet-almanac",
  "pallet-balances",
  "pallet-divination-common",
+ "pallet-divination-ocw-tee",
  "pallet-divination-privacy",
  "pallet-timestamp",
  "parity-scale-codec",
@@ -7117,6 +7143,7 @@ dependencies = [
  "frame-system 45.0.0",
  "pallet-balances",
  "pallet-divination-common",
+ "pallet-divination-ocw-tee",
  "pallet-divination-privacy",
  "pallet-insecure-randomness-collective-flip",
  "pallet-timestamp",
@@ -7336,6 +7363,7 @@ dependencies = [
  "pallet-almanac",
  "pallet-balances",
  "pallet-divination-common",
+ "pallet-divination-ocw-tee",
  "pallet-divination-privacy",
  "pallet-timestamp",
  "parity-scale-codec",
@@ -7358,6 +7386,7 @@ dependencies = [
  "pallet-almanac",
  "pallet-balances",
  "pallet-divination-common",
+ "pallet-divination-ocw-tee",
  "pallet-divination-privacy",
  "pallet-timestamp",
  "parity-scale-codec",

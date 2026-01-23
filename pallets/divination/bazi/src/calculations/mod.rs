@@ -25,7 +25,7 @@ pub mod true_solar_time;
 
 // 重新导出核心函数
 pub use ganzhi::*;
-pub use sizhu::{calculate_day_ganzhi, calculate_year_ganzhi, calculate_year_ganzhi_with_hour, calculate_month_ganzhi, calculate_month_ganzhi_with_hour, calculate_hour_ganzhi};
+pub use sizhu::{calculate_day_ganzhi, calculate_year_ganzhi, calculate_year_ganzhi_with_hour, calculate_month_ganzhi, calculate_month_ganzhi_with_hour, calculate_hour_ganzhi, calculate_sizhu_core};
 pub use dayun::{calculate_qiyun_age, calculate_dayun_list, calculate_dayun_shishen};
 pub use wuxing::{calculate_wuxing_strength, determine_xiyong_shen, determine_xiyong_shen_full};
 pub use jieqi::{get_month_zhi_by_jieqi, get_jieqi_time, calculate_year_jieqi, JieQiTime};

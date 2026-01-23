@@ -36,6 +36,9 @@ pallet-divination-privacy = { path = "../privacy", default-features = false }
 # 黄历模块 - 统一农历转换
 pallet-almanac = { path = "../almanac", default-features = false }
 
+# OCW + TEE 通用模块
+pallet-divination-ocw-tee = { path = "../ocw-tee", default-features = false }
+
 [dev-dependencies]
 sp-core = { workspace = true, default-features = true }
 pallet-balances = { workspace = true, default-features = true }
@@ -56,6 +59,7 @@ std = [
     "pallet-divination-common/std",
     "pallet-divination-privacy/std",
     "pallet-almanac/std",
+    "pallet-divination-ocw-tee/std",
 ]
 runtime-benchmarks = [
     "frame-benchmarking/runtime-benchmarks",

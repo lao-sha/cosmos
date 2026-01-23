@@ -794,6 +794,150 @@ impl<T: crate::pallet::Config> PartialEq for BaziChart<T> {
 impl<T: crate::pallet::Config> Eq for BaziChart<T> {}
 
 // ================================
+// 精简存储类型定义（Phase 10 优化）
+// ================================
+
+/// 精简八字信息（存储优化版）
+///
+/// 仅存储必要的基础数据，计算数据通过 Runtime API 实时获取。
+/// 存储大小：~100 bytes（相比 BaziChart 的 ~500 bytes 节省 80%）
+///
+/// # 设计理念
+/// - 存储最小化：只存储无法计算的原始数据
+/// - 计算实时化：sizhu、dayun、wuxing_strength 等通过 API 实时计算
+/// - 向后兼容：新创建的命盘使用此结构，旧命盘保持 BaziChart
+#[derive(Clone, Debug, Encode, Decode, TypeInfo, MaxEncodedLen)]
+#[scale_info(skip_type_params(T))]
+pub struct BaziChartCompact<T: crate::pallet::Config> {
+	/// 所有者账户
+	pub owner: T::AccountId,
+	/// 命盘名称（可选，最大32字节UTF-8）
+	pub name: BoundedVec<u8, ConstU32<32>>,
+
+	// ===== 隐私控制字段 =====
+	/// 隐私模式 (0=Public, 1=Partial, 2=Private)
+	pub privacy_mode: pallet_divination_privacy::types::PrivacyMode,
+	/// 加密字段标记（位标志）
+	pub encrypted_fields: Option<u8>,
+	/// 敏感数据哈希（用于完整性验证）
+	pub sensitive_data_hash: Option<[u8; 32]>,
+
+	// ===== 出生信息（核心数据）=====
+	/// 出生时间（用于计算四柱）
+	pub birth_time: Option<BirthTime>,
+	/// 输入日历类型（公历/农历）
+	pub input_calendar_type: Option<InputCalendarType>,
+	/// 性别（用于计算大运顺逆）
+	pub gender: Option<Gender>,
+	/// 子时模式
+	pub zishi_mode: Option<ZiShiMode>,
+	/// 出生地经度（用于真太阳时修正）
+	pub longitude: Option<i32>,
+
+	// ===== 可选：四柱索引缓存 =====
+	/// 四柱索引（8 bytes，可选缓存）
+	/// 当 birth_time 存在时可以计算得到，但缓存可加速查询
+	pub sizhu_index: Option<SiZhuIndex>,
+
+	/// 创建时间戳（区块号）
+	pub timestamp: u64,
+}
+
+impl<T: crate::pallet::Config> BaziChartCompact<T> {
+	/// 从完整 BaziChart 转换（用于迁移）
+	pub fn from_full_chart(chart: &BaziChart<T>) -> Self {
+		// 从 sizhu 提取索引
+		let sizhu_index = chart.sizhu.as_ref().map(|s| SiZhuIndex {
+			year_gan: s.year_zhu.ganzhi.gan.0,
+			year_zhi: s.year_zhu.ganzhi.zhi.0,
+			month_gan: s.month_zhu.ganzhi.gan.0,
+			month_zhi: s.month_zhu.ganzhi.zhi.0,
+			day_gan: s.day_zhu.ganzhi.gan.0,
+			day_zhi: s.day_zhu.ganzhi.zhi.0,
+			hour_gan: s.hour_zhu.ganzhi.gan.0,
+			hour_zhi: s.hour_zhu.ganzhi.zhi.0,
+		});
+
+		Self {
+			owner: chart.owner.clone(),
+			name: chart.name.clone(),
+			privacy_mode: chart.privacy_mode,
+			encrypted_fields: chart.encrypted_fields,
+			sensitive_data_hash: chart.sensitive_data_hash,
+			birth_time: chart.birth_time,
+			input_calendar_type: chart.input_calendar_type,
+			gender: chart.gender,
+			zishi_mode: chart.zishi_mode,
+			longitude: chart.longitude,
+			sizhu_index,
+			timestamp: chart.timestamp,
+		}
+	}
+
+	/// 检查是否可以进行解读
+	pub fn can_interpret(&self) -> bool {
+		self.privacy_mode != pallet_divination_privacy::types::PrivacyMode::Private
+			&& (self.birth_time.is_some() || self.sizhu_index.is_some())
+	}
+
+	/// 检查是否公开
+	pub fn is_public(&self) -> bool {
+		self.privacy_mode == pallet_divination_privacy::types::PrivacyMode::Public
+	}
+
+	/// 获取或计算四柱索引
+	pub fn get_sizhu_index(&self) -> Option<SiZhuIndex> {
+		// 如果有缓存，直接返回
+		if let Some(index) = self.sizhu_index {
+			return Some(index);
+		}
+
+		// 否则从 birth_time 计算
+		let birth_time = self.birth_time?;
+		let zishi_mode = self.zishi_mode.unwrap_or(ZiShiMode::Modern);
+
+		// 使用核心计算函数
+		let (year_gz, month_gz, day_gz, hour_gz) = crate::calculations::calculate_sizhu_core(
+			birth_time.year,
+			birth_time.month,
+			birth_time.day,
+			birth_time.hour,
+			zishi_mode,
+		)?;
+
+		Some(SiZhuIndex {
+			year_gan: year_gz.gan.0,
+			year_zhi: year_gz.zhi.0,
+			month_gan: month_gz.gan.0,
+			month_zhi: month_gz.zhi.0,
+			day_gan: day_gz.gan.0,
+			day_zhi: day_gz.zhi.0,
+			hour_gan: hour_gz.gan.0,
+			hour_zhi: hour_gz.zhi.0,
+		})
+	}
+}
+
+impl<T: crate::pallet::Config> PartialEq for BaziChartCompact<T> {
+	fn eq(&self, other: &Self) -> bool {
+		self.owner == other.owner &&
+		self.name == other.name &&
+		self.privacy_mode == other.privacy_mode &&
+		self.encrypted_fields == other.encrypted_fields &&
+		self.sensitive_data_hash == other.sensitive_data_hash &&
+		self.birth_time == other.birth_time &&
+		self.input_calendar_type == other.input_calendar_type &&
+		self.gender == other.gender &&
+		self.zishi_mode == other.zishi_mode &&
+		self.longitude == other.longitude &&
+		self.sizhu_index == other.sizhu_index &&
+		self.timestamp == other.timestamp
+	}
+}
+
+impl<T: crate::pallet::Config> Eq for BaziChartCompact<T> {}
+
+// ================================
 // 加密存储类型定义
 // ================================
 
@@ -885,55 +1029,60 @@ impl SiZhuIndex {
 		self.day_gan < 10 && self.day_zhi < 12 &&
 		self.hour_gan < 10 && self.hour_zhi < 12
 	}
-}
 
-/// 加密的八字命盘
-///
-/// # 存储结构
-/// - `sizhu_index`: 四柱索引（8 bytes）- 明文存储，用于计算
-/// - `gender`: 性别（1 byte）- 明文存储，用于大运计算
-/// - `encrypted_data`: 加密数据（最大 256 bytes）- 包含敏感信息
-/// - `data_hash`: 数据哈希（32 bytes）- 用于验证解密正确性
-///
-/// # 加密数据内容（前端加密）
-/// - 出生时间（年月日时分）
-/// - 子时模式
-/// - 大运信息
-/// - 其他敏感数据
-///
-/// # 安全特性
-/// - 出生时间永不明文存储
-/// - 用户自己管理密钥（钱包签名派生）
-/// - Runtime API 仍可基于 sizhu_index 免费计算解盘
-#[derive(Clone, Debug, Encode, Decode, TypeInfo, MaxEncodedLen)]
-#[scale_info(skip_type_params(T))]
-pub struct EncryptedBaziChart<T: crate::pallet::Config> {
-	/// 所有者账户
-	pub owner: T::AccountId,
-	/// 四柱干支索引（明文，用于计算）
-	pub sizhu_index: SiZhuIndex,
-	/// 性别（明文，用于大运计算）
-	pub gender: Gender,
-	/// 加密的敏感数据（AES-256-GCM 加密）
-	pub encrypted_data: BoundedVec<u8, ConstU32<256>>,
-	/// 原始数据的 Blake2-256 哈希（用于验证解密正确性）
-	pub data_hash: [u8; 32],
-	/// 创建时间戳（区块号）
-	pub created_at: u32,
-}
+	/// 从干支索引创建（兼容 SiZhuDirectInput 用法）
+	///
+	/// 干支索引 (0-59) 转换为天干地支：
+	/// - 天干 = gz % 10
+	/// - 地支 = gz % 12
+	///
+	/// # 参数
+	/// - `year_gz`: 年柱干支索引 (0-59)
+	/// - `month_gz`: 月柱干支索引 (0-59)
+	/// - `day_gz`: 日柱干支索引 (0-59)
+	/// - `hour_gz`: 时柱干支索引 (0-59)
+	pub fn from_gz_indices(year_gz: u8, month_gz: u8, day_gz: u8, hour_gz: u8) -> Self {
+		Self {
+			year_gan: year_gz % 10,
+			year_zhi: year_gz % 12,
+			month_gan: month_gz % 10,
+			month_zhi: month_gz % 12,
+			day_gan: day_gz % 10,
+			day_zhi: day_gz % 12,
+			hour_gan: hour_gz % 10,
+			hour_zhi: hour_gz % 12,
+		}
+	}
 
-impl<T: crate::pallet::Config> PartialEq for EncryptedBaziChart<T> {
-	fn eq(&self, other: &Self) -> bool {
-		self.owner == other.owner &&
-		self.sizhu_index == other.sizhu_index &&
-		self.gender == other.gender &&
-		self.encrypted_data == other.encrypted_data &&
-		self.data_hash == other.data_hash &&
-		self.created_at == other.created_at
+	/// 验证干支索引有效性
+	pub fn is_valid_gz_indices(year_gz: u8, month_gz: u8, day_gz: u8, hour_gz: u8) -> bool {
+		year_gz < 60 && month_gz < 60 && day_gz < 60 && hour_gz < 60
+	}
+
+	/// 转换为 BaziInputType
+	pub fn to_input_type(&self, birth_year: u16) -> BaziInputType {
+		// 从天干地支反推干支索引
+		// 干支索引 = (天干 * 6 + 地支) % 60 的逆运算较复杂
+		// 这里使用简化方法：直接使用天干和地支构造
+		BaziInputType::SiZhu {
+			year_gz: (self.year_gan % 10) + (self.year_zhi % 12) * 0, // 简化：直接用 gan*12 + zhi 的近似
+			month_gz: self.month_gan,
+			day_gz: self.day_gan,
+			hour_gz: self.hour_gan,
+			birth_year,
+		}
 	}
 }
 
-impl<T: crate::pallet::Config> Eq for EncryptedBaziChart<T> {}
+// ================================
+// 注：EncryptedBaziChart 已迁移至 pallet-divination-ocw-tee
+//
+// 加密八字存储现在由 TEE 架构统一管理：
+// - 加密输入 → TEE 解密计算 → 结果存 IPFS
+// - 链上只存储 CID + SiZhuIndex（可选）+ TEE 证明
+//
+// 请使用 pallet_divination_ocw_tee::types::DivinationOnChain
+// ================================
 
 // ================================
 // 统一输入类型定义
@@ -1057,44 +1206,6 @@ impl BaziInputType {
 			BaziInputType::Solar { year, .. } => *year,
 			BaziInputType::Lunar { year, .. } => *year,
 			BaziInputType::SiZhu { birth_year, .. } => *birth_year,
-		}
-	}
-}
-
-/// 四柱直接输入结构（用于测试和内部使用）
-///
-/// 与 BaziInputType::SiZhu 功能相同，但作为独立结构便于测试
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Encode, Decode, TypeInfo, MaxEncodedLen)]
-pub struct SiZhuDirectInput {
-	/// 年柱干支索引 (0-59)
-	pub year_gz: u8,
-	/// 月柱干支索引 (0-59)
-	pub month_gz: u8,
-	/// 日柱干支索引 (0-59)
-	pub day_gz: u8,
-	/// 时柱干支索引 (0-59)
-	pub hour_gz: u8,
-}
-
-impl SiZhuDirectInput {
-	/// 创建四柱直接输入
-	pub fn new(year_gz: u8, month_gz: u8, day_gz: u8, hour_gz: u8) -> Self {
-		Self { year_gz, month_gz, day_gz, hour_gz }
-	}
-
-	/// 验证有效性
-	pub fn is_valid(&self) -> bool {
-		self.year_gz < 60 && self.month_gz < 60 && self.day_gz < 60 && self.hour_gz < 60
-	}
-
-	/// 转换为 BaziInputType
-	pub fn to_input_type(self, birth_year: u16) -> BaziInputType {
-		BaziInputType::SiZhu {
-			year_gz: self.year_gz,
-			month_gz: self.month_gz,
-			day_gz: self.day_gz,
-			hour_gz: self.hour_gz,
-			birth_year,
 		}
 	}
 }

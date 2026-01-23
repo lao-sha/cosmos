@@ -24,6 +24,7 @@ members = [
     "pallets/divination/tarot",
     "pallets/divination/membership",
     "pallets/divination/tee-privacy",
+    "pallets/divination/ocw-tee",
     "pallets/divination/affiliate",
     "pallets/chat/common",
     "pallets/chat/permission",
@@ -68,6 +69,7 @@ pallet-daliuren = { path = "./pallets/divination/daliuren", default-features = f
 pallet-tarot = { path = "./pallets/divination/tarot", default-features = false }
 pallet-membership = { path = "./pallets/divination/membership", default-features = false }
 pallet-tee-privacy = { path = "./pallets/divination/tee-privacy", default-features = false }
+pallet-divination-ocw-tee = { path = "./pallets/divination/ocw-tee", default-features = false }
 # Chat pallets
 pallet-chat-common = { path = "./pallets/chat/common", default-features = false }
 pallet-chat-permission = { path = "./pallets/chat/permission", default-features = false }

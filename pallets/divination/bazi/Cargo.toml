@@ -38,6 +38,9 @@ pallet-almanac = { path = "../almanac", default-features = false }
 # 隐私模块（隐私模式类型定义）
 pallet-divination-privacy = { path = "../privacy", default-features = false }
 
+# OCW + TEE 通用模块
+pallet-divination-ocw-tee = { path = "../ocw-tee", default-features = false }
+
 [dev-dependencies]
 sp-core = { workspace = true, features = ["std"] }
 sp-io = { workspace = true, features = ["std"] }
@@ -57,6 +60,7 @@ std = [
 	"pallet-divination-common/std",
 	"pallet-almanac/std",
 	"pallet-divination-privacy/std",
+	"pallet-divination-ocw-tee/std",
 ]
 runtime-benchmarks = [
 	"frame-benchmarking/runtime-benchmarks",

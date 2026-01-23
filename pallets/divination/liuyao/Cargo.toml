@@ -41,6 +41,9 @@ pallet-divination-privacy = { path = "../privacy", default-features = false }
 # 通用模块 - 押金管理
 pallet-divination-common = { path = "../common", default-features = false }
 
+# OCW-TEE 模块
+pallet-divination-ocw-tee = { path = "../ocw-tee", default-features = false }
+
 [dev-dependencies]
 sp-io = { workspace = true }
 
@@ -62,6 +65,7 @@ std = [
     "pallet-almanac/std",
     "pallet-divination-privacy/std",
     "pallet-divination-common/std",
+    "pallet-divination-ocw-tee/std",
 ]
 runtime-benchmarks = [
     "frame-benchmarking/runtime-benchmarks",

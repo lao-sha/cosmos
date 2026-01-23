@@ -45,6 +45,7 @@
 
 pub mod algorithm;
 pub mod interpretation;
+pub mod ocw_tee;
 pub mod runtime_api;
 pub mod shensha;
 pub mod types;
@@ -112,18 +113,6 @@ pub mod pallet {
         /// 货币类型（需要支持 reserve/unreserve）
         type Currency: frame_support::traits::Currency<Self::AccountId>
             + frame_support::traits::ReservableCurrency<Self::AccountId>;
-
-        /// 每 KB 存储押金基础费率
-        #[pallet::constant]
-        type StorageDepositPerKb: Get<u128>;
-
-        /// 最小存储押金
-        #[pallet::constant]
-        type MinStorageDeposit: Get<u128>;
-
-        /// 最大存储押金
-        #[pallet::constant]
-        type MaxStorageDeposit: Get<u128>;
     }
 
     // ========================================================================
@@ -197,16 +186,6 @@ pub mod pallet {
     pub type BalanceOf<T> =
         <<T as Config>::Currency as frame_support::traits::Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
-    /// 存储押金记录
-    #[pallet::storage]
-    #[pallet::getter(fn deposit_records)]
-    pub type DepositRecords<T: Config> = StorageMap<
-        _,
-        Blake2_128Concat,
-        u64,
-        pallet_divination_common::deposit::DepositRecord<BalanceOf<T>, BlockNumberFor<T>>,
-    >;
-
     // ========================================================================
     // 事件
     // ========================================================================
@@ -243,20 +222,6 @@ pub mod pallet {
             gua_id: u64,
             owner: T::AccountId,
         },
-        /// 存储押金已锁定
-        StorageDepositLocked {
-            gua_id: u64,
-            owner: T::AccountId,
-            deposit: BalanceOf<T>,
-            privacy_mode: u8,
-        },
-        /// 存储押金已返还
-        StorageDepositRefunded {
-            gua_id: u64,
-            owner: T::AccountId,
-            refund: BalanceOf<T>,
-            treasury: BalanceOf<T>,
-        },
     }
 
     // ========================================================================
@@ -291,10 +256,6 @@ pub mod pallet {
         OwnerKeyBackupMissing,
         /// 加密数据过长
         EncryptedDataTooLong,
-        /// 押金余额不足
-        InsufficientDepositBalance,
-        /// 押金记录未找到
-        DepositRecordNotFound,
     }
 
     // ========================================================================
@@ -1041,11 +1002,7 @@ pub mod pallet {
                 .ok_or(Error::<T>::GuaNotFound)?;
             ensure!(gua.creator == who, Error::<T>::NotGuaOwner);
 
-            // 2. 返还押金（如果有押金记录）
-            let (refund, treasury) = Self::unreserve_storage_deposit(&who, gua_id)
-                .unwrap_or((BalanceOf::<T>::zero(), BalanceOf::<T>::zero()));
-
-            // 3. 从用户索引中移除
+            // 2. 从用户索引中移除
             UserGuas::<T>::mutate(&who, |guas| {
                 guas.retain(|&id| id != gua_id);
             });
@@ -1066,21 +1023,11 @@ pub mod pallet {
             // 7. 删除主卦象记录
             Guas::<T>::remove(gua_id);
 
-            // 8. 发送删除事件
+            // 6. 发送删除事件
             Self::deposit_event(Event::GuaDeleted {
                 gua_id,
-                owner: who.clone(),
+                owner: who,
             });
-
-            // 9. 发送押金返还事件（如果有押金）
-            if !refund.is_zero() || !treasury.is_zero() {
-                Self::deposit_event(Event::StorageDepositRefunded {
-                    gua_id,
-                    owner: who,
-                    refund,
-                    treasury,
-                });
-            }
 
             Ok(())
         }
@@ -1570,92 +1517,4 @@ pub mod pallet {
         }
     }
 
-    // ========================================================================
-    // 存储押金管理辅助函数
-    // ========================================================================
-
-    impl<T: Config> Pallet<T>
-    where
-        BalanceOf<T>: From<u32> + sp_runtime::traits::Saturating + core::ops::Div<Output = BalanceOf<T>> + sp_runtime::traits::Zero + PartialOrd + Copy,
-        BlockNumberFor<T>: From<u32> + sp_runtime::traits::Saturating + PartialOrd + Copy,
-    {
-        /// 计算存储押金
-        pub fn calculate_deposit(data_size: u32, privacy_mode: pallet_divination_common::deposit::PrivacyMode) -> BalanceOf<T> {
-            use sp_runtime::SaturatedConversion;
-            let size_kb = (data_size.saturating_add(1023)) / 1024;
-            let size_kb = if size_kb == 0 { 1 } else { size_kb };
-            let multiplier = privacy_mode.multiplier();
-            let base_rate = T::StorageDepositPerKb::get();
-            let min_deposit = T::MinStorageDeposit::get();
-            let max_deposit = T::MaxStorageDeposit::get();
-            let deposit_u128 = base_rate
-                .saturating_mul(size_kb as u128)
-                .saturating_mul(multiplier as u128)
-                / 100u128;
-            let clamped = if deposit_u128 < min_deposit {
-                min_deposit
-            } else if deposit_u128 > max_deposit {
-                max_deposit
-            } else {
-                deposit_u128
-            };
-            clamped.saturated_into()
-        }
-
-        /// 锁定存储押金
-        pub fn reserve_storage_deposit(
-            who: &T::AccountId,
-            gua_id: u64,
-            data_size: u32,
-            privacy_mode: pallet_divination_common::deposit::PrivacyMode,
-        ) -> Result<BalanceOf<T>, DispatchError> {
-            let deposit_amount = Self::calculate_deposit(data_size, privacy_mode);
-            <T::Currency as frame_support::traits::ReservableCurrency<T::AccountId>>::reserve(
-                who,
-                deposit_amount,
-            ).map_err(|_| Error::<T>::InsufficientDepositBalance)?;
-            let current_block = <frame_system::Pallet<T>>::block_number();
-            let record = pallet_divination_common::deposit::DepositRecord {
-                amount: deposit_amount,
-                created_at: current_block,
-                data_size,
-                privacy_mode,
-            };
-            DepositRecords::<T>::insert(gua_id, record);
-            Ok(deposit_amount)
-        }
-
-        /// 返还存储押金
-        pub fn unreserve_storage_deposit(
-            who: &T::AccountId,
-            gua_id: u64,
-        ) -> Result<(BalanceOf<T>, BalanceOf<T>), DispatchError> {
-            let record = DepositRecords::<T>::take(gua_id)
-                .ok_or(Error::<T>::DepositRecordNotFound)?;
-            let current_block = <frame_system::Pallet<T>>::block_number();
-            let (refund_amount, treasury_amount) = pallet_divination_common::deposit::calculate_refund_amount(
-                record.amount,
-                record.created_at,
-                current_block,
-            );
-            let actually_unreserved = <T::Currency as frame_support::traits::ReservableCurrency<T::AccountId>>::unreserve(
-                who,
-                refund_amount,
-            );
-            if !treasury_amount.is_zero() {
-                let _ = <T::Currency as frame_support::traits::ReservableCurrency<T::AccountId>>::unreserve(
-                    who,
-                    treasury_amount,
-                );
-            }
-            Ok((refund_amount.saturating_sub(refund_amount.saturating_sub(actually_unreserved)), treasury_amount))
-        }
-
-        /// 估算特定隐私模式的押金
-        pub fn estimate_deposit(privacy_mode: u8) -> Option<BalanceOf<T>> {
-            let mode = pallet_divination_common::deposit::PrivacyMode::from_u8(privacy_mode)?;
-            let data_size = pallet_divination_common::deposit::estimate_data_size(4, mode); // 4 = LiuYao
-            Some(Self::calculate_deposit(data_size, mode))
-        }
-    }
 }

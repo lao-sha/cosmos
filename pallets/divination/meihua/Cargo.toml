@@ -34,6 +34,9 @@ pallet-divination-privacy = { path = "../privacy", default-features = false }
 # 占卜通用模块 - DivinationType 枚举等
 pallet-divination-common = { path = "../common", default-features = false }
 
+# OCW + TEE 通用模块
+pallet-divination-ocw-tee = { path = "../ocw-tee", default-features = false }
+
 [dev-dependencies]
 sp-io = { workspace = true, features = ["std"] }
 pallet-balances = { workspace = true, features = ["std"] }
@@ -56,6 +59,7 @@ std = [
   "pallet-almanac/std",
   "pallet-divination-privacy/std",
   "pallet-divination-common/std",
+  "pallet-divination-ocw-tee/std",
 ]
 runtime-benchmarks = [
   "frame-support/runtime-benchmarks",

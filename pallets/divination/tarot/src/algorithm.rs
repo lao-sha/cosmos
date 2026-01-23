@@ -1499,3 +1499,46 @@ mod interpretation_tests {
         assert!(energy.outer_energy > energy.inner_energy); // 全正位，外在能量更强
     }
 }
+
+// ============================================================================
+// OCW-TEE 集成辅助函数
+// ============================================================================
+
+/// 获取牌阵所需的牌数量
+pub fn get_spread_card_count(spread_type: u8) -> u8 {
+    match spread_type {
+        0 => 1,  // 单张
+        1 => 3,  // 三牌阵
+        2 => 5,  // 五牌阵
+        3 => 10, // 凯尔特十字
+        4 => 7,  // 七星阵
+        _ => 3,  // 默认三牌
+    }
+}
+
+/// 从数字生成牌列表
+pub fn generate_cards_from_number(num: u32, count: u8) -> Vec<u8> {
+    let mut cards = Vec::with_capacity(count as usize);
+    let mut used = [false; 78];
+    
+    for i in 0..count {
+        let seed = num.wrapping_add(i as u32 * 17);
+        let mut card_id = (seed % 78) as u8;
+        
+        // 避免重复
+        while used[card_id as usize] {
+            card_id = (card_id + 1) % 78;
+        }
+        used[card_id as usize] = true;
+        cards.push(card_id);
+    }
+    
+    cards
+}
+
+/// 从数字生成正逆位列表
+pub fn generate_reversed_from_number(num: u32, count: u8) -> Vec<bool> {
+    (0..count)
+        .map(|i| ((num >> (i % 32)) & 1) == 1)
+        .collect()
+}

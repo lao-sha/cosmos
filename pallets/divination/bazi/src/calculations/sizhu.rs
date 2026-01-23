@@ -372,6 +372,51 @@ pub fn calculate_hour_ganzhi(
 	))
 }
 
+/// 计算四柱干支（核心函数）
+///
+/// 统一的四柱计算逻辑，处理日→年→月→时柱计算及子时模式。
+///
+/// # 参数
+/// - `year`: 公历年份
+/// - `month`: 公历月份 (1-12)
+/// - `day`: 公历日期 (1-31)
+/// - `hour`: 小时 (0-23)
+/// - `zishi_mode`: 子时模式
+///
+/// # 返回
+/// - `Some((year_gz, month_gz, day_gz, hour_gz))`: 四柱干支
+/// - `None`: 计算失败
+pub fn calculate_sizhu_core(
+	year: u16,
+	month: u8,
+	day: u8,
+	hour: u8,
+	zishi_mode: crate::types::ZiShiMode,
+) -> Option<(GanZhi, GanZhi, GanZhi, GanZhi)> {
+	// 1. 计算日柱
+	let day_ganzhi = calculate_day_ganzhi(year, month, day)?;
+
+	// 2. 计算年柱
+	let year_ganzhi = calculate_year_ganzhi(year, month, day)?;
+
+	// 3. 计算月柱
+	let month_ganzhi = calculate_month_ganzhi(year, month, day, year_ganzhi.gan.0)?;
+
+	// 4. 计算时柱（处理子时双模式）
+	let (hour_ganzhi, is_next_day) = calculate_hour_ganzhi(hour, day_ganzhi.gan.0, zishi_mode)?;
+
+	// 5. 如果是次日子时（传统派23:00），需要重新计算日柱和时柱
+	let (final_day_ganzhi, final_hour_ganzhi) = if is_next_day {
+		let next_day_ganzhi = day_ganzhi.next();
+		let (final_hour, _) = calculate_hour_ganzhi(hour, next_day_ganzhi.gan.0, zishi_mode)?;
+		(next_day_ganzhi, final_hour)
+	} else {
+		(day_ganzhi, hour_ganzhi)
+	};
+
+	Some((year_ganzhi, month_ganzhi, final_day_ganzhi, final_hour_ganzhi))
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
