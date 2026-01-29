@@ -84,7 +84,7 @@ impl pallet_chat_group::Config for Test {
     type PalletId = GroupPalletId;
     type MessageRateLimit = ConstU32<60>;
     type GroupCreationCooldown = ConstU64<10>;
-    type GroupDeposit = ConstU128<50_000_000_000_000_000_000>; // 50 DUST 兜底
+    type GroupDeposit = ConstU128<50_000_000_000_000_000_000>; // 50 COS 兜底
     type GroupDepositUsd = ConstU64<5_000_000>; // 5 USDT
     type DepositCalculator = (); // 使用空实现，返回兜底值
     type TreasuryAccount = TreasuryAccountId;

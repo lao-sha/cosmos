@@ -73,6 +73,6 @@ fn calculate_deposit_returns_fallback() {
     new_test_ext().execute_with(|| {
         // 使用空实现的 DepositCalculator，应返回兜底值
         let deposit = ChatGroup::calculate_deposit_amount();
-        assert_eq!(deposit, 50_000_000_000_000_000_000u128); // 50 DUST
+        assert_eq!(deposit, 50_000_000_000_000_000_000u128); // 50 COS
     });
 }

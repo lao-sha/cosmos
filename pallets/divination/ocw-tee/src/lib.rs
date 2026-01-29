@@ -145,7 +145,7 @@ pub mod pallet {
 
         /// IPFS Pin 服务提供者（Phase 15 集成）
         /// 
-        /// 通过此接口与 pallet-stardust-ipfs 交互：
+        /// 通过此接口与 pallet-cosmos-ipfs 交互：
         /// - 自动 Pin 加密数据到 IPFS
         /// - 使用三级扣费机制（IpfsPool → SubjectFunding → Grace）
         type IpfsPinner: pallet_storage_service::IpfsPinner<Self::AccountId, u128>;

@@ -7,7 +7,7 @@
 ## ✨ 核心特性
 
 - ✅ **用户举报**: 支持5种举报类型，匿名举报可选
-- ✅ **防滥用机制**: 10 DUST押金 + 1天冷却期
+- ✅ **防滥用机制**: 10 COS押金 + 1天冷却期
 - ✅ **灵活撤回**: 12小时内可撤回，退还80%押金
 - ✅ **委员会审核**: 三种结果（成立/驳回/恶意）
 - ✅ **自动过期**: 7天未处理自动过期，全额退款
@@ -71,7 +71,7 @@ Livestream::appeal_room_ban(
 ## 🔒 安全机制
 
 ### 防滥用保护
-- 10 DUST 押金要求
+- 10 COS 押金要求
 - 1天举报冷却期
 - 不能举报自己的直播间
 
@@ -129,7 +129,7 @@ cargo test --package pallet-livestream --lib report
 
 | 参数 | 值 | 说明 |
 |------|-----|------|
-| `MinReportDeposit` | 10 DUST | 最小举报押金 |
+| `MinReportDeposit` | 10 COS | 最小举报押金 |
 | `ReportTimeout` | 7 天 | 举报处理超时 |
 | `ReportCooldownPeriod` | 1 天 | 举报冷却期 |
 | `ReportWithdrawWindow` | 12 小时 | 撤回窗口期 |
@@ -166,4 +166,4 @@ cargo test --package pallet-livestream --lib report
 
 **实施日期**: 2026-01-19
 **状态**: ✅ 已完成并测试通过
-**维护者**: Stardust Team
+**维护者**: Cosmos Team

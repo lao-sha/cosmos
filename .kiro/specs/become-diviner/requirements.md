@@ -29,7 +29,7 @@
 2. WHEN a user submits registration with valid information, THE System SHALL create a provider record with Pending status
 3. WHEN a user submits registration with invalid information, THE System SHALL display specific validation errors
 4. THE System SHALL require the following fields: display name (1-64 chars), bio (1-256 chars), specialties (at least 1), supported divination types (at least 1)
-5. WHEN registration is submitted, THE System SHALL lock the minimum deposit (100 DUST) from user's balance
+5. WHEN registration is submitted, THE System SHALL lock the minimum deposit (100 COS) from user's balance
 6. IF the user has insufficient balance for deposit, THEN THE System SHALL display an error and prevent registration
 
 ### Requirement 2: 占卜师状态管理
@@ -51,7 +51,7 @@
 
 #### Acceptance Criteria
 
-1. WHEN a diviner creates a package, THE System SHALL validate price >= minimum (1 DUST)
+1. WHEN a diviner creates a package, THE System SHALL validate price >= minimum (1 COS)
 2. WHEN a diviner creates a package, THE System SHALL require: divination type, service type, name, description, price, follow-up count
 3. THE System SHALL limit each diviner to maximum 10 packages
 4. WHEN a diviner updates a package, THE System SHALL preserve the package ID and update only changed fields

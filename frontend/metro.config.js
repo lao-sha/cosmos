@@ -1,31 +1,15 @@
-const { getDefaultConfig } = require('expo/metro-config');
+const { getDefaultConfig } = require("expo/metro-config");
 
+/** @type {import('expo/metro-config').MetroConfig} */
 const config = getDefaultConfig(__dirname);
 
-// P0-3: Polyfill for @polkadot/api in React Native
-config.resolver.extraNodeModules = {
-  ...config.resolver.extraNodeModules,
-  crypto: require.resolve('react-native-get-random-values'),
-  stream: require.resolve('readable-stream'),
-  buffer: require.resolve('buffer'),
-};
+// Add support for .mjs files (often used by @polkadot/api)
+config.resolver.sourceExts.push("mjs");
 
-// Enable package exports for proper ESM resolution
+// Support package exports resolution
 config.resolver.unstable_enablePackageExports = true;
 
-// Transform @polkadot packages that use import.meta
-// These packages need to be transformed by Metro instead of being treated as external
-config.transformer = {
-  ...config.transformer,
-  getTransformOptions: async () => ({
-    transform: {
-      experimentalImportSupport: false,
-      inlineRequires: true,
-    },
-  }),
-};
-
-// Ensure @polkadot packages are transformed
-config.resolver.sourceExts = [...(config.resolver.sourceExts || []), 'cjs'];
+// Patch import.meta usage in @polkadot/* packages for web bundling
+config.transformer.babelTransformerPath = require.resolve("./metro-transformer");
 
 module.exports = config;

@@ -191,11 +191,11 @@ impl pallet_storage_service::ContentRegistry for MockContentRegistry {
 pub struct MockPricing;
 
 impl pallet_trading_common::PricingProvider<u64> for MockPricing {
-    fn get_dust_to_usd_rate() -> Option<u64> {
-        Some(1_000_000) // 1 DUST = 1 USD
+    fn get_cos_to_usd_rate() -> Option<u64> {
+        Some(1_000_000) // 1 COS = 1 USD
     }
 
-    fn report_swap_order(_timestamp: u64, _price_usdt: u64, _dust_qty: u128) -> sp_runtime::DispatchResult {
+    fn report_swap_order(_timestamp: u64, _price_usdt: u64, _cos_qty: u128) -> sp_runtime::DispatchResult {
         Ok(())
     }
 }

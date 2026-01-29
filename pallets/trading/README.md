@@ -2,11 +2,11 @@
 
 ## 📋 模块概述
 
-`pallet-trading` 是 Stardust 区块链的 **统一交易接口层**，采用模块化设计理念，聚合以下四个独立子模块：
+`pallet-trading` 是 Cosmos 区块链的 **统一交易接口层**，采用模块化设计理念，聚合以下四个独立子模块：
 
 1. **pallet-maker** - 做市商管理（申请、审核、押金、提现）
 2. **pallet-otc-order** - OTC 订单管理（创建、支付、释放、取消、争议）
-3. **pallet-swap** - DUST → USDT 做市商兑换服务（OCW 验证、超时退款）
+3. **pallet-swap** - COS → USDT 做市商兑换服务（OCW 验证、超时退款）
 4. **pallet-trading-common** - 公共工具库（数据掩码、验证）
 
 ### 核心价值
@@ -50,7 +50,7 @@ pallet-maker (独立模块 - 做市商管理)
 
 pallet-otc-order (独立模块 - OTC 订单)
   ├── 订单创建/支付
-  ├── DUST 释放
+  ├── COS 释放
   ├── 首购逻辑（固定 10 USD）
   ├── 自动过期清理
   ├── 争议处理
@@ -307,13 +307,13 @@ pub fn execute_withdrawal(origin: OriginFor<T>) -> DispatchResult
 pub fn create_order(
     origin: OriginFor<T>,
     maker_id: u64,           // 做市商 ID
-    dust_amount: BalanceOf<T>, // DUST 数量
+    cos_amount: BalanceOf<T>, // COS 数量
     payment_commit: H256,    // 支付承诺哈希
     contact_commit: H256,    // 联系方式承诺哈希
 ) -> DispatchResult
 ```
 
-**功能：** 买家创建 OTC 订单，锁定 DUST 到托管账户
+**功能：** 买家创建 OTC 订单，锁定 COS 到托管账户
 
 **限制：**
 - 最小金额：20 USD（`MinOrderUsdAmount`）
@@ -337,7 +337,7 @@ pub fn create_first_purchase(
 
 **首购规则：**
 - 固定 USD 价值：10 USD（`FirstPurchaseUsdAmount`）
-- 动态 DUST 数量：根据实时汇率计算
+- 动态 COS 数量：根据实时汇率计算
 - 每个买家只能首购一次
 - 每个做市商最多同时接收 5 个首购订单
 
@@ -353,17 +353,17 @@ pub fn mark_paid(
 ) -> DispatchResult
 ```
 
-**功能：** 买家标记已付款，通知做市商释放 DUST
+**功能：** 买家标记已付款，通知做市商释放 COS
 
-#### 2.4 release_dust - 释放 DUST
+#### 2.4 release_cos - 释放 COS
 
 ```rust
 #[pallet::call_index(3)]
-#[pallet::weight(T::WeightInfo::release_dust())]
-pub fn release_dust(origin: OriginFor<T>, order_id: u64) -> DispatchResult
+#[pallet::weight(T::WeightInfo::release_cos())]
+pub fn release_cos(origin: OriginFor<T>, order_id: u64) -> DispatchResult
 ```
 
-**功能：** 做市商确认收款，释放 DUST 给买家
+**功能：** 做市商确认收款，释放 COS 给买家
 
 **副作用：**
 - 记录做市商信用分（`MakerCredit::record_maker_order_completed`）
@@ -390,20 +390,20 @@ pub fn dispute_order(origin: OriginFor<T>, order_id: u64) -> DispatchResult
 
 > ℹ️ **版本说明**: v0.2.0 移除了官方桥接功能，仅保留做市商兑换服务
 
-#### 3.1 create_swap - 创建做市商兑换
+#### 3.1 maker_swap - 创建做市商兑换
 
 ```rust
 #[pallet::call_index(0)]
-#[pallet::weight(T::WeightInfo::create_swap())]
-pub fn create_swap(
+#[pallet::weight(T::WeightInfo::maker_swap())]
+pub fn maker_swap(
     origin: OriginFor<T>,
     maker_id: u64,             // 做市商 ID
-    dust_amount: BalanceOf<T>, // DUST 数量
+    cos_amount: BalanceOf<T>, // COS 数量
     usdt_address: Vec<u8>,     // USDT 接收地址
 ) -> DispatchResult
 ```
 
-**功能：** 用户发起做市商兑换，锁定 DUST，等待做市商发送 USDT
+**功能：** 用户发起做市商兑换，锁定 COS，等待做市商发送 USDT
 
 **超时机制：** `SwapTimeoutBlocks` 区块后自动退款
 
@@ -471,17 +471,17 @@ pub enum Event<T: Config> {
 
 ```rust
 pub enum Event<T: Config> {
-    /// 订单已创建 [order_id, buyer, maker_id, dust_amount]
+    /// 订单已创建 [order_id, buyer, maker_id, cos_amount]
     OrderCreated(u64, T::AccountId, u64, BalanceOf<T>),
 
-    /// 首购订单已创建 [order_id, buyer, maker_id, dust_amount]
+    /// 首购订单已创建 [order_id, buyer, maker_id, cos_amount]
     FirstPurchaseCreated(u64, T::AccountId, u64, BalanceOf<T>),
 
     /// 买家已标记付款 [order_id, tron_tx_hash]
     BuyerMarkedPaid(u64, Option<Vec<u8>>),
 
-    /// DUST 已释放 [order_id, buyer]
-    DustReleased(u64, T::AccountId),
+    /// COS 已释放 [order_id, buyer]
+    CosReleased(u64, T::AccountId),
 
     /// 订单已取消 [order_id]
     OrderCancelled(u64),
@@ -498,7 +498,7 @@ pub enum Event<T: Config> {
 
 ```rust
 pub enum Event<T: Config> {
-    /// 做市商兑换已创建 [swap_id, user, maker_id, dust_amount, usdt_address]
+    /// 做市商兑换已创建 [swap_id, user, maker_id, cos_amount, usdt_address]
     SwapCreated(u64, T::AccountId, u64, BalanceOf<T>, Vec<u8>),
 
     /// TRC20 交易哈希已提交 [swap_id, trc20_tx_hash]
@@ -510,7 +510,7 @@ pub enum Event<T: Config> {
     /// 用户已举报 [swap_id, user]
     SwapReported(u64, T::AccountId),
 
-    /// 兑换已超时退款 [swap_id, user, dust_amount]
+    /// 兑换已超时退款 [swap_id, user, cos_amount]
     SwapTimeout(u64, T::AccountId, BalanceOf<T>),
 }
 ```
@@ -531,7 +531,7 @@ impl pallet_maker::Config for Runtime {
     type Pricing = Pricing;
 
     // 常量参数
-    type MakerDepositAmount = ConstU128<1_000_000_000_000_000>; // 1000 DUST
+    type MakerDepositAmount = ConstU128<1_000_000_000_000_000>; // 1000 COS
     type TargetDepositUsd = ConstU64<1_000_000_000>;            // 1000 USD
     type DepositReplenishThreshold = ConstU64<950_000_000>;     // 950 USD
     type DepositReplenishTarget = ConstU64<1_050_000_000>;      // 1050 USD
@@ -561,8 +561,8 @@ impl pallet_otc_order::Config for Runtime {
     type EvidenceWindow = ConstU64<86_400_000>;                  // 24小时证据窗口（毫秒）
     type FirstPurchaseUsdValue = ConstU128<10_000_000>;          // 10 USD（已废弃）
     type FirstPurchaseUsdAmount = ConstU64<10_000_000>;          // 10 USD
-    type MinFirstPurchaseDustAmount = ConstU128<1_000_000_000_000>; // 最小 1000 DUST
-    type MaxFirstPurchaseDustAmount = ConstU128<1_000_000_000_000_000>; // 最大 1M DUST
+    type MinFirstPurchaseCosAmount = ConstU128<1_000_000_000_000>; // 最小 1000 COS
+    type MaxFirstPurchaseCosAmount = ConstU128<1_000_000_000_000_000>; // 最大 1M COS
     type MaxOrderUsdAmount = ConstU64<200_000_000>;              // 最大 200 USD
     type MinOrderUsdAmount = ConstU64<20_000_000>;               // 最小 20 USD
     type AmountValidationTolerance = ConstU16<100>;              // 1% 容差
@@ -585,7 +585,7 @@ impl pallet_swap::Config for Runtime {
     // 常量参数
     type SwapTimeoutBlocks = ConstU32<14_400>;                   // 1天超时（区块数）
     type TxHashTtlBlocks = ConstU32<{ 30 * DAYS }>;              // 30天 TTL 过期清理
-    type MinSwapAmount = ConstU128<100_000_000_000>;             // 最小 100 DUST
+    type MinSwapAmount = ConstU128<100_000_000_000>;             // 最小 100 COS
     type WeightInfo = ();
 }
 ```
@@ -633,7 +633,7 @@ async function submitInfo(api: ApiPromise, account: KeyringPair) {
     2,                                    // direction (BuyAndSell)
     10,                                   // buy_premium_bps (0.1%)
     20,                                   // sell_premium_bps (0.2%)
-    100_000_000_000,                      // min_amount (100 DUST)
+    100_000_000_000,                      // min_amount (100 COS)
     'wechat_12345',                       // wechat_id
     JSON.stringify({ alipay: '13812345678' }), // payment_methods_json
   );
@@ -736,12 +736,12 @@ async function createFirstPurchase(
     if (status.isInBlock) {
       events.forEach(({ event }) => {
         if (api.events.otcOrder.FirstPurchaseCreated.is(event)) {
-          const [orderId, buyer, makerId, dustAmount] = event.data;
+          const [orderId, buyer, makerId, cosAmount] = event.data;
           console.log('首购订单创建成功:', {
             orderId: orderId.toString(),
             buyer: buyer.toString(),
             makerId: makerId.toString(),
-            dustAmount: dustAmount.toString(),
+            cosAmount: cosAmount.toString(),
           });
         }
       });
@@ -757,14 +757,14 @@ async function createOrder(
   api: ApiPromise,
   account: KeyringPair,
   makerId: number,
-  dustAmount: string,
+  cosAmount: string,
 ) {
   const paymentCommit = generatePaymentCommit('李四', '110101199001011234', '13812345678');
   const contactCommit = generateContactCommit('wechat_12345', '13812345678');
 
   const tx = api.tx.otcOrder.createOrder(
     makerId,
-    dustAmount,
+    cosAmount,
     paymentCommit,
     contactCommit,
   );
@@ -787,20 +787,19 @@ async function markPaid(
   await tx.signAndSend(account);
 }
 
-// 做市商释放 DUST
-async function releaseDust(
+// 做市商释放 COS
+async function releaseCos(
   api: ApiPromise,
   makerAccount: KeyringPair,
   orderId: number,
 ) {
-  const tx = api.tx.otcOrder.releaseDust(orderId);
+  const tx = api.tx.otcOrder.releaseCos(orderId);
   await tx.signAndSend(makerAccount);
 }
 
 // 查询订单详情
 async function queryOrder(api: ApiPromise, orderId: number) {
   const order = await api.query.otcOrder.orders(orderId);
-
   if (order.isSome) {
     const data = order.unwrap();
     console.log('订单详情:', {
@@ -848,21 +847,21 @@ async function createSwap(
   api: ApiPromise,
   account: KeyringPair,
   makerId: number,
-  dustAmount: string,
+  cosAmount: string,
   usdtAddress: string,
 ) {
-  const tx = api.tx.swap.createSwap(makerId, dustAmount, usdtAddress);
+  const tx = api.tx.swap.createSwap(makerId, cosAmount, usdtAddress);
 
   await tx.signAndSend(account, ({ status, events }) => {
     if (status.isInBlock) {
       events.forEach(({ event }) => {
         if (api.events.swap.SwapCreated.is(event)) {
-          const [swapId, user, makerId, dustAmount, usdtAddress] = event.data;
+          const [swapId, user, makerId, cosAmount, usdtAddress] = event.data;
           console.log('做市商兑换创建成功:', {
             swapId: swapId.toString(),
             user: user.toString(),
             makerId: makerId.toString(),
-            dustAmount: dustAmount.toString(),
+            cosAmount: cosAmount.toString(),
             usdtAddress: usdtAddress.toHuman(),
           });
         }
@@ -901,7 +900,7 @@ async function querySwap(api: ApiPromise, swapId: number) {
       swapId: data.swapId.toString(),
       makerId: data.makerId.toString(),
       user: data.user.toString(),
-      dustAmount: data.dustAmount.toString(),
+      cosAmount: data.cosAmount.toString(),
       usdtAmount: data.usdtAmount.toString(),
       usdtAddress: data.usdtAddress.toHuman(),
       status: data.status.toString(),
@@ -1020,7 +1019,7 @@ console.log(isValidTronAddress('TYASr5UV6HEcXatwdFQfmLVUqQQQMUxHLS')); // true
 
 // 1. 配置 pallet-maker
 parameter_types! {
-    pub const MakerDeposit: Balance = 1_000_000_000_000_000; // 1000 DUST
+    pub const MakerDeposit: Balance = 1_000_000_000_000_000; // 1000 COS
     pub const MakerTimeout: BlockNumber = 100_800;           // 7天
     pub const WithdrawalCooldown: BlockNumber = 100_800;     // 7天
 }
@@ -1057,8 +1056,8 @@ impl pallet_otc_order::Config for Runtime {
     type EvidenceWindow = ConstU64<86_400_000>;
     type FirstPurchaseUsdValue = ConstU128<10_000_000>;
     type FirstPurchaseUsdAmount = ConstU64<10_000_000>;
-    type MinFirstPurchaseDustAmount = ConstU128<1_000_000_000_000>;
-    type MaxFirstPurchaseDustAmount = ConstU128<1_000_000_000_000_000>;
+    type MinFirstPurchaseCosAmount = ConstU128<1_000_000_000_000>;
+    type MaxFirstPurchaseCosAmount = ConstU128<1_000_000_000_000_000>;
     type MaxOrderUsdAmount = ConstU64<200_000_000>;
     type MinOrderUsdAmount = ConstU64<20_000_000>;
     type AmountValidationTolerance = ConstU16<100>;
@@ -1143,8 +1142,8 @@ pub struct Order<T: Config> {
     pub maker_id: u64,                    // 做市商 ID
     pub maker: T::AccountId,              // 做市商账户
     pub taker: T::AccountId,              // 买家账户
-    pub price: BalanceOf<T>,              // 单价（USDT/DUST，精度 10^6）
-    pub qty: BalanceOf<T>,                // 数量（DUST 数量）
+    pub price: BalanceOf<T>,              // 单价（USDT/COS，精度 10^6）
+    pub qty: BalanceOf<T>,                // 数量（COS 数量）
     pub amount: BalanceOf<T>,             // 总金额（USDT 金额）
     pub created_at: MomentOf,             // 创建时间（毫秒）
     pub expire_at: MomentOf,              // 超时时间（毫秒）
@@ -1166,7 +1165,7 @@ pub struct MakerSwapRecord<T: Config> {
     pub maker_id: u64,                    // 做市商 ID
     pub maker: T::AccountId,              // 做市商账户
     pub user: T::AccountId,               // 用户账户
-    pub dust_amount: BalanceOf<T>,        // DUST 数量
+    pub cos_amount: BalanceOf<T>,         // COS 数量
     pub usdt_amount: u64,                 // USDT 金额（精度 10^6）
     pub usdt_address: TronAddress,        // USDT 接收地址
     pub created_at: BlockNumberFor<T>,    // 创建时间
@@ -1384,7 +1383,7 @@ try {
 
 - **[pallet-maker](../maker/README.md)**: 做市商管理
 - **[pallet-otc-order](../otc/README.md)**: OTC 订单管理
-- **[pallet-swap](../swap/README.md)**: DUST → USDT 做市商兑换
+- **[pallet-swap](../swap/README.md)**: COS → USDT 做市商兑换
 - **[pallet-trading-common](../common/README.md)**: 公共工具库
 
 ### 依赖模块
@@ -1503,15 +1502,15 @@ async function buyerCompleteFlow() {
   await api.tx.otcOrder.markPaid(orderId, null)
     .signAndSend(buyerAccount);
 
-  // 3. 做市商释放 DUST
-  console.log('Step 3: 等待做市商释放 DUST...');
+  // 3. 做市商释放 COS
+  console.log('Step 3: 等待做市商释放 COS...');
   // （做市商账户调用 releaseDust）
 
   // 4. 首购完成后，创建普通订单（20-200 USD）
   console.log('Step 4: 创建普通订单...');
   await api.tx.otcOrder.createOrder(
     1, // maker_id
-    '50000000000000', // 50 DUST
+    '50000000000000', // 50 COS
     paymentCommit,
     contactCommit,
   ).signAndSend(buyerAccount);

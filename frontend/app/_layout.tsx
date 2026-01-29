@@ -1,87 +1,63 @@
-/**
- * 星尘玄鉴 - 应用根布局
- * 主题色：金棕色 #B2955D
- */
+import { Buffer } from 'buffer';
+import 'fast-text-encoding';
 
-import { Slot } from 'expo-router';
-import { View, StyleSheet, Text } from 'react-native';
-import { StatusBar } from 'expo-status-bar';
-import React, { useEffect } from 'react';
-import { ErrorBoundary } from '@/components/ErrorBoundary';
-import { disableConsoleInProduction, createLogger, configureLogger } from '@/lib/logger';
-import { configureErrorReporter } from '@/lib/error-handler';
-import { 
-  initErrorReporting, 
-  createRemoteLogger,
-  setTag,
-} from '@/services/error-reporting.service';
-import { initWebSecurity } from '@/lib/security/init';
-
-// 生产环境禁用 console.log/debug/info
-disableConsoleInProduction();
-
-const log = createLogger('RootLayout');
-
-// 主题色
-const THEME_BG = '#F5F5F7';
-const DARK_BG = '#0a0a0f';
-
-export default function RootLayout() {
-  log.debug('Rendering...');
-  
-  // 初始化服务
-  useEffect(() => {
-    const initServices = async () => {
-      try {
-        // 1. 初始化 Web 安全功能（P0 修复）
-        await initWebSecurity();
-        
-        // 2. 初始化错误上报（生产环境）
-        await initErrorReporting({
-          // DSN 从环境变量获取，未配置时使用本地日志
-          dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
-          environment: __DEV__ ? 'development' : 'production',
-          release: '1.0.0',
-        });
-        
-        // 3. 配置日志服务使用远程上报
-        configureLogger({
-          remoteLogger: createRemoteLogger(),
-        });
-        
-        // 4. 设置应用标签
-        setTag('app', 'stardust-mobile');
-        
-        log.info('Services initialized');
-      } catch (error) {
-        log.warn('Failed to initialize services:', error);
-      }
-    };
-    
-    initServices();
-  }, []);
-  
-  return (
-    <ErrorBoundary module="RootLayout">
-      <View style={styles.container}>
-        <StatusBar style="light" />
-        <View style={styles.content}>
-          <Slot />
-        </View>
-      </View>
-    </ErrorBoundary>
-  );
+if (typeof global.Buffer === 'undefined') {
+  global.Buffer = Buffer;
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: DARK_BG,
-  },
-  content: {
-    flex: 1,
-    backgroundColor: THEME_BG,
-  },
-});
+import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Stack } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
+import 'react-native-reanimated';
 
-declare const __DEV__: boolean;
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useAuthStore } from '@/src/stores/auth';
+import { useChainStore } from '@/src/stores/chain';
+import { useWalletStore } from '@/src/stores/wallet';
+
+const queryClient = new QueryClient();
+
+// 默认连接到本地节点或测试网
+const RPC_ENDPOINT = 'ws://127.0.0.1:9944';
+
+export const unstable_settings = {
+  anchor: '(tabs)',
+};
+
+export default function RootLayout() {
+  const colorScheme = useColorScheme();
+  const initializeAuth = useAuthStore((state) => state.initialize);
+  const connectChain = useChainStore((state) => state.connect);
+  const initializeWallet = useWalletStore((state) => state.initialize);
+
+  useEffect(() => {
+    const init = async () => {
+      try {
+        // 初始化钱包（兼容旧版）
+        await initializeAuth();
+        // 初始化多账户系统
+        await initializeWallet();
+        // 连接区块链
+        await connectChain(RPC_ENDPOINT);
+        console.log('App initialized, wallet and chain connected');
+      } catch (error) {
+        console.error('Initialization error:', error);
+      }
+    };
+    init();
+  }, []);
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+        <Stack>
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+        </Stack>
+        <StatusBar style="auto" />
+      </ThemeProvider>
+    </QueryClientProvider>
+  );
+}

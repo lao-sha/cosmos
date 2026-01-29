@@ -38,10 +38,10 @@ mod benchmarks {
         let caller: T::AccountId = whitelisted_caller();
         let swap_id: u64 = 1;
         let price: u64 = 7_000_000;
-        let dust_qty: BalanceOf<T> = 1000u32.into();
+        let cos_qty: BalanceOf<T> = 1000u32.into();
 
         #[extrinsic_call]
-        _(RawOrigin::Signed(caller), swap_id, price, dust_qty);
+        _(RawOrigin::Signed(caller), swap_id, price, cos_qty);
     }
 
     #[benchmark]

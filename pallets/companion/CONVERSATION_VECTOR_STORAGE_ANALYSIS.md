@@ -703,7 +703,7 @@ fn process_conversation_vectorization(
 
 - [AI 陪伴机器人分析](./AI_COMPANION_WEB3_ANALYSIS.md)
 - [聊天系统模块](../pallets/chat/README.md)
-- [IPFS 存储机制](../pallets/stardust-ipfs/README.md)
+- [IPFS 存储机制](../pallets/cosmos-ipfs/README.md)
 
 ---
 

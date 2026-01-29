@@ -10,7 +10,7 @@
 //! 
 //! 1. **pallet-maker** - 做市商管理（Application、审核、押金、提现）
 //! 2. **pallet-otc-order** - OTC 订单管理（创建、支付、释放、取消、争议）
-//! 3. **pallet-bridge** - DUST ↔ USDT 桥接（Swap、兑换、OCW）
+//! 3. **pallet-bridge** - COS ↔ USDT 桥接（Swap、兑换、OCW）
 //! 4. **pallet-trading-common** - 公共工具（数据掩码、验证）
 //! 
 //! ### 架构优势
@@ -30,12 +30,12 @@
 //! 
 //! pallet-otc-order (独立模块)
 //!   ├── 订单创建/支付
-//!   ├── DUST释放
+//!   ├── COS释放
 //!   ├── 首购逻辑
 //!   └── 自动过期
 //! 
 //! pallet-bridge (独立模块)
-//!   ├── DUST ↔ USDT兑换
+//!   ├── COS ↔ USDT兑换
 //!   ├── OCW处理
 //!   └── 做市商兑换
 //! 
@@ -135,7 +135,7 @@ pub use pallet_maker;
 /// 提供 OTC 订单创建、支付、释放、取消、争议、首购逻辑等功能。
 pub use pallet_otc_order;
 
-/// DUST ↔ USDT 桥接模块
+/// COS ↔ USDT 桥接模块
 /// 
 /// 提供官方桥接、做市商兑换、OCW 处理等功能。
 pub use pallet_bridge;

@@ -2,8 +2,8 @@
 name = "pallet-contacts"
 version = "0.1.0"
 license = "Unlicense"
-description = "Stardust 通讯录管理模块 - 联系人、分组、黑名单、好友申请"
-authors = ["Stardust Team"]
+description = "Cosmos 通讯录管理模块 - 联系人、分组、黑名单、好友申请"
+authors = ["Cosmos Team"]
 edition = "2021"
 publish = false
 

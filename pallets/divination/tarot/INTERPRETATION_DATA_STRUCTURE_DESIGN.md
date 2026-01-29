@@ -6,7 +6,7 @@
 
 #### 参考实现（xuanxue/tarot）
 
-通过分析 `/home/xiaodong/文档/stardust/xuanxue/tarot` 项目，发现其塔罗牌系统包含以下核心数据：
+通过分析 `/home/xiaodong/文档/cosmos/xuanxue/tarot` 项目，发现其塔罗牌系统包含以下核心数据：
 
 **Python实现（tarot-reader）**：
 - 完整的78张牌数据结构（TarotCard）

@@ -6,10 +6,10 @@
 
 ## Glossary
 
-- **Exchange_Module**: 合并后的统一兑换模块，处理所有 DUST ↔ USDT 交易
-- **Official_Bridge**: 官方桥接服务，由治理委员会管理的 DUST → USDT 兑换
-- **Maker_Bridge**: 做市商桥接服务，用户通过做市商进行 DUST → USDT 兑换
-- **OTC_Order**: 场外交易订单，用户通过做市商购买 DUST（USDT → DUST）
+- **Exchange_Module**: 合并后的统一兑换模块，处理所有 COS ↔ USDT 交易
+- **Official_Bridge**: 官方桥接服务，由治理委员会管理的 COS → USDT 兑换
+- **Maker_Bridge**: 做市商桥接服务，用户通过做市商进行 COS → USDT 兑换
+- **OTC_Order**: 场外交易订单，用户通过做市商购买 COS（USDT → COS）
 - **First_Purchase**: 首购订单，新用户固定 10 USD 价值的首次购买
 - **Swap_Record**: 统一的兑换/订单记录结构
 - **Escrow_Service**: 托管服务，用于锁定和释放资金
@@ -43,37 +43,37 @@
 
 ### Requirement 3: 官方桥接功能保留
 
-**User Story:** As a user, I want to use official bridge service, so that I can exchange DUST to USDT through governance-managed channel.
+**User Story:** As a user, I want to use official bridge service, so that I can exchange COS to USDT through governance-managed channel.
 
 #### Acceptance Criteria
 
-1. WHEN a user calls `official_swap`, THE Exchange_Module SHALL lock user's DUST to escrow
-2. WHEN governance calls `complete_official_swap`, THE Exchange_Module SHALL release DUST to bridge account
+1. WHEN a user calls `official_swap`, THE Exchange_Module SHALL lock user's COS to escrow
+2. WHEN governance calls `complete_official_swap`, THE Exchange_Module SHALL release COS to bridge account
 3. IF an official swap times out, THEN THE Exchange_Module SHALL allow refund to user
 4. THE Exchange_Module SHALL emit `OfficialSwapCreated` and `OfficialSwapCompleted` events
 
 ### Requirement 4: 做市商桥接功能保留
 
-**User Story:** As a user, I want to use maker bridge service, so that I can exchange DUST to USDT through market makers.
+**User Story:** As a user, I want to use maker bridge service, so that I can exchange COS to USDT through market makers.
 
 #### Acceptance Criteria
 
-1. WHEN a user calls `maker_swap`, THE Exchange_Module SHALL verify maker is active and lock user's DUST
-2. WHEN a maker calls `mark_swap_complete` with TRC20 tx hash, THE Exchange_Module SHALL verify hash uniqueness and release DUST to maker
+1. WHEN a user calls `maker_swap`, THE Exchange_Module SHALL verify maker is active and lock user's COS
+2. WHEN a maker calls `mark_swap_complete` with TRC20 tx hash, THE Exchange_Module SHALL verify hash uniqueness and release COS to maker
 3. IF a maker swap is not completed within timeout, THEN THE Exchange_Module SHALL allow user to report
 4. WHEN a user reports a swap, THE Exchange_Module SHALL change status to `UserReported` for arbitration
 5. THE Exchange_Module SHALL record maker credit for completed swaps
 
 ### Requirement 5: OTC 订单功能保留
 
-**User Story:** As a user, I want to buy DUST through OTC orders, so that I can acquire DUST by paying USDT to makers.
+**User Story:** As a user, I want to buy COS through OTC orders, so that I can acquire COS by paying USDT to makers.
 
 #### Acceptance Criteria
 
-1. WHEN a user calls `create_order`, THE Exchange_Module SHALL verify KYC, check quota, and lock maker's DUST
+1. WHEN a user calls `create_order`, THE Exchange_Module SHALL verify KYC, check quota, and lock maker's COS
 2. WHEN a buyer calls `mark_paid`, THE Exchange_Module SHALL update order status to `PaidOrCommitted`
-3. WHEN a maker calls `release_dust`, THE Exchange_Module SHALL release DUST to buyer and update credit
-4. WHEN either party calls `cancel_order`, THE Exchange_Module SHALL refund DUST to maker and release quota
+3. WHEN a maker calls `release_dust`, THE Exchange_Module SHALL release COS to buyer and update credit
+4. WHEN either party calls `cancel_order`, THE Exchange_Module SHALL refund COS to maker and release quota
 5. WHEN either party calls `dispute_order`, THE Exchange_Module SHALL change status to `Disputed`
 6. THE Exchange_Module SHALL enforce order amount limits (20-200 USD for regular orders)
 
@@ -84,7 +84,7 @@
 #### Acceptance Criteria
 
 1. WHEN a new user calls `create_first_purchase`, THE Exchange_Module SHALL verify user has not first purchased before
-2. THE Exchange_Module SHALL calculate DUST amount based on current price for fixed 10 USD value
+2. THE Exchange_Module SHALL calculate COS amount based on current price for fixed 10 USD value
 3. THE Exchange_Module SHALL limit each maker to maximum 5 concurrent first purchase orders
 4. WHEN a first purchase completes, THE Exchange_Module SHALL mark user as `HasFirstPurchased`
 

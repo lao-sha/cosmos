@@ -2,11 +2,11 @@
 
 ## 模块概述
 
-`pallet-trading-swap` 是 StarDust 链上的做市商兑换服务模块，提供 **DUST → USDT** 的兑换功能。用户可以通过做市商将链上的 DUST 代币兑换为 TRC20 USDT。
+`pallet-trading-swap` 是 Cosmos 链上的做市商兑换服务模块，提供 **COS → USDT** 的兑换功能。用户可以通过做市商将链上的 COS 代币兑换为 TRC20 USDT。
 
 ### 核心特性
 
-- 🔄 **做市商兑换**：市场化的 DUST → USDT 兑换服务
+- 🔄 **做市商兑换**：市场化的 COS → USDT 兑换服务
 - 🔍 **OCW 自动验证**：链下工作机（Off-Chain Worker）自动验证 TRC20 交易
 - ⏰ **超时退款机制**：做市商未及时完成转账时自动退款给用户
 - 🔒 **TRC20 交易哈希防重放**：防止同一笔 USDT 交易被重复使用
@@ -32,7 +32,7 @@
  │                       │                       │
  │ ① 创建兑换请求         │                       │
  │ ─────────────────────>│                       │
- │   (锁定 DUST)          │                       │
+ │   (锁定 COS)          │                       │
  │                       │                       │
  │                       │ ② 通知做市商           │
  │                       │ ─────────────────────>│
@@ -46,7 +46,7 @@
  │                       │ ⑤ OCW 验证 TRC20 交易  │
  │                       │ ─────────────────────>│
  │                       │                       │
- │                       │ ⑥ 验证成功，释放 DUST  │
+ │                       │ ⑥ 验证成功，释放 COS  │
  │                       │ ─────────────────────>│
  │                       │                       │
 ```
@@ -86,7 +86,7 @@ pub enum SwapStatus {
     Pending,
     /// 等待验证 - 做市商已提交交易哈希，等待 OCW 验证
     AwaitingVerification,
-    /// 已完成 - 验证成功，DUST 已释放给做市商
+    /// 已完成 - 验证成功，COS 已释放给做市商
     Completed,
     /// 验证失败 - OCW 验证 TRC20 交易失败
     VerificationFailed,
@@ -115,8 +115,8 @@ pub struct MakerSwapRecord<T: Config> {
     pub maker: T::AccountId,
     /// 用户账户
     pub user: T::AccountId,
-    /// DUST 数量
-    pub dust_amount: BalanceOf<T>,
+    /// COS 数量
+    pub cos_amount: BalanceOf<T>,
     /// USDT 金额（精度 10^6）
     pub usdt_amount: u64,
     /// USDT 接收地址（TRC20）
@@ -181,24 +181,24 @@ pub struct VerificationRequest<T: Config> {
 
 ### 1. `maker_swap` - 创建做市商兑换
 
-用户发起 DUST → USDT 兑换请求。
+用户发起 COS → USDT 兑换请求。
 
 ```rust
 pub fn maker_swap(
     origin: OriginFor<T>,
     maker_id: u64,           // 做市商 ID
-    dust_amount: BalanceOf<T>, // DUST 数量
+    cos_amount: BalanceOf<T>, // COS 数量
     usdt_address: Vec<u8>,   // USDT 接收地址（TRC20）
 ) -> DispatchResult
 ```
 
 **流程**：
-1. 验证兑换金额 ≥ 最小金额（100 DUST）
+1. 验证兑换金额 ≥ 最小金额（100 COS）
 2. 验证做市商存在且激活
 3. 验证 USDT 地址格式（TRC20）
-4. 获取当前 DUST/USD 汇率
+4. 获取当前 COS/USD 汇率
 5. 计算 USDT 金额（至少 1 USDT）
-6. 锁定用户的 DUST 到托管
+6. 锁定用户的 COS 到托管
 7. 创建兑换记录
 
 ### 2. `mark_swap_complete` - 提交 TRC20 交易哈希
@@ -296,7 +296,7 @@ pub fn ocw_submit_verification(
 | `SwapReported` | 用户已举报兑换 |
 | `SwapTimeout` | 兑换已超时退款 |
 | `VerificationSubmitted` | TRC20 验证已提交，等待验证 |
-| `VerificationConfirmed` | TRC20 验证成功，DUST 已释放 |
+| `VerificationConfirmed` | TRC20 验证成功，COS 已释放 |
 | `VerificationFailed` | TRC20 验证失败 |
 | `VerificationTimeout` | 验证超时，已退款 |
 
@@ -339,7 +339,7 @@ pub fn ocw_submit_verification(
 |------|------|--------|------|
 | `OcwSwapTimeoutBlocks` | `BlockNumber` | 14400（约 1 天） | 做市商兑换超时时间 |
 | `VerificationTimeoutBlocks` | `BlockNumber` | 1200（约 2 小时） | TRC20 验证超时时间 |
-| `MinSwapAmount` | `Balance` | 100 DUST | 最小兑换金额 |
+| `MinSwapAmount` | `Balance` | 100 COS | 最小兑换金额 |
 | `TxHashTtlBlocks` | `BlockNumber` | 432000（约 30 天） | 交易哈希 TTL（防重放窗口） |
 
 ---
@@ -349,15 +349,15 @@ pub fn ocw_submit_verification(
 ### 用户发起兑换
 
 ```rust
-// 用户将 1000 DUST 兑换为 USDT
+// 用户将 1000 COS 兑换为 USDT
 let maker_id = 1;
-let dust_amount = 1_000_000_000_000_000u128; // 1000 DUST (12位精度)
+let cos_amount = 1_000_000_000_000_000u128; // 1000 COS (12位精度)
 let usdt_address = b"TRC20_ADDRESS_HERE".to_vec();
 
 Swap::maker_swap(
     RuntimeOrigin::signed(user),
     maker_id,
-    dust_amount,
+    cos_amount,
     usdt_address,
 )?;
 ```
@@ -429,7 +429,7 @@ let maker_swaps = Swap::get_maker_swaps(maker_id);
 | `pallet-trading-common` | 公共类型和接口 |
 | `pallet-timestamp` | 时间戳服务 |
 | `pallet-storage-lifecycle` | 存储生命周期管理 |
-| `pallet-stardust-ipfs` | CID 锁定管理（证据存储） |
+| `pallet-cosmos-ipfs` | CID 锁定管理（证据存储） |
 
 ---
 

@@ -1,10 +1,10 @@
 [package]
 name = "pallet-chat-permission"
 version = "0.1.0"
-authors = ["Stardust Team"]
+authors = ["Cosmos Team"]
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/lao-sha/stardust"
+repository = "https://github.com/memoio/cosmos"
 description = "聊天权限系统模块 - 基于场景的多场景共存权限控制"
 
 [package.metadata.docs.rs]

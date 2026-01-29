@@ -50,7 +50,7 @@ impl frame_system::Config for Test {
 // 1. pallet-balances (Currency)
 // 2. pallet-trading-credit (MakerCredit)
 // 3. pallet-trading-common (PricingProvider)
-// 4. pallet-stardust-ipfs (ContentRegistry)
+// 4. pallet-cosmos-ipfs (ContentRegistry)
 // 5. pallet-timestamp (UnixTime)
 // 
 // 完整 mock 实现需要配置所有依赖 pallet

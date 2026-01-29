@@ -98,14 +98,14 @@ impl<Balance: Clone + Saturating + PartialOrd + From<u32>> DepositConfig<Balance
     /// 使用较小的测试值，实际生产值应在 Runtime 中配置。
     ///
     /// 测试值：
-    /// - 基础费率: 100 (0.0000001 DUST per KB)
-    /// - 最小押金: 10 (0.00000001 DUST)
-    /// - 最大押金: 100_000_000 (0.1 DUST)
+    /// - 基础费率: 100 (0.0000001 COS per KB)
+    /// - 最小押金: 10 (0.00000001 COS)
+    /// - 最大押金: 100_000_000 (0.1 COS)
     ///
     /// 生产建议值（需要在 Runtime 中使用 u128）：
-    /// - 基础费率: 10_000_000_000 (0.01 DUST per KB)
-    /// - 最小押金: 1_000_000_000 (0.001 DUST)
-    /// - 最大押金: 100_000_000_000_000 (100 DUST)
+    /// - 基础费率: 10_000_000_000 (0.01 COS per KB)
+    /// - 最小押金: 1_000_000_000 (0.001 COS)
+    /// - 最大押金: 100_000_000_000_000 (100 COS)
     pub fn test_config() -> Self {
         Self {
             base_rate_per_kb: Balance::from(100u32),
@@ -176,7 +176,7 @@ pub const BLOCKS_PER_30_DAYS: u32 = 432_000;
 ///     PrivacyMode::Partial,
 ///     &config,
 /// );
-/// // deposit = 0.01 × 2 × 1.2 = 0.024 DUST
+/// // deposit = 0.01 × 2 × 1.2 = 0.024 COS
 /// ```
 pub fn calculate_storage_deposit<Balance>(
     data_size_bytes: u32,
@@ -234,11 +234,11 @@ where
 ///
 /// ```ignore
 /// let (refund, treasury) = calculate_refund_amount(
-///     1_000_000_000_000u128,  // 1 DUST
+///     1_000_000_000_000u128,  // 1 COS
 ///     100,                    // 创建于区块 100
 ///     500_000,                // 当前区块 500000（超过30天）
 /// );
-/// // refund = 0.9 DUST, treasury = 0.1 DUST
+/// // refund = 0.9 COS, treasury = 0.1 COS
 /// ```
 pub fn calculate_refund_amount<Balance, BlockNumber>(
     deposit_amount: Balance,
@@ -316,9 +316,9 @@ mod tests {
 
     fn test_config() -> DepositConfig<TestBalance> {
         DepositConfig {
-            base_rate_per_kb: 10_000_000_000,     // 0.01 DUST per KB
-            minimum_deposit: 1_000_000_000,       // 0.001 DUST
-            maximum_deposit: 100_000_000_000_000, // 100 DUST
+            base_rate_per_kb: 10_000_000_000,     // 0.01 COS per KB
+            minimum_deposit: 1_000_000_000,       // 0.001 COS
+            maximum_deposit: 100_000_000_000_000, // 100 COS
         }
     }
 
@@ -342,7 +342,7 @@ mod tests {
         let config = test_config();
 
         // 1 KB, Public mode
-        // deposit = 0.01 × 1 × 1.0 = 0.01 DUST
+        // deposit = 0.01 × 1 × 1.0 = 0.01 COS
         let deposit = calculate_storage_deposit::<TestBalance>(
             1024,
             PrivacyMode::Public,
@@ -351,7 +351,7 @@ mod tests {
         assert_eq!(deposit, 10_000_000_000);
 
         // 2 KB, Public mode
-        // deposit = 0.01 × 2 × 1.0 = 0.02 DUST
+        // deposit = 0.01 × 2 × 1.0 = 0.02 COS
         let deposit = calculate_storage_deposit::<TestBalance>(
             2048,
             PrivacyMode::Public,
@@ -365,7 +365,7 @@ mod tests {
         let config = test_config();
 
         // 1 KB, Partial mode
-        // deposit = 0.01 × 1 × 1.2 = 0.012 DUST
+        // deposit = 0.01 × 1 × 1.2 = 0.012 COS
         let deposit = calculate_storage_deposit::<TestBalance>(
             1024,
             PrivacyMode::Partial,
@@ -374,7 +374,7 @@ mod tests {
         assert_eq!(deposit, 12_000_000_000);
 
         // 2 KB, Partial mode
-        // deposit = 0.01 × 2 × 1.2 = 0.024 DUST
+        // deposit = 0.01 × 2 × 1.2 = 0.024 COS
         let deposit = calculate_storage_deposit::<TestBalance>(
             2048,
             PrivacyMode::Partial,
@@ -388,7 +388,7 @@ mod tests {
         let config = test_config();
 
         // 1 KB, Private mode
-        // deposit = 0.01 × 1 × 1.5 = 0.015 DUST
+        // deposit = 0.01 × 1 × 1.5 = 0.015 COS
         let deposit = calculate_storage_deposit::<TestBalance>(
             1024,
             PrivacyMode::Private,
@@ -408,7 +408,7 @@ mod tests {
             &config,
         );
         // 100 bytes → 1 KB (向上取整)
-        // deposit = 0.01 × 1 × 1.0 = 0.01 DUST = 10_000_000_000
+        // deposit = 0.01 × 1 × 1.0 = 0.01 COS = 10_000_000_000
         // 大于最小押金 1_000_000_000
         assert_eq!(deposit, 10_000_000_000);
     }
@@ -423,13 +423,13 @@ mod tests {
             PrivacyMode::Public,
             &config,
         );
-        // deposit = 0.01 × 2 × 1.0 = 0.02 DUST
+        // deposit = 0.01 × 2 × 1.0 = 0.02 COS
         assert_eq!(deposit, 20_000_000_000);
     }
 
     #[test]
     fn test_calculate_refund_within_30_days() {
-        let deposit_amount: TestBalance = 1_000_000_000_000; // 1 DUST
+        let deposit_amount: TestBalance = 1_000_000_000_000; // 1 COS
         let created_at: TestBlockNumber = 100;
         let current_block: TestBlockNumber = 100 + BLOCKS_PER_30_DAYS - 1; // 刚好30天内
 
@@ -446,7 +446,7 @@ mod tests {
 
     #[test]
     fn test_calculate_refund_after_30_days() {
-        let deposit_amount: TestBalance = 1_000_000_000_000; // 1 DUST
+        let deposit_amount: TestBalance = 1_000_000_000_000; // 1 COS
         let created_at: TestBlockNumber = 100;
         let current_block: TestBlockNumber = 100 + BLOCKS_PER_30_DAYS + 1; // 超过30天
 
@@ -463,7 +463,7 @@ mod tests {
 
     #[test]
     fn test_calculate_refund_edge_case_exactly_30_days() {
-        let deposit_amount: TestBalance = 1_000_000_000_000; // 1 DUST
+        let deposit_amount: TestBalance = 1_000_000_000_000; // 1 COS
         let created_at: TestBlockNumber = 100;
         let current_block: TestBlockNumber = 100 + BLOCKS_PER_30_DAYS; // 刚好30天
 

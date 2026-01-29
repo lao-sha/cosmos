@@ -44,7 +44,7 @@ pub use pallet::*;
 /// 用户存储资金账户提供者 trait
 /// 
 /// 用于获取用户的 UserFunding 派生账户地址
-/// 实现方通常是 pallet-stardust-ipfs
+/// 实现方通常是 pallet-cosmos-ipfs
 pub trait UserFundingProvider<AccountId> {
     /// 获取用户的存储资金账户地址
     fn derive_user_funding_account(user: &AccountId) -> AccountId;
@@ -212,7 +212,7 @@ pub mod pallet {
         #[pallet::constant]
         type ProposalExpiry: Get<BlockNumberFor<Self>>;
 
-        /// 提案押金兜底值（DUST数量，pricing不可用时使用）
+        /// 提案押金兜底值（COS数量，pricing不可用时使用）
         #[pallet::constant]
         type ProposalDeposit: Get<BalanceOf<Self>>;
 
@@ -1039,7 +1039,7 @@ pub mod pallet {
         /// 发起分成比例调整提案
         ///
         /// 权限要求（满足其一）:
-        /// - 持币量 ≥ 10,000 DUST（大户提案）
+        /// - 持币量 ≥ 10,000 COS（大户提案）
         /// - ≥ 1000 人联署（联署提案）
         /// - 技术委员会成员提议（委员会提案）
         ///
@@ -1079,7 +1079,7 @@ pub mod pallet {
             let change_magnitude =
                 Self::calculate_change_magnitude(&current_percentages, &new_percentages);
 
-            // 计算提案押金（50 USDT 等值的 DUST）
+            // 计算提案押金（50 USDT 等值的 COS）
             let deposit_amount = Self::calculate_proposal_deposit();
 
             // 缴纳押金
@@ -1921,7 +1921,7 @@ pub mod pallet {
             x
         }
 
-        /// 计算提案押金金额（50 USDT 等值的 DUST）
+        /// 计算提案押金金额（50 USDT 等值的 COS）
         /// 
         /// 使用统一的 DepositCalculator trait 计算
         pub fn calculate_proposal_deposit() -> BalanceOf<T> {

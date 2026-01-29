@@ -2,10 +2,10 @@
 name = "pallet-divination-ocw-tee"
 version = "0.1.0"
 description = "OCW + TEE 通用架构模块，为所有占卜模块提供统一的隐私计算基础设施"
-authors = ["Stardust Team"]
+authors = ["Cosmos Team"]
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/stardust/stardust"
+repository = "https://github.com/memoio/cosmos"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]

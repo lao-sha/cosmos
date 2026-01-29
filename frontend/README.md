@@ -1,181 +1,50 @@
-# 星尘玄鉴 - 移动端应用
+# Welcome to your Expo app 👋
 
-基于 Substrate 区块链的玄学占卜 DApp（纯移动端）
+This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
-## 🌟 特性
+## Get started
 
-- ✅ 纯移动端设计，极致原生体验
-- ✅ 手势交互：摇晃手机起卦、滑动抽塔罗牌
-- ✅ 安全钱包：scrypt + AES-256 加密存储
-- ✅ 八种占卜术：八字、紫微、奇门、六爻、梅花、塔罗、大六壬、小六壬
-- ✅ 链上存证：占卜结果永久保存
-- ✅ 离线可用：核心功能支持离线
+1. Install dependencies
 
-## 📱 技术栈
+   ```bash
+   npm install
+   ```
 
-| 技术 | 版本 | 用途 |
-|------|------|------|
-| React Native | 0.76+ | 移动端框架 |
-| Expo | 52+ | 开发平台 |
-| TypeScript | 5.6+ | 类型系统（strict mode）|
-| @polkadot/api | 14.x | Substrate API |
-| Zustand | 5.x | 状态管理 |
-| Expo Router | 4.x | 文件路由 |
-| Reanimated 3 | 3.16+ | 高性能动画 |
-| Gesture Handler | 2.20+ | 手势识别 |
+2. Start the app
 
-## 🚀 快速开始
+   ```bash
+   npx expo start
+   ```
 
-### 安装依赖
+In the output, you'll find options to open the app in a
 
-```bash
-npm install
-```
+- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
+- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
+- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
+- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
 
-### 开发模式
+You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+
+## Get a fresh project
+
+When you're ready, run:
 
 ```bash
-# 启动开发服务器
-npm start
-
-# iOS
-npm run ios
-
-# Android
-npm run android
+npm run reset-project
 ```
 
-### 构建生产版本
+This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
 
-```bash
-# 安装 EAS CLI
-npm install -g eas-cli
+## Learn more
 
-# 登录 Expo
-eas login
+To learn more about developing your project with Expo, look at the following resources:
 
-# 构建
-eas build --platform all
-```
+- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
+- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
 
-## 📂 项目结构
+## Join the community
 
-```
-frontend/
-├── app/                    # Expo Router 页面
-│   ├── (tabs)/             # 底部标签页
-│   │   ├── index.tsx       # 首页
-│   │   ├── divination.tsx  # 占卜入口
-│   │   ├── chat.tsx        # 消息
-│   │   └── profile.tsx     # 我的
-│   ├── auth/               # 认证页面
-│   │   ├── create.tsx      # 创建钱包
-│   │   ├── import.tsx      # 导入钱包
-│   │   └── unlock.tsx      # 解锁钱包
-│   └── divination/         # 占卜详情页
-│       └── liuyao.tsx      # 六爻摇卦
-│
-├── src/
-│   ├── lib/                # 核心库
-│   │   ├── errors.ts       # 错误定义
-│   │   ├── crypto.ts       # 加密工具
-│   │   └── keystore.ts     # 密钥存储
-│   ├── api/                # 链交互
-│   │   └── connection.ts   # API 连接
-│   ├── stores/             # Zustand 状态
-│   │   └── wallet.store.ts # 钱包状态
-│   └── hooks/              # 自定义 Hooks
-│       ├── useShake.ts     # 摇晃检测
-│       └── useHaptic.ts    # 触觉反馈
-│
-├── metro.config.js         # Metro 配置（polyfill）
-├── tsconfig.json           # TypeScript 配置（strict）
-└── app.json                # Expo 配置
-```
+Join our community of developers creating universal apps.
 
-## 🔒 安全特性
-
-### 钱包加密
-
-- **算法**：scrypt + AES-256（简化版，生产建议使用 AES-GCM）
-- **密钥派生**：scrypt(password, salt, N=16384, r=8, p=1)
-- **存储**：Expo SecureStore（iOS Keychain / Android Keystore）
-
-### 安全建议
-
-⚠️ **当前实现使用简化的 XOR 加密作为演示，生产环境必须替换为 AES-GCM！**
-
-安装生产级加密库：
-
-```bash
-npm install react-native-aes-crypto
-```
-
-## 📝 开发计划
-
-### ✅ 已完成
-
-- [x] 项目初始化
-- [x] Polkadot API 集成
-- [x] 钱包创建/导入/解锁
-- [x] 摇晃检测 Hook
-- [x] 触觉反馈
-- [x] 六爻摇卦页面（示例）
-- [x] 底部导航
-- [x] 错误处理
-- [x] 网络自动重连
-
-### 🔄 进行中
-
-- [ ] 其他 7 种占卜页面
-- [ ] 占卜算法实现
-- [ ] 链上存储功能
-- [ ] UI 优化
-
-### 📅 待开发
-
-- [ ] 聊天功能
-- [ ] 交易功能
-- [ ] 历史记录
-- [ ] 多语言支持
-- [ ] PWA 支持
-
-## 🎮 手势交互
-
-| 占卜术 | 手势 | 触觉反馈 |
-|--------|------|----------|
-| 六爻 | 📱 摇晃手机 | Medium Impact |
-| 塔罗 | 👆 上滑/左滑 | Medium Impact |
-| 梅花 | 🔄 双指旋转 | Light Impact |
-| 小六壬 | 👆 滑动 | Selection |
-
-## 🔧 配置
-
-### 环境变量
-
-创建 `.env` 文件：
-
-```env
-EXPO_PUBLIC_WS_ENDPOINT=ws://127.0.0.1:9944
-```
-
-### Metro Polyfill
-
-已配置 `@polkadot/api` 所需的 polyfill：
-- `react-native-get-random-values`
-- `buffer`
-- `readable-stream`
-
-## 📄 许可证
-
-MIT
-
-## 👥 贡献
-
-欢迎贡献代码！
-
----
-
-**版本**：0.1.0
-**更新日期**：2025-12-31
-**作者**：Claude Code
+- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
+- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.

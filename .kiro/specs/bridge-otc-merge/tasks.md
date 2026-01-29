@@ -36,14 +36,14 @@
     - 验证最小金额
     - 验证 TRON 地址格式
     - 获取当前价格
-    - 锁定用户 DUST 到托管
+    - 锁定用户 COS 到托管
     - 创建 ExchangeRecord
     - 发出 ExchangeCreated 事件
     - _Requirements: 3.1, 3.4_
   - [ ] 3.2 实现 complete_official_swap 函数
     - 验证治理权限
     - 验证交易状态
-    - 释放 DUST 到桥接账户
+    - 释放 COS 到桥接账户
     - 更新状态为 Completed
     - 发出 ExchangeCompleted 事件
     - _Requirements: 3.2, 3.4_
@@ -61,7 +61,7 @@
     - 验证做市商存在且激活
     - 验证 USDT 地址格式
     - 获取当前价格并计算 USDT 金额
-    - 锁定用户 DUST 到托管
+    - 锁定用户 COS 到托管
     - 创建 ExchangeRecord
     - 发出 ExchangeCreated 事件
     - _Requirements: 4.1_
@@ -70,7 +70,7 @@
     - 验证交易状态为 Created
     - 验证 TRC20 交易哈希唯一性
     - 记录已使用的交易哈希
-    - 释放 DUST 到做市商
+    - 释放 COS 到做市商
     - 记录做市商信用分
     - 更新状态为 Completed
     - _Requirements: 4.2, 4.5_
@@ -114,7 +114,7 @@
     - 验证订单金额限制 (20-200 USD)
     - 验证做市商存在且激活
     - 检查并占用买家额度
-    - 锁定做市商 DUST 到托管
+    - 锁定做市商 COS 到托管
     - 创建 ExchangeRecord
     - 授予聊天权限
     - 发出 ExchangeCreated 事件
@@ -128,7 +128,7 @@
   - [ ] 7.3 实现 release_dust 函数
     - 验证调用者是做市商
     - 验证交易状态为 PaidOrCommitted
-    - 释放 DUST 到买家
+    - 释放 COS 到买家
     - 释放买家额度
     - 记录做市商和买家信用分
     - 更新状态为 Released
@@ -136,7 +136,7 @@
   - [ ] 7.4 实现 cancel_order 函数
     - 验证调用者是买家或做市商
     - 验证交易状态允许取消
-    - 退还 DUST 给做市商
+    - 退还 COS 给做市商
     - 释放买家额度
     - 记录买家取消信用
     - 更新状态为 Cancelled
@@ -157,9 +157,9 @@
     - 调用 KYC 验证
     - 验证用户未首购过
     - 验证做市商首购配额
-    - 根据当前价格计算 DUST 数量
-    - 验证 DUST 数量在合理范围
-    - 锁定做市商 DUST 到托管
+    - 根据当前价格计算 COS 数量
+    - 验证 COS 数量在合理范围
+    - 锁定做市商 COS 到托管
     - 更新做市商首购计数
     - 创建 ExchangeRecord
     - 授予聊天权限
@@ -170,7 +170,7 @@
     - _Requirements: 6.4_
   - [ ]* 8.3 编写首购订单属性测试
     - **Property 8: First Purchase Uniqueness**
-    - **Property 9: First Purchase DUST Calculation**
+    - **Property 9: First Purchase COS Calculation**
     - **Property 10: Maker First Purchase Quota**
     - **Validates: Requirements 6.1, 6.2, 6.3, 6.4**
 

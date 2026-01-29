@@ -266,11 +266,11 @@ impl pallet_divination_market::Config for Runtime {
 	type Currency = Balances;
 	type DivinationProvider = pallet_divination_common::NullDivinationProvider;
 	type ContentRegistry = pallet_storage_service::Pallet<Runtime>;
-	type MinDeposit = ConstU128<{ 10 * UNIT }>;  // 最低保证金 10 DUST（兜底值）
+	type MinDeposit = ConstU128<{ 10 * UNIT }>;  // 最低保证金 10 COS（兜底值）
 	type MinDepositUsd = ConstU64<100_000_000>;  // 最低保证金 100 USDT（精度10^6，使用pricing换算）
 	type Pricing = TradingPricingProvider;  // 定价接口
 	type MinServicePrice = ConstU128<{ UNIT / 10 }>;
-	type MaxServicePrice = ConstU128<{ 100_000_000 * UNIT }>;  // 修复 H-13: 最大服务价格 1亿 DUST
+	type MaxServicePrice = ConstU128<{ 100_000_000 * UNIT }>;  // 修复 H-13: 最大服务价格 1亿 COS
 	type OrderTimeout = ConstU32<{ 24 * HOURS }>;
 	type AcceptTimeout = ConstU32<{ 1 * HOURS }>;
 	type ReviewPeriod = ConstU32<{ 7 * DAYS }>;
@@ -592,7 +592,7 @@ parameter_types! {
 }
 
 parameter_types! {
-	pub const GroupDeposit: Balance = 50 * UNIT; // 创建群组保证金兜底值 50 DUST
+	pub const GroupDeposit: Balance = 50 * UNIT; // 创建群组保证金兜底值 50 COS
 	pub const GroupDepositUsd: u64 = 5_000_000; // 创建群组保证金 5 USDT（精度10^6）
 }
 
@@ -634,8 +634,8 @@ impl pallet_livestream::Config for Runtime {
 	type MaxGiftNameLen = ConstU32<32>;
 	type MaxCoHostsPerRoom = ConstU32<4>;
 	type PlatformFeePercent = ConstU8<20>; // 20% 平台抽成
-	type MinWithdrawAmount = ConstU128<{ 1 * UNIT }>; // 最小提现 1 DUST
-	type RoomBond = ConstU128<{ UNIT / 20 }>; // 创建直播间保证金兜底值 0.05 DUST
+	type MinWithdrawAmount = ConstU128<{ 1 * UNIT }>; // 最小提现 1 COS
+	type RoomBond = ConstU128<{ UNIT / 20 }>; // 创建直播间保证金兜底值 0.05 COS
 	type RoomBondUsd = ConstU64<5_000_000>; // 创建直播间保证金 5 USDT
 	type DepositCalculator = pallet_trading_common::DepositCalculatorImpl<TradingPricingProvider, Balance>;
 	type PalletId = LivestreamPalletId;
@@ -682,8 +682,8 @@ impl pallet_trading_credit::Config for Runtime {
 pub struct TradingPricingProvider;
 
 impl pallet_trading_common::PricingProvider<Balance> for TradingPricingProvider {
-	fn get_dust_to_usd_rate() -> Option<Balance> {
-		let price = pallet_trading_pricing::Pallet::<Runtime>::get_dust_market_price_weighted();
+	fn get_cos_to_usd_rate() -> Option<Balance> {
+		let price = pallet_trading_pricing::Pallet::<Runtime>::get_cos_market_price_weighted();
 		if price > 0 {
 			Some(price as Balance)
 		} else {
@@ -691,8 +691,8 @@ impl pallet_trading_common::PricingProvider<Balance> for TradingPricingProvider 
 		}
 	}
 	
-	fn report_swap_order(timestamp: u64, price_usdt: u64, dust_qty: u128) -> sp_runtime::DispatchResult {
-		pallet_trading_pricing::Pallet::<Runtime>::add_swap_order(timestamp, price_usdt, dust_qty)
+	fn report_swap_order(timestamp: u64, price_usdt: u64, cos_qty: u128) -> sp_runtime::DispatchResult {
+		pallet_trading_pricing::Pallet::<Runtime>::add_swap_order(timestamp, price_usdt, cos_qty)
 	}
 }
 
@@ -776,7 +776,7 @@ impl pallet_trading_swap::Config for Runtime {
 		EnsureRoot<AccountId>,
 		pallet_collective::EnsureProportionAtLeast<AccountId, pallet_collective::Instance1, 2, 3>,
 	>;
-	type MinSwapAmount = ConstU128<{ 10 * UNIT }>; // 最小兑换10 DUST
+	type MinSwapAmount = ConstU128<{ 10 * UNIT }>; // 最小兑换10 COS
 	// 🆕 存储膨胀防护：TRON 交易哈希 TTL（30天 = 432000 区块 @6秒/块）
 	type TxHashTtlBlocks = ConstU32<{ 30 * DAYS }>;
 	type WeightInfo = ();
@@ -859,15 +859,15 @@ impl pallet_trading_otc::Config for Runtime {
 	type OrderTimeout = ConstU64<3600000>; // 1小时（毫秒）
 	type EvidenceWindow = ConstU64<86400000>; // 24小时（毫秒）
 	type FirstPurchaseUsdValue = ConstU128<10_000_000>; // 10 USD (精度 10^6)
-	type MinFirstPurchaseDustAmount = ConstU128<{ 1 * UNIT }>; // 最小1 DUST (防止汇率过高)
-	type MaxFirstPurchaseDustAmount = ConstU128<{ 100_000_000 * UNIT }>; // 最大1亿DUST (防止汇率异常低)
+	type MinFirstPurchaseCosAmount = ConstU128<{ 1 * UNIT }>; // 最小1 COS (防止汇率过高)
+	type MaxFirstPurchaseCosAmount = ConstU128<{ 100_000_000 * UNIT }>; // 最大1亿COS (防止汇率异常低)
 	type MaxOrderUsdAmount = ConstU64<200_000_000>; // 200 USD
 	type MinOrderUsdAmount = ConstU64<20_000_000>; // 20 USD
 	type FirstPurchaseUsdAmount = ConstU64<10_000_000>; // 10 USD
 	type AmountValidationTolerance = ConstU16<100>; // 1% 容差
 	type MaxFirstPurchaseOrdersPerMaker = ConstU32<5>;
 	// 🆕 2026-01-18: 买家押金机制配置
-	type MinDeposit = ConstU128<{ UNIT / 10 }>; // 最小押金 0.1 DUST
+	type MinDeposit = ConstU128<{ UNIT / 10 }>; // 最小押金 0.1 COS
 	type DepositRateLow = ConstU16<300>; // 3% (信用分 50-69)
 	type DepositRateMedium = ConstU16<500>; // 5% (信用分 30-49)
 	type DepositRateHigh = ConstU16<1000>; // 10% (信用分 < 30)
@@ -924,8 +924,8 @@ parameter_types! {
 	pub const AffiliateMinUsdt: u64 = 30_000_000;
 }
 
-/// 基于余额的会员验证 - 账户余额 >= 30 USDT 等值 DUST 才有资格获得联盟分成
-/// 使用 pricing 模块的实时 DUST/USDT 价格进行换算
+/// 基于余额的会员验证 - 账户余额 >= 30 USDT 等值 COS 才有资格获得联盟分成
+/// 使用 pricing 模块的实时 COS/USDT 价格进行换算
 pub struct BalanceBasedMembership;
 
 impl pallet_referral::MembershipProvider<AccountId> for BalanceBasedMembership {
@@ -933,24 +933,24 @@ impl pallet_referral::MembershipProvider<AccountId> for BalanceBasedMembership {
 		// 获取账户可用余额
 		let balance = pallet_balances::Pallet::<Runtime>::free_balance(who);
 
-		// 获取 DUST/USDT 价格（精度 10^6）
-		let price_usdt = pallet_trading_pricing::Pallet::<Runtime>::get_dust_market_price_weighted();
+		// 获取 COS/USDT 价格（精度 10^6）
+		let price_usdt = pallet_trading_pricing::Pallet::<Runtime>::get_cos_market_price_weighted();
 
 		// 价格为 0 时使用保底逻辑（要求最低 ED）
 		if price_usdt == 0 {
 			return balance >= EXISTENTIAL_DEPOSIT;
 		}
 
-		// 计算 30 USDT 等值的 DUST 数量
-		// min_dust = 30_USDT * 10^12 / price_usdt
+		// 计算 30 USDT 等值的 COS 数量
+		// min_cos = 30_USDT * 10^12 / price_usdt
 		// 其中 30_USDT = 30_000_000（精度 10^6）
 		let min_usdt = AffiliateMinUsdt::get() as u128;
-		let min_dust = min_usdt
-			.saturating_mul(1_000_000_000_000u128)  // 10^12 DUST 精度
+		let min_cos = min_usdt
+			.saturating_mul(1_000_000_000_000u128)  // 10^12 COS 精度
 			.checked_div(price_usdt as u128)
 			.unwrap_or(0);
 
-		balance >= min_dust
+		balance >= min_cos
 	}
 }
 
@@ -1258,7 +1258,7 @@ impl pallet_arbitration::pallet::Config for Runtime {
 	type ResponseDeadline = ConstU32<{ 7 * DAYS }>; // 7天应诉期限
 	type RejectedSlashBps = ConstU16<3000>; // 驳回时罚没30%
 	type PartialSlashBps = ConstU16<5000>; // 部分胜诉罚没50%
-	type ComplaintDeposit = ConstU128<{ UNIT / 10 }>; // 投诉押金兜底值 0.1 DUST
+	type ComplaintDeposit = ConstU128<{ UNIT / 10 }>; // 投诉押金兜底值 0.1 COS
 	type ComplaintDepositUsd = ConstU64<1_000_000>; // 投诉押金 1 USDT（精度10^6，使用pricing换算）
 	type Pricing = TradingPricingProvider; // 定价接口
 	type ComplaintSlashBps = ConstU16<5000>; // 投诉败诉罚没50%
@@ -1459,7 +1459,7 @@ parameter_types! {
 	pub const DivinationMembershipPalletId: frame_support::PalletId = frame_support::PalletId(*b"div/memb");
 	pub const RewardPoolAllocation: u32 = 1000; // 10% 分配到奖励池
 	pub const NewAccountCooldown: BlockNumber = 7 * DAYS; // 7天冷却期
-	pub const MinBalanceForRewards: Balance = UNIT; // 最低 1 DUST
+	pub const MinBalanceForRewards: Balance = UNIT; // 最低 1 COS
 	pub const BlocksPerDay: BlockNumber = DAYS; // 每天区块数
 	pub const BlocksPerMonth: BlockNumber = 30 * DAYS; // 每月区块数
 	pub const MaxDisplayNameLength: u32 = 64;
@@ -1494,14 +1494,14 @@ impl pallet_divination_membership::Config for Runtime {
 parameter_types! {
 	pub const MatchmakingBlocksPerMonth: BlockNumber = 30 * DAYS;
 	pub const MatchmakingBlocksPerDay: BlockNumber = DAYS;
-	pub const MatchmakingMonthlyFee: Balance = 10 * UNIT; // 兜底值 10 DUST
+	pub const MatchmakingMonthlyFee: Balance = 10 * UNIT; // 兜底值 10 COS
 	pub const MatchmakingMonthlyFeeUsd: u64 = 10_000_000; // 10 USDT
-	pub const MatchmakingLifetimeFee: Balance = 500 * UNIT; // 兜底值 500 DUST
+	pub const MatchmakingLifetimeFee: Balance = 500 * UNIT; // 兜底值 500 COS
 	pub const MatchmakingLifetimeFeeUsd: u64 = 500_000_000; // 500 USDT
 	// Profile 保证金配置
-	pub const ProfileDeposit: Balance = 500 * UNIT; // 兜底值 500 DUST
+	pub const ProfileDeposit: Balance = 500 * UNIT; // 兜底值 500 COS
 	pub const ProfileDepositUsd: u64 = 50_000_000; // 50 USDT
-	pub const ProfileMonthlyFee: Balance = 20 * UNIT; // 兜底值 20 DUST
+	pub const ProfileMonthlyFee: Balance = 20 * UNIT; // 兜底值 20 COS
 	pub const ProfileMonthlyFeeUsd: u64 = 2_000_000; // 2 USDT
 }
 

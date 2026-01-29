@@ -1,6 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-/// Stardust智能群聊系统 - 简化版本
+/// Cosmos智能群聊系统 - 简化版本
 ///
 /// 这是一个最小可用版本，提供基础的群聊功能：
 /// - 创建群组
@@ -143,7 +143,7 @@ pub mod pallet {
         #[pallet::constant]
         type GroupCreationCooldown: Get<BlockNumberFor<Self>>;
 
-        /// 创建群组保证金兜底值（DUST数量，pricing不可用时使用）
+        /// 创建群组保证金兜底值（COS数量，pricing不可用时使用）
         #[pallet::constant]
         type GroupDeposit: Get<BalanceOf<Self>>;
 
@@ -383,7 +383,7 @@ pub mod pallet {
                 Error::<T>::UserGroupLimitExceeded
             );
 
-            // 计算并锁定保证金（5 USDT 等值的 DUST）
+            // 计算并锁定保证金（5 USDT 等值的 COS）
             let deposit = Self::calculate_deposit_amount();
             T::Currency::reserve(&who, deposit)
                 .map_err(|_| Error::<T>::InsufficientBalance)?;
@@ -886,7 +886,7 @@ pub mod pallet {
             }
         }
 
-        /// 计算保证金金额（5 USDT 等值的 DUST）
+        /// 计算保证金金额（5 USDT 等值的 COS）
         /// 
         /// 使用统一的 DepositCalculator trait 计算
         pub fn calculate_deposit_amount() -> BalanceOf<T> {

@@ -1,6 +1,6 @@
 //! # 直播间模块 (pallet-livestream)
 //!
-//! 为 Stardust 平台提供去中心化直播功能，支持主播开播、观众互动、礼物打赏等核心功能。
+//! 为 Cosmos 平台提供去中心化直播功能，支持主播开播、观众互动、礼物打赏等核心功能。
 //!
 //! ## 设计原则
 //!
@@ -98,7 +98,7 @@ pub mod pallet {
         #[pallet::constant]
         type MinWithdrawAmount: Get<BalanceOf<Self>>;
 
-        /// 创建直播间保证金兜底值（DUST数量，pricing不可用时使用）
+        /// 创建直播间保证金兜底值（COS数量，pricing不可用时使用）
         #[pallet::constant]
         type RoomBond: Get<BalanceOf<Self>>;
 
@@ -1183,8 +1183,8 @@ pub mod pallet {
 
         /// 提取超额保证金
         /// 
-        /// 当 DUST 价值上涨后，主播可以提取超过所需 USD 价值的保证金部分。
-        /// 保证金将调整为当前价格下 5 USDT 对应的 DUST 数量。
+        /// 当 COS 价值上涨后，主播可以提取超过所需 USD 价值的保证金部分。
+        /// 保证金将调整为当前价格下 5 USDT 对应的 COS 数量。
         #[pallet::call_index(62)]
         #[pallet::weight(Weight::from_parts(10_000, 0))]
         pub fn withdraw_excess_bond(
@@ -1393,7 +1393,7 @@ pub mod pallet {
             Ok(actually_slashed)
         }
 
-        /// 计算直播间保证金金额（5 USDT 等值的 DUST）
+        /// 计算直播间保证金金额（5 USDT 等值的 COS）
         /// 
         /// 使用统一的 DepositCalculator trait 计算
         pub fn calculate_room_bond() -> BalanceOf<T> {

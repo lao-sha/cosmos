@@ -214,7 +214,7 @@
 | `MaxCidLen` | u32 | IPFS CID 最大长度（默认 64） |
 | `DailyFreeDivinations` | u32 | 每日免费起课次数（默认 3） |
 | `MaxDailyDivinations` | u32 | 每日最大起课次数（默认 100） |
-| `AiInterpretationFee` | Balance | AI 解读费用（默认 5 DUST） |
+| `AiInterpretationFee` | Balance | AI 解读费用（默认 5 COS） |
 
 ## 事件
 
@@ -401,7 +401,7 @@ SKIP_WASM_BUILD=1 cargo test -p pallet-xiaoliuren
          ▼
 ┌───────────────────┐
 │ 请求 AI 解读      │
-│ (支付 5 DUST)     │
+│ (支付 5 COS)     │
 └───────────────────┘
 ```
 

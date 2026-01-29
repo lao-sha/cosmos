@@ -1,6 +1,6 @@
-//! # Stardust Media Common Library
+//! # Cosmos Media Common Library
 //!
-//! 为 Stardust 区块链项目提供通用的媒体处理工具库。
+//! 为 Cosmos 区块链项目提供通用的媒体处理工具库。
 //!
 //! ## 特性
 //!

@@ -4,7 +4,7 @@
 //!
 //! ## 概述
 //!
-//! 玄学公共模块是 Stardust 链上玄学生态的基础设施层，提供：
+//! 玄学公共模块是 Cosmos 链上玄学生态的基础设施层，提供：
 //!
 //! - **统一类型定义**：`DivinationType`、`Rarity`、`RarityInput` 等
 //! - **核心 Trait**：`DivinationProvider`、`InterpretationContextGenerator`

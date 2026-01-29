@@ -2,7 +2,7 @@
 
 ## 模块概述
 
-去中心化聊天功能模块，采用混合存储架构（链上元数据 + IPFS内容存储），为Stardust纪念平台提供安全、隐私、可扩展的即时通讯服务。该模块实现了完整的私聊功能，包括会话管理、消息已读/未读状态追踪、软删除机制、黑名单系统、频率限制防护等核心功能。
+去中心化聊天功能模块，采用混合存储架构（链上元数据 + IPFS内容存储），为Cosmos纪念平台提供安全、隐私、可扩展的即时通讯服务。该模块实现了完整的私聊功能，包括会话管理、消息已读/未读状态追踪、软删除机制、黑名单系统、频率限制防护等核心功能。
 
 ### 版本历史
 
@@ -28,7 +28,7 @@
 
 ### 与其他模块的关系
 
-- **pallet-stardust-ipfs**: 依赖IPFS模块存储加密的消息内容
+- **pallet-cosmos-ipfs**: 依赖IPFS模块存储加密的消息内容
 - **pallet-otc-order**: OTC订单系统中的买卖双方沟通渠道
 - **前端DApp**: 通过Polkadot-JS API调用，实现实时通讯功能
 
@@ -1468,7 +1468,7 @@ console.log('Bob的黑名单:', blacklist);
 
 ### 与其他模块的集成
 
-#### 1. 与 pallet-stardust-ipfs 集成
+#### 1. 与 pallet-cosmos-ipfs 集成
 
 Chat模块依赖IPFS模块存储加密的消息内容：
 
@@ -1478,7 +1478,7 @@ impl pallet_chat::Config for Runtime {
     // ... 其他配置
 }
 
-impl pallet_stardust_ipfs::Config for Runtime {
+impl pallet_cosmos_ipfs::Config for Runtime {
     // ... IPFS配置
 }
 ```
@@ -1627,4 +1627,4 @@ const decryptMessage = (encryptedData: string, sharedKey: string): string => {
 
 **版本**: v1.3.0
 **最后更新**: 2025-11-04
-**维护者**: Stardust 开发团队
+**维护者**: Cosmos 开发团队

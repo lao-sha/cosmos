@@ -109,7 +109,7 @@ use pallet_affiliate::UserFundingProvider;
         #[pallet::constant]
         type BlocksPerDay: Get<BlockNumberFor<Self>>;
 
-        /// 月费兜底金额（DUST 数量，pricing 不可用时使用）
+        /// 月费兜底金额（COS 数量，pricing 不可用时使用）
         #[pallet::constant]
         type MonthlyFee: Get<BalanceOf<Self>>;
 
@@ -125,7 +125,7 @@ use pallet_affiliate::UserFundingProvider;
         #[pallet::constant]
         type LifetimeFeeUsd: Get<u64>;
 
-        /// 定价接口（用于获取 DUST/USD 汇率）
+        /// 定价接口（用于获取 COS/USD 汇率）
         type Pricing: PricingProvider<BalanceOf<Self>>;
 
         /// 国库账户
@@ -649,19 +649,19 @@ use pallet_affiliate::UserFundingProvider;
 
         /// 计算月费金额
         /// 
-        /// 使用 DUST/USD 汇率计算，如果汇率不可用则使用兜底值
+        /// 使用 COS/USD 汇率计算，如果汇率不可用则使用兜底值
         fn calculate_monthly_fee() -> BalanceOf<T> {
             let usd_value = T::MonthlyFeeUsd::get(); // 精度 10^6
-            if let Some(rate) = T::Pricing::get_dust_to_usd_rate() {
-                // rate 是 DUST/USD 汇率（精度 10^6），表示 1 DUST = rate/10^6 USD
+            if let Some(rate) = T::Pricing::get_cos_to_usd_rate() {
+                // rate 是 COS/USD 汇率（精度 10^6），表示 1 COS = rate/10^6 USD
                 // usd_value 是 USD 金额（精度 10^6）
-                // dust_amount = usd_value * 10^12 / rate
+                // cos_amount = usd_value * 10^12 / rate
                 let rate_u128: u128 = rate.try_into().unwrap_or(1_000_000);
                 if rate_u128 > 0 {
-                    let dust_amount = (usd_value as u128)
-                        .saturating_mul(1_000_000_000_000u128) // 10^12 (DUST 精度)
+                    let cos_amount = (usd_value as u128)
+                        .saturating_mul(1_000_000_000_000u128) // 10^12 (COS 精度)
                         / rate_u128;
-                    return dust_amount.try_into().unwrap_or(T::MonthlyFee::get());
+                    return cos_amount.try_into().unwrap_or(T::MonthlyFee::get());
                 }
             }
             T::MonthlyFee::get()
@@ -670,13 +670,13 @@ use pallet_affiliate::UserFundingProvider;
         /// 计算终身会员费
         fn calculate_lifetime_fee() -> BalanceOf<T> {
             let usd_value = T::LifetimeFeeUsd::get();
-            if let Some(rate) = T::Pricing::get_dust_to_usd_rate() {
+            if let Some(rate) = T::Pricing::get_cos_to_usd_rate() {
                 let rate_u128: u128 = rate.try_into().unwrap_or(1_000_000);
                 if rate_u128 > 0 {
-                    let dust_amount = (usd_value as u128)
+                    let cos_amount = (usd_value as u128)
                         .saturating_mul(1_000_000_000_000u128)
                         / rate_u128;
-                    return dust_amount.try_into().unwrap_or(T::LifetimeFee::get());
+                    return cos_amount.try_into().unwrap_or(T::LifetimeFee::get());
                 }
             }
             T::LifetimeFee::get()

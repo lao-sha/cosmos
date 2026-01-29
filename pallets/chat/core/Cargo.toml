@@ -1,10 +1,10 @@
 [package]
 name = "pallet-chat-core"
 version = "0.1.0"
-authors = ["Stardust Team"]
+authors = ["Cosmos Team"]
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/lao-sha/stardust"
+repository = "https://github.com/memoio/cosmos"
 description = "去中心化私聊功能模块 (链上元数据 + IPFS 内容 + ChatUserId)"
 
 [package.metadata.docs.rs]

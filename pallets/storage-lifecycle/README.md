@@ -370,4 +370,4 @@ MIT License
 
 ## 作者
 
-Stardust Team
+Cosmos Team

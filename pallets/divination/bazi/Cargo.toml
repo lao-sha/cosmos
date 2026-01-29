@@ -2,12 +2,12 @@
 name = "pallet-bazi-chart"
 version = "0.1.0"
 description = "八字排盘 Pallet - 完整的中国传统命理计算模块"
-authors = ["Stardust Team"]
-homepage = "https://github.com/stardust/stardust"
+authors = ["Cosmos Team"]
+homepage = "https://github.com/memoio/cosmos"
 edition = "2021"
 license = "MIT-0"
 publish = false
-repository = "https://github.com/stardust/stardust"
+repository = "https://github.com/memoio/cosmos"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]

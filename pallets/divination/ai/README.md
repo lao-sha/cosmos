@@ -101,9 +101,9 @@
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `BaseInterpretationFee` | 基础解读费用 | 10 DUST |
-| `MinOracleStake` | 预言机最低质押 | 1000 DUST |
-| `DisputeDeposit` | 争议押金 | 50 DUST |
+| `BaseInterpretationFee` | 基础解读费用 | 10 COS |
+| `MinOracleStake` | 预言机最低质押 | 1000 COS |
+| `DisputeDeposit` | 争议押金 | 50 COS |
 | `RequestTimeout` | 请求超时（区块数） | 1200 |
 | `ProcessingTimeout` | 处理超时（区块数） | 3600 |
 | `DisputePeriod` | 争议期限（区块数） | 7200 |

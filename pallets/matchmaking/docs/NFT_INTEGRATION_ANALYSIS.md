@@ -76,7 +76,7 @@ pub struct DivinationNft<AccountId, Balance, BlockNumber, ...> {
     { "trait_type": "合婚等级", "value": "天作之合" },
     { "trait_type": "双方地址", "value": ["5Alice...", "5Bob..."] }
   ],
-  "external_url": "https://stardust.network/match/123"
+  "external_url": "https://cosmos.network/match/123"
 }
 ```
 

@@ -1,835 +1,448 @@
-// frontend/app/market/order/[id].tsx
-
-import React, { useEffect, useState, useCallback } from 'react';
+import { TransactionModal } from '@/src/components/TransactionModal';
+import { useTransaction } from '@/src/hooks/useTransaction';
+import { useAuthStore } from '@/src/stores/auth';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  RefreshControl,
-  SafeAreaView,
-  StatusBar,
-  Alert,
-  TextInput,
+    Alert,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useWalletStore } from '@/stores/wallet.store';
-import { useOrders, useMarketApi, useChainTransaction } from '@/divination/market/hooks';
-import {
-  Avatar,
-  TierBadge,
-  PriceDisplay,
-  DivinationTypeBadge,
-  OrderStatusBadge,
-  OrderTimeline,
-  LoadingSpinner,
-  EmptyState,
-  ActionButton,
-} from '@/divination/market/components';
-import { Card, Button, Input } from '@/components/common';
-import { useAsync } from '@/hooks';
-import { THEME, SHADOWS } from '@/divination/market/theme';
-import { Order, Provider, FollowUp } from '@/divination/market/types';
-import { truncateAddress, formatDateTime } from '@/divination/market/utils/market.utils';
-import { getIpfsUrl, uploadToIpfs } from '@/divination/market/services/ipfs.service';
+
+type OrderStatus = 'pending' | 'paid' | 'processing' | 'completed' | 'disputed' | 'refunded';
+
+interface DivinationOrder {
+  id: string;
+  providerId: string;
+  providerName: string;
+  packageName: string;
+  price: string;
+  status: OrderStatus;
+  createdAt: string;
+  question?: string;
+  answer?: string;
+  birthInfo?: {
+    year: number;
+    month: number;
+    day: number;
+    hour: number;
+  };
+}
+
+const STATUS_MAP: Record<OrderStatus, { label: string; color: string; bg: string }> = {
+  pending: { label: '待支付', color: '#f59e0b', bg: '#fef3c7' },
+  paid: { label: '已支付', color: '#3b82f6', bg: '#dbeafe' },
+  processing: { label: '分析中', color: '#6D28D9', bg: '#f3e8ff' },
+  completed: { label: '已完成', color: '#16a34a', bg: '#dcfce7' },
+  disputed: { label: '申诉中', color: '#dc2626', bg: '#fee2e2' },
+  refunded: { label: '已退款', color: '#6b7280', bg: '#f3f4f6' },
+};
+
+const MOCK_ORDER: DivinationOrder = {
+  id: '1',
+  providerId: 'p1',
+  providerName: '玄明道长',
+  packageName: '八字详批',
+  price: '¥288',
+  status: 'pending',
+  createdAt: '2024-01-20 14:30',
+  birthInfo: {
+    year: 1990,
+    month: 6,
+    day: 15,
+    hour: 10,
+  },
+};
 
 export default function OrderDetailScreen() {
-  const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { address } = useWalletStore();
-  const { getOrder } = useOrders();
-  const { getProvider } = useMarketApi();
-  const {
-    acceptOrder,
-    rejectOrder,
-    completeOrder,
-    cancelOrder,
-    requestRefund,
-    submitFollowUp,
-    replyFollowUp,
-    isProcessing,
-  } = useChainTransaction();
-  const { execute, isLoading } = useAsync();
-
-  const [order, setOrder] = useState<Order | null>(null);
-  const [provider, setProvider] = useState<Provider | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [followUpQuestion, setFollowUpQuestion] = useState('');
-  const [submittingFollowUp, setSubmittingFollowUp] = useState(false);
-  const [answerContent, setAnswerContent] = useState('');
-
-  const loadData = useCallback(async () => {
-    if (!id) return;
-
-    await execute(async () => {
-      const orderData = await getOrder(parseInt(id, 10));
-      setOrder(orderData);
-
-      if (orderData?.provider) {
-        const providerData = await getProvider(orderData.provider);
-        setProvider(providerData);
-      }
-    });
-  }, [id, getOrder, getProvider, execute]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
-  }, [loadData]);
-
-  const isCustomer = order?.customer === address;
-  const isProvider = order?.provider === address;
+  const router = useRouter();
+  const { isLoggedIn } = useAuthStore();
+  const { createDivinationOrder, isLoading, status } = useTransaction();
   
-  const canFollowUp =
-    order?.status === 'Completed' &&
-    order.followUps &&
-    order.followUps.length < (order as any).followUpCount;
+  const [order, setOrder] = useState<DivinationOrder>(MOCK_ORDER);
+  const [question, setQuestion] = useState('');
+  const [showPayModal, setShowPayModal] = useState(false);
 
-  // --- 交易处理函数 ---
+  const statusInfo = STATUS_MAP[order.status];
 
-  const handleAcceptOrder = async () => {
-    if (!order) return;
-    await acceptOrder(order.id, {
-      onSuccess: () => {
-        Alert.alert('成功', '已接单');
-        loadData();
-      },
-    });
+  const handlePay = async () => {
+    const result = await createDivinationOrder(
+      order.providerId,
+      1,
+      question || '八字命理分析'
+    );
+    
+    if (result?.success) {
+      setOrder(prev => ({ ...prev, status: 'paid' }));
+      setShowPayModal(false);
+    }
   };
 
-  const handleRejectOrder = async () => {
-    if (!order) return;
-    Alert.prompt('拒绝订单', '请输入拒绝原因', [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '确定',
-        onPress: async (reason) => {
-          await rejectOrder(order.id, reason, {
-            onSuccess: () => {
-              Alert.alert('已拒绝', '订单已拒绝并退款');
-              loadData();
-            },
-          });
-        },
-      },
-    ]);
+  const handleChat = () => {
+    router.push(`/chat/${order.providerId}`);
   };
 
-  const handleCancelOrder = async () => {
-    if (!order) return;
-    Alert.alert('取消订单', '确定要取消订单吗？', [
-      { text: '返回', style: 'cancel' },
-      {
-        text: '确定取消',
-        style: 'destructive',
-        onPress: async () => {
-          await cancelOrder(order.id, {
-            onSuccess: () => {
-              Alert.alert('已取消', '订单已成功取消');
-              loadData();
-            },
-          });
-        },
-      },
-    ]);
-  };
-
-  const handleDispute = async () => {
-    if (!order) return;
-    Alert.prompt('发起举报', '请简述举报原因，平台介入后将根据证据处理。注意：举报需要缴纳一定押金，恶意举报将没收押金并扣除信用分。', [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '提交举报',
-        onPress: async (description) => {
-          if (!description) return;
-          // 这里应该调用新的 submitReport 方法
-          // 暂时沿用 requestRefund 的结构，之后在 hook 中适配
-          await requestRefund(order.id, description, {
-            onSuccess: () => {
-              Alert.alert('已提交', '举报已发起，请等待平台处理');
-              loadData();
-            },
-          });
-        },
-      },
-    ]);
-  };
-
-  const handleTip = async () => {
-    if (!order) return;
-    Alert.prompt('额外打赏', '输入打赏金额 (DUST)', [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '确认打赏',
-        onPress: async (amountStr) => {
-          const amount = parseFloat(amountStr || '0');
-          if (isNaN(amount) || amount <= 0) {
-            Alert.alert('错误', '请输入有效的打赏金额');
-            return;
-          }
-          const amountBigInt = BigInt(Math.floor(amount * 1000000));
-          await tip({
-            providerId: order.provider,
-            amount: amountBigInt,
-            orderId: order.id
-          }, {
-            onSuccess: () => {
-              Alert.alert('感谢', '打赏已发送，感谢您的支持！');
-            }
-          });
-        }
+  const handleDispute = () => {
+    if (Platform.OS === 'web') {
+      if (window.confirm('确定要发起申诉吗？')) {
+        setOrder(prev => ({ ...prev, status: 'disputed' }));
       }
-    ]);
-  };
-
-  const handleConfirmOrder = async () => {
-    if (!order) return;
-    Alert.alert('确认订单', '订单已完成，您可以对此次服务进行评价。如有问题，可以发起举报。', [
-      { text: '返回', style: 'cancel' },
-      {
-        text: '去评价',
-        onPress: handleReview,
-      },
-    ]);
-  };
-
-  const handleSubmitAnswer = async () => {
-    if (!order || !answerContent.trim()) {
-      Alert.alert('提示', '请输入解答内容');
-      return;
-    }
-
-    try {
-      setRefreshing(true);
-      // 1. 上传到 IPFS
-      const { cid } = await uploadToIpfs(answerContent);
-      
-      // 2. 提交到链上
-      await completeOrder(
-        { orderId: order.id, resultCid: cid },
-        {
-          onSuccess: () => {
-            Alert.alert('成功', '解答已提交');
-            setAnswerContent('');
-            loadData();
-          },
-        }
-      );
-    } catch (err) {
-      Alert.alert('失败', '提交失败: ' + (err instanceof Error ? err.message : '未知错误'));
-    } finally {
-      setRefreshing(false);
+    } else {
+      Alert.alert('确认', '确定要发起申诉吗？', [
+        { text: '取消', style: 'cancel' },
+        { text: '确认', onPress: () => setOrder(prev => ({ ...prev, status: 'disputed' })) },
+      ]);
     }
   };
-
-  const handleSubmitFollowUp = async () => {
-    if (!followUpQuestion.trim() || !order) {
-      Alert.alert('提示', '请输入追问内容');
-      return;
-    }
-
-    setSubmittingFollowUp(true);
-    try {
-      const { cid } = await uploadToIpfs(followUpQuestion);
-      await submitFollowUp(
-        { orderId: order.id, questionCid: cid },
-        {
-          onSuccess: () => {
-            Alert.alert('成功', '追问已提交');
-            setFollowUpQuestion('');
-            loadData();
-          },
-        }
-      );
-    } catch (err) {
-      Alert.alert('失败', '提交追问失败');
-    } finally {
-      setSubmittingFollowUp(false);
-    }
-  };
-
-  const handleReview = () => {
-    router.push(`/market/review/create?orderId=${id}`);
-  };
-
-  if (isLoading && !order) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <LoadingSpinner text="加载中..." fullScreen />
-      </SafeAreaView>
-    );
-  }
-
-  if (!order) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={24} color={THEME.text} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>订单详情</Text>
-          <View style={styles.backBtn} />
-        </View>
-        <EmptyState
-          icon="document-outline"
-          title="订单不存在"
-          actionText="返回"
-          onAction={() => router.back()}
-        />
-      </SafeAreaView>
-    );
-  }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={THEME.card} />
-
-      {/* 顶部导航 */}
+    <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color={THEME.text} />
-        </TouchableOpacity>
+        <Pressable style={styles.backButton} onPress={() => router.back()}>
+          <Text style={styles.backText}>‹ 返回</Text>
+        </Pressable>
         <Text style={styles.headerTitle}>订单详情</Text>
-        <View style={styles.backBtn} />
+        <View style={styles.headerRight} />
       </View>
 
-      <ScrollView
-        style={styles.content}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing || isProcessing}
-            onRefresh={onRefresh}
-            colors={[THEME.primary]}
-            tintColor={THEME.primary}
-          />
-        }
-      >
-        {/* 订单状态卡片 */}
-        <Card style={styles.statusCard}>
-          <View style={styles.statusHeader}>
-            <OrderStatusBadge status={order.status} size="medium" />
-            {order.isUrgent && (
-              <View style={styles.urgentTag}>
-                <Ionicons name="flash" size={12} color={THEME.warning} />
-                <Text style={styles.urgentText}>加急</Text>
-              </View>
-            )}
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <View style={styles.statusCard}>
+          <View style={[styles.statusBadge, { backgroundColor: statusInfo.bg }]}>
+            <Text style={[styles.statusText, { color: statusInfo.color }]}>
+              {statusInfo.label}
+            </Text>
           </View>
           <Text style={styles.orderId}>订单号: {order.id}</Text>
-        </Card>
+          <Text style={styles.orderTime}>{order.createdAt}</Text>
+        </View>
 
-        {/* 解卦师/客户信息 */}
-        <Card style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            {isCustomer ? '解卦师' : '客户'}
-          </Text>
-          <View style={styles.personRow}>
-            {isCustomer && provider ? (
-              <>
-                <Avatar
-                  uri={provider.avatarCid ? getIpfsUrl(provider.avatarCid) : undefined}
-                  name={provider.name}
-                  size={44}
-                />
-                <View style={styles.personInfo}>
-                  <View style={styles.nameRow}>
-                    <Text style={styles.personName}>{provider.name}</Text>
-                    <TierBadge tier={provider.tier} size="small" />
-                  </View>
-                  <Text style={styles.personOrders}>
-                    已完成 {provider.completedOrders} 单
-                  </Text>
-                </View>
-              </>
-            ) : (
-              <>
-                <Avatar name="客" size={44} />
-                <View style={styles.personInfo}>
-                  <Text style={styles.personName}>
-                    {truncateAddress(order.customer)}
-                  </Text>
-                </View>
-              </>
-            )}
-          </View>
-        </Card>
-
-        {/* 套餐信息 */}
-        <Card style={styles.section}>
+        <View style={styles.section}>
           <Text style={styles.sectionTitle}>服务信息</Text>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>占卜类型</Text>
-            <DivinationTypeBadge type={order.divinationType} />
+            <Text style={styles.infoLabel}>占卜师</Text>
+            <Text style={styles.infoValue}>{order.providerName}</Text>
+          </View>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>服务套餐</Text>
+            <Text style={styles.infoValue}>{order.packageName}</Text>
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>订单金额</Text>
-            <PriceDisplay amount={order.amount} size="small" />
+            <Text style={styles.priceValue}>{order.price}</Text>
           </View>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>创建时间</Text>
-            <Text style={styles.infoValue}>{formatDateTime(order.createdAt)}</Text>
-          </View>
-        </Card>
+        </View>
 
-        {/* 问题描述 */}
-        <Card style={styles.section}>
-          <Text style={styles.sectionTitle}>问题描述</Text>
-          <View style={styles.questionBox}>
-            <Text style={styles.questionText}>
-              {order.question || '问题内容加密存储在链上'}
-            </Text>
-          </View>
-        </Card>
-
-        {/* 提供者输入解答 (仅限进行中且我是提供者) */}
-        {isProvider && order.status === 'Accepted' && (
-          <Card style={styles.section}>
-            <Text style={styles.sectionTitle}>提交解答</Text>
-            <TextInput
-              style={styles.answerInput}
-              placeholder="请在这里输入您的详细解读..."
-              placeholderTextColor={THEME.textTertiary}
-              value={answerContent}
-              onChangeText={setAnswerContent}
-              multiline
-              numberOfLines={6}
-              textAlignVertical="top"
-            />
-            <TouchableOpacity
-              style={[styles.submitBtn, (!answerContent.trim() || isProcessing) && styles.btnDisabled]}
-              onPress={handleSubmitAnswer}
-              disabled={!answerContent.trim() || isProcessing}
-            >
-              <Text style={styles.submitBtnText}>提交解答并完成订单</Text>
-            </TouchableOpacity>
-          </Card>
-        )}
-
-        {/* 解读结果 */}
-        {order.answerCid && (
-          <Card style={styles.section}>
-            <Text style={styles.sectionTitle}>解读结果</Text>
-            <View style={styles.answerBox}>
-              <Text style={styles.answerText}>
-                {order.answer || '解读结果已上链存储'}
+        {order.birthInfo && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>出生信息</Text>
+            <View style={styles.birthInfoBox}>
+              <Text style={styles.birthInfoText}>
+                {order.birthInfo.year}年{order.birthInfo.month}月{order.birthInfo.day}日 {order.birthInfo.hour}时
               </Text>
             </View>
-          </Card>
+          </View>
         )}
 
-        {/* 追问列表 */}
-        {order.followUps && order.followUps.length > 0 && (
-          <Card style={styles.section}>
-            <Text style={styles.sectionTitle}>
-              追问记录 ({order.followUps.length})
-            </Text>
-            {order.followUps.map((followUp, index) => (
-              <View key={index} style={styles.followUpItem}>
-                <View style={styles.followUpQuestion}>
-                  <Ionicons name="chatbubble-outline" size={14} color={THEME.info} />
-                  <Text style={styles.followUpQuestionText}>
-                    {followUp.question || '追问内容已上链'}
-                  </Text>
-                </View>
-                {followUp.answerCid && (
-                  <View style={styles.followUpAnswer}>
-                    <Ionicons name="chatbubble" size={14} color={THEME.primary} />
-                    <Text style={styles.followUpAnswerText}>
-                      {followUp.answer || '追问解答已上链'}
-                    </Text>
-                  </View>
-                )}
-                {isProvider && !followUp.answerCid && (
-                  <TouchableOpacity 
-                    style={styles.replyBtn}
-                    onPress={() => {
-                      Alert.prompt('回复追问', '请输入您的解答', [
-                        { text: '取消', style: 'cancel' },
-                        {
-                          text: '提交',
-                          onPress: async (answer) => {
-                            if (!answer) return;
-                            const { cid } = await uploadToIpfs(answer);
-                            await replyFollowUp({
-                              orderId: order.id,
-                              followUpIndex: index,
-                              answerCid: cid
-                            }, {
-                              onSuccess: () => {
-                                Alert.alert('成功', '追问已回复');
-                                loadData();
-                              }
-                            });
-                          }
-                        }
-                      ]);
-                    }}
-                  >
-                    <Text style={styles.replyBtnText}>回复此追问</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            ))}
-          </Card>
-        )}
-
-        {/* 追问输入 */}
-        {isCustomer && canFollowUp && (
-          <Card style={styles.section}>
-            <Text style={styles.sectionTitle}>追问</Text>
+        {order.status === 'pending' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>咨询问题（可选）</Text>
             <TextInput
-              style={styles.followUpInput}
-              placeholder="输入您的追问..."
-              placeholderTextColor={THEME.textTertiary}
-              value={followUpQuestion}
-              onChangeText={setFollowUpQuestion}
+              style={styles.questionInput}
+              placeholder="请描述您想咨询的具体问题..."
+              value={question}
+              onChangeText={setQuestion}
               multiline
-              numberOfLines={3}
+              numberOfLines={4}
               textAlignVertical="top"
             />
-            <TouchableOpacity
-              style={[styles.followUpBtn, (submittingFollowUp || isProcessing) && styles.btnDisabled]}
-              onPress={handleSubmitFollowUp}
-              disabled={submittingFollowUp || isProcessing}
-            >
-              <Text style={styles.followUpBtnText}>
-                {submittingFollowUp ? '提交中...' : '提交追问'}
-              </Text>
-            </TouchableOpacity>
-          </Card>
+          </View>
         )}
 
-        {/* 订单时间线 */}
-        <Card style={styles.section}>
-          <Text style={styles.sectionTitle}>订单进度</Text>
-          <OrderTimeline order={order} />
-        </Card>
+        {order.question && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>咨询问题</Text>
+            <Text style={styles.questionText}>{order.question}</Text>
+          </View>
+        )}
 
-        <View style={styles.bottomSpace} />
+        {order.answer && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>占卜结果</Text>
+            <View style={styles.answerBox}>
+              <Text style={styles.answerText}>{order.answer}</Text>
+            </View>
+          </View>
+        )}
+
+        {order.status === 'processing' && (
+          <View style={styles.processingBox}>
+            <Text style={styles.processingIcon}>🔮</Text>
+            <Text style={styles.processingText}>占卜师正在为您分析命盘...</Text>
+            <Text style={styles.processingHint}>预计24-48小时内完成</Text>
+          </View>
+        )}
+
+        <View style={styles.bottomSpacer} />
       </ScrollView>
 
-      {/* 底部操作栏 - 根据身份和状态动态显示 */}
-      <View style={styles.footer}>
-        {/* 提供者操作 */}
-        {isProvider && order.status === 'Paid' && (
-          <View style={styles.actionRow}>
-            <TouchableOpacity style={[styles.actionBtn, styles.rejectBtn]} onPress={handleRejectOrder} disabled={isProcessing}>
-              <Text style={styles.rejectBtnText}>拒绝接单</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionBtn, styles.primaryBtn]} onPress={handleAcceptOrder} disabled={isProcessing}>
-              <Text style={styles.primaryBtnText}>立即接单</Text>
-            </TouchableOpacity>
-          </View>
+      <View style={styles.bottomBar}>
+        {order.status === 'pending' && (
+          <Pressable 
+            style={styles.payButton}
+            onPress={() => setShowPayModal(true)}
+          >
+            <Text style={styles.payButtonText}>立即支付 {order.price}</Text>
+          </Pressable>
         )}
 
-        {/* 客户操作 */}
-        {isCustomer && (
-          <View style={styles.actionRow}>
-            {order.status === 'Paid' && (
-              <TouchableOpacity style={[styles.actionBtn, styles.outlineBtn]} onPress={handleCancelOrder} disabled={isProcessing}>
-                <Text style={styles.outlineBtnText}>取消订单</Text>
-              </TouchableOpacity>
-            )}
-            {order.status === 'Accepted' && (
-              <TouchableOpacity style={[styles.actionBtn, styles.outlineBtn]} onPress={handleDispute} disabled={isProcessing}>
-                <Text style={styles.outlineBtnText}>发起争议</Text>
-              </TouchableOpacity>
-            )}
-            {order.status === 'Completed' && (
-              <>
-                <TouchableOpacity style={[styles.actionBtn, styles.outlineBtn, { flex: 0.6 }]} onPress={handleDispute} disabled={isProcessing}>
-                  <Text style={[styles.outlineBtnText, { fontSize: 14 }]}>举报</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.actionBtn, styles.outlineBtn, { flex: 0.6 }]} onPress={handleTip} disabled={isProcessing}>
-                  <Text style={[styles.outlineBtnText, { fontSize: 14 }]}>打赏</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.actionBtn, styles.primaryBtn]} onPress={handleReview} disabled={isProcessing}>
-                  <Ionicons name="star-outline" size={18} color={THEME.textInverse} />
-                  <Text style={styles.primaryBtnText}>评价</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
+        {(order.status === 'paid' || order.status === 'processing') && (
+          <>
+            <Pressable style={styles.chatButton} onPress={handleChat}>
+              <Text style={styles.chatButtonText}>💬 联系占卜师</Text>
+            </Pressable>
+            <Pressable style={styles.disputeButton} onPress={handleDispute}>
+              <Text style={styles.disputeButtonText}>申诉</Text>
+            </Pressable>
+          </>
+        )}
+
+        {order.status === 'completed' && (
+          <Pressable style={styles.reviewButton}>
+            <Text style={styles.reviewButtonText}>评价服务</Text>
+          </Pressable>
         )}
       </View>
-    </SafeAreaView>
+
+      <TransactionModal
+        visible={showPayModal}
+        onClose={() => setShowPayModal(false)}
+        title="确认支付"
+        description={`${order.packageName} - ${order.providerName}`}
+        amount={order.price}
+        status={status}
+        isLoading={isLoading}
+        onConfirm={handlePay}
+        confirmText="确认支付"
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: THEME.background,
+    backgroundColor: '#f5f5f5',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: THEME.card,
-    paddingHorizontal: 8,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: THEME.border,
+    backgroundColor: '#fff',
+    paddingTop: 50,
+    paddingBottom: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
   },
-  backBtn: {
-    padding: 8,
-    width: 40,
+  backButton: {
+    padding: 4,
+  },
+  backText: {
+    fontSize: 17,
+    color: '#6D28D9',
   },
   headerTitle: {
     fontSize: 17,
     fontWeight: '600',
-    color: THEME.text,
+    color: '#1f2937',
+  },
+  headerRight: {
+    width: 50,
   },
   content: {
     flex: 1,
-    padding: 16,
   },
   statusCard: {
-    marginBottom: 16,
-  },
-  statusHeader: {
-    flexDirection: 'row',
+    backgroundColor: '#fff',
+    padding: 20,
     alignItems: 'center',
-    gap: 10,
+    marginBottom: 12,
   },
-  urgentTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: THEME.warning + '15',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    gap: 2,
+  statusBadge: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginBottom: 12,
   },
-  urgentText: {
-    fontSize: 11,
-    color: THEME.warning,
-    fontWeight: '500',
+  statusText: {
+    fontSize: 15,
+    fontWeight: '600',
   },
   orderId: {
+    fontSize: 13,
+    color: '#6b7280',
+  },
+  orderTime: {
     fontSize: 12,
-    color: THEME.textTertiary,
-    marginTop: 8,
+    color: '#9ca3af',
+    marginTop: 4,
   },
   section: {
-    marginBottom: 16,
+    backgroundColor: '#fff',
+    padding: 16,
+    marginBottom: 12,
   },
   sectionTitle: {
     fontSize: 15,
     fontWeight: '600',
-    color: THEME.text,
+    color: '#1f2937',
     marginBottom: 12,
-  },
-  personRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  personInfo: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  personName: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: THEME.text,
-  },
-  personOrders: {
-    fontSize: 12,
-    color: THEME.textSecondary,
-    marginTop: 4,
   },
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: THEME.borderLight,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
   },
   infoLabel: {
     fontSize: 14,
-    color: THEME.textSecondary,
+    color: '#6b7280',
   },
   infoValue: {
     fontSize: 14,
-    color: THEME.text,
+    color: '#1f2937',
+    fontWeight: '500',
   },
-  questionBox: {
-    backgroundColor: THEME.background,
+  priceValue: {
+    fontSize: 16,
+    color: '#6D28D9',
+    fontWeight: '700',
+  },
+  birthInfoBox: {
+    backgroundColor: '#f9fafb',
+    padding: 12,
+    borderRadius: 8,
+  },
+  birthInfoText: {
+    fontSize: 15,
+    color: '#4b5563',
+    textAlign: 'center',
+  },
+  questionInput: {
+    backgroundColor: '#f9fafb',
     borderRadius: 8,
     padding: 12,
+    fontSize: 14,
+    color: '#1f2937',
+    minHeight: 100,
   },
   questionText: {
     fontSize: 14,
-    color: THEME.text,
-    lineHeight: 20,
-  },
-  answerInput: {
-    backgroundColor: THEME.background,
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 14,
-    color: THEME.text,
-    minHeight: 120,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: THEME.border,
-  },
-  submitBtn: {
-    backgroundColor: THEME.success,
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  submitBtnText: {
-    color: THEME.textInverse,
-    fontSize: 15,
-    fontWeight: '600',
+    color: '#4b5563',
+    lineHeight: 22,
   },
   answerBox: {
-    backgroundColor: THEME.primary + '10',
-    borderRadius: 8,
-    padding: 12,
+    backgroundColor: '#faf5ff',
+    padding: 16,
+    borderRadius: 12,
     borderLeftWidth: 3,
-    borderLeftColor: THEME.primary,
+    borderLeftColor: '#6D28D9',
   },
   answerText: {
     fontSize: 14,
-    color: THEME.text,
-    lineHeight: 22,
+    color: '#4b5563',
+    lineHeight: 24,
   },
-  followUpItem: {
-    marginBottom: 12,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: THEME.borderLight,
-  },
-  followUpQuestion: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 8,
-  },
-  followUpQuestionText: {
-    flex: 1,
-    fontSize: 13,
-    color: THEME.info,
-    lineHeight: 18,
-  },
-  followUpAnswer: {
-    flexDirection: 'row',
-    gap: 8,
-    marginLeft: 22,
-    marginBottom: 8,
-  },
-  followUpAnswerText: {
-    flex: 1,
-    fontSize: 13,
-    color: THEME.text,
-    lineHeight: 18,
-  },
-  replyBtn: {
-    alignSelf: 'flex-end',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 14,
-    backgroundColor: THEME.primary + '15',
-  },
-  replyBtnText: {
-    fontSize: 12,
-    color: THEME.primary,
-    fontWeight: '500',
-  },
-  followUpInput: {
-    backgroundColor: THEME.background,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: THEME.text,
-    height: 80,
-    marginBottom: 12,
-  },
-  followUpBtn: {
-    backgroundColor: THEME.primary,
-    borderRadius: 8,
-    paddingVertical: 10,
+  processingBox: {
+    backgroundColor: '#fff',
+    padding: 32,
     alignItems: 'center',
+    marginBottom: 12,
   },
-  btnDisabled: {
-    opacity: 0.6,
+  processingIcon: {
+    fontSize: 48,
+    marginBottom: 16,
   },
-  followUpBtnText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: THEME.textInverse,
+  processingText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6D28D9',
   },
-  bottomSpace: {
+  processingHint: {
+    fontSize: 13,
+    color: '#9ca3af',
+    marginTop: 8,
+  },
+  bottomSpacer: {
     height: 100,
   },
-  footer: {
+  bottomBar: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: THEME.card,
+    flexDirection: 'row',
+    backgroundColor: '#fff',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    paddingBottom: 24,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: THEME.border,
-    ...SHADOWS.medium,
-  },
-  actionRow: {
-    flexDirection: 'row',
+    paddingBottom: 30,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
     gap: 12,
   },
-  actionBtn: {
+  payButton: {
     flex: 1,
-    flexDirection: 'row',
-    height: 48,
-    borderRadius: 10,
-    justifyContent: 'center',
+    backgroundColor: '#6D28D9',
+    paddingVertical: 14,
+    borderRadius: 12,
     alignItems: 'center',
-    gap: 6,
   },
-  primaryBtn: {
-    backgroundColor: THEME.primary,
-  },
-  primaryBtnText: {
-    color: THEME.textInverse,
+  payButtonText: {
     fontSize: 16,
     fontWeight: '600',
+    color: '#fff',
   },
-  rejectBtn: {
-    backgroundColor: THEME.error + '10',
-    borderWidth: 1,
-    borderColor: THEME.error,
+  chatButton: {
+    flex: 2,
+    backgroundColor: '#6D28D9',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
   },
-  rejectBtnText: {
-    color: THEME.error,
+  chatButtonText: {
     fontSize: 16,
     fontWeight: '600',
+    color: '#fff',
   },
-  outlineBtn: {
-    backgroundColor: THEME.card,
-    borderWidth: 1,
-    borderColor: THEME.border,
+  disputeButton: {
+    flex: 1,
+    backgroundColor: '#f3f4f6',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
   },
-  outlineBtnText: {
-    color: THEME.textSecondary,
+  disputeButtonText: {
     fontSize: 16,
     fontWeight: '600',
+    color: '#6b7280',
+  },
+  reviewButton: {
+    flex: 1,
+    backgroundColor: '#6D28D9',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  reviewButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
 });

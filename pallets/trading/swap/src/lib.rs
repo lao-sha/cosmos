@@ -4,7 +4,7 @@
 //!
 //! ## 概述
 //!
-//! 本模块负责 DUST → USDT 做市商兑换服务，包括：
+//! 本模块负责 COS → USDT 做市商兑换服务，包括：
 //! - 做市商兑换（市场化服务）
 //! - OCW 自动验证
 //! - 超时退款机制
@@ -100,8 +100,8 @@ pub mod pallet {
         pub maker_id: u64,
         /// 用户账户
         pub user: T::AccountId,
-        /// DUST 数量
-        pub dust_amount: BalanceOf<T>,
+        /// COS 数量
+        pub cos_amount: BalanceOf<T>,
         /// USDT 金额
         pub usdt_amount: u64,
         /// 创建区块
@@ -132,8 +132,8 @@ pub mod pallet {
         pub maker_id: u64,
         /// 用户账户
         pub user: T::AccountId,
-        /// DUST 数量（压缩为u64）
-        pub dust_amount: u64,
+        /// COS 数量（压缩为u64）
+        pub cos_amount: u64,
         /// USDT 金额
         pub usdt_amount: u64,
         /// 兑换状态
@@ -182,8 +182,8 @@ pub mod pallet {
         pub maker: T::AccountId,
         /// 用户账户
         pub user: T::AccountId,
-        /// DUST 数量
-        pub dust_amount: BalanceOf<T>,
+        /// COS 数量
+        pub cos_amount: BalanceOf<T>,
         /// USDT 金额（精度 10^6）
         pub usdt_amount: u64,
         /// USDT 接收地址
@@ -239,7 +239,7 @@ pub mod pallet {
         /// 托管服务接口
         type Escrow: pallet_escrow::Escrow<Self::AccountId, BalanceOf<Self>>;
         
-        /// 价格提供者接口（用于获取 DUST/USD 汇率）
+        /// 价格提供者接口（用于获取 COS/USD 汇率）
         type Pricing: PricingProvider<BalanceOf<Self>>;
         
         /// Maker Pallet 接口（用于验证做市商）
@@ -413,7 +413,7 @@ pub mod pallet {
             swap_id: u64,
             maker_id: u64,
             user: T::AccountId,
-            dust_amount: BalanceOf<T>,
+            cos_amount: BalanceOf<T>,
         },
         /// 做市商兑换已完成
         MakerSwapCompleted {
@@ -442,7 +442,7 @@ pub mod pallet {
             swap_id: u64,
             tx_hash: BoundedVec<u8, ConstU32<128>>,
         },
-        /// 🆕 2026-01-20: TRC20 验证成功，DUST 已释放
+        /// 🆕 2026-01-20: TRC20 验证成功，COS 已释放
         VerificationConfirmed {
             swap_id: u64,
             maker: T::AccountId,
@@ -524,7 +524,7 @@ pub mod pallet {
         /// # 参数
         /// - `origin`: 调用者（用户，必须是签名账户）
         /// - `maker_id`: 做市商ID
-        /// - `dust_amount`: DUST数量
+        /// - `cos_amount`: COS数量
         /// - `usdt_address`: USDT接收地址
         ///
         /// # 返回
@@ -534,11 +534,11 @@ pub mod pallet {
         pub fn maker_swap(
             origin: OriginFor<T>,
             maker_id: u64,
-            dust_amount: BalanceOf<T>,
+            cos_amount: BalanceOf<T>,
             usdt_address: sp_std::vec::Vec<u8>,
         ) -> DispatchResult {
             let user = ensure_signed(origin)?;
-            let _swap_id = Self::do_maker_swap(&user, maker_id, dust_amount, usdt_address)?;
+            let _swap_id = Self::do_maker_swap(&user, maker_id, cos_amount, usdt_address)?;
             Ok(())
         }
         
@@ -685,14 +685,14 @@ pub mod pallet {
         /// 1. 验证做市商存在且激活
         /// 2. 验证兑换金额大于最小值
         /// 3. 验证 USDT 地址格式
-        /// 4. 锁定用户的 DUST 到托管
+        /// 4. 锁定COS 到托管
         /// 5. 创建做市商兑换记录
         /// 6. 等待做市商转账 USDT
         /// 
         /// ## 参数
         /// - `user`: 用户账户
         /// - `maker_id`: 做市商ID
-        /// - `dust_amount`: DUST 数量
+        /// - `cos_amount`: COS 数量
         /// - `usdt_address`: USDT 收款地址（TRC20）
         /// 
         /// ## 返回
@@ -701,12 +701,12 @@ pub mod pallet {
         pub fn do_maker_swap(
             user: &T::AccountId,
             maker_id: u64,
-            dust_amount: BalanceOf<T>,
+            cos_amount: BalanceOf<T>,
             usdt_address: sp_std::vec::Vec<u8>,
         ) -> Result<u64, DispatchError> {
             // 1. 验证最小兑换金额
             ensure!(
-                dust_amount >= T::MinSwapAmount::get(),
+                cos_amount >= T::MinSwapAmount::get(),
                 Error::<T>::BelowMinimumAmount
             );
             
@@ -723,13 +723,13 @@ pub mod pallet {
                 .map_err(|_| Error::<T>::InvalidAddress)?;
             
             // 4. 获取当前价格（从 PricingProvider 获取实时汇率）
-            let price_balance = T::Pricing::get_dust_to_usd_rate()
+            let price_balance = T::Pricing::get_cos_to_usd_rate()
                 .ok_or(Error::<T>::PriceNotAvailable)?;
             let price_usdt: u64 = price_balance.saturated_into();
             
             // 5. 计算 USDT 金额（加入边界检查防止溢出）
-            let dust_amount_u128: u128 = dust_amount.saturated_into();
-            let usdt_amount_u128 = dust_amount_u128
+            let cos_amount_u128: u128 = cos_amount.saturated_into();
+            let usdt_amount_u128 = cos_amount_u128
                 .checked_mul(price_usdt as u128)
                 .ok_or(Error::<T>::AmountOverflow)?
                 .checked_div(1_000_000_000_000u128)
@@ -746,11 +746,11 @@ pub mod pallet {
             // 7. 获取兑换ID
             let swap_id = NextSwapId::<T>::get();
             
-            // 7. 锁定用户的 DUST 到托管
+            // 7. 锁定COS 到托管
             T::Escrow::lock_from(
                 user,
                 swap_id,
-                dust_amount,
+                cos_amount,
             )?;
             
             // 8. 计算超时时间
@@ -763,7 +763,7 @@ pub mod pallet {
                 maker_id,
                 maker: maker_app.account,
                 user: user.clone(),
-                dust_amount,
+                cos_amount,
                 usdt_amount,
                 usdt_address: usdt_addr,
                 created_at: current_block,
@@ -796,7 +796,7 @@ pub mod pallet {
                 swap_id,
                 user: user.clone(),
                 maker_id,
-                dust_amount,
+                cos_amount,
             });
             
             Ok(swap_id)
@@ -805,7 +805,7 @@ pub mod pallet {
         /// 函数级详细中文注释：做市商标记兑换完成
         /// 
         /// ## 🆕 2026-01-20 更新：OCW 验证机制
-        /// 做市商提交 TRC20 交易哈希后，不再直接释放 DUST，
+        /// 做市商提交 TRC20 交易哈希后，不再直接释放 COS，
         /// 而是进入 AwaitingVerification 状态，等待 OCW 或委员会验证。
         /// 
         /// ## 功能说明
@@ -856,7 +856,7 @@ pub mod pallet {
             let current_block = frame_system::Pallet::<T>::block_number();
             UsedTronTxHashes::<T>::insert(&tx_hash, current_block);
             
-            // 🆕 2026-01-20: 不再直接释放 DUST，而是进入验证等待状态
+            // 🆕 2026-01-20: 不再直接释放 COS，而是进入验证等待状态
             
             // 7. 更新兑换记录状态为 AwaitingVerification
             record.trc20_tx_hash = Some(tx_hash.clone());
@@ -892,7 +892,7 @@ pub mod pallet {
         /// 
         /// ## 功能说明
         /// 由 OCW 或委员会调用，确认 TRC20 交易验证结果。
-        /// - 验证成功：释放 DUST 给做市商
+        /// - 验证成功：释放 COS 给做市商
         /// - 验证失败：进入人工仲裁流程
         /// 
         /// ## 参数
@@ -920,7 +920,7 @@ pub mod pallet {
             let current_block = frame_system::Pallet::<T>::block_number();
             
             if verified {
-                // 验证成功：释放 DUST 给做市商
+                // 验证成功：释放 COS 给做市商
                 T::Escrow::release_all(swap_id, &record.maker)?;
                 
                 record.status = SwapStatus::Completed;
@@ -939,8 +939,8 @@ pub mod pallet {
                 
                 // 🆕 上报交易数据到 pricing 模块
                 let timestamp = current_block.saturated_into::<u64>() * 6000; // 转换为毫秒
-                let dust_qty: u128 = record.dust_amount.saturated_into();
-                let _ = T::Pricing::report_swap_order(timestamp, record.price_usdt, dust_qty);
+                let cos_qty: u128 = record.cos_amount.saturated_into();
+                let _ = T::Pricing::report_swap_order(timestamp, record.price_usdt, cos_qty);
                 
                 Self::deposit_event(Event::VerificationConfirmed {
                     swap_id,
@@ -1126,7 +1126,7 @@ pub mod pallet {
                 swap_id,
                 maker_id: record.maker_id,
                 user: record.user.clone(),
-                dust_amount: record.dust_amount,
+                cos_amount: record.cos_amount,
                 usdt_amount: record.usdt_amount,
                 created_at_block: created_at_u64,
                 created_at_timestamp,
@@ -1417,7 +1417,7 @@ pub mod pallet {
                         swap_id: record.swap_id,
                         maker_id: record.maker_id,
                         user: record.user.clone(),
-                        dust_amount: record.dust_amount.saturated_into(),
+                        cos_amount: record.cos_amount.saturated_into(),
                         usdt_amount: record.usdt_amount,
                         status: record.status.clone(),
                         completed_at: completed_block,

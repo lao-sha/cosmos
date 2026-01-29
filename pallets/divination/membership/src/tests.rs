@@ -11,7 +11,7 @@ fn subscribe_bronze_works() {
         let user = 1;
         let initial_balance = balance(user);
 
-        // Subscribe to Bronze (5 DUST/month)
+        // Subscribe to Bronze (5 COS/month)
         assert_ok!(Membership::subscribe(
             RuntimeOrigin::signed(user),
             MemberTier::Bronze,
@@ -20,23 +20,23 @@ fn subscribe_bronze_works() {
         ));
 
         // Check balance deducted
-        assert_eq!(balance(user), initial_balance - 5 * DUST);
+        assert_eq!(balance(user), initial_balance - 5 * COS);
 
         // Check membership created
         let member = Membership::members(user).unwrap();
         assert_eq!(member.tier, MemberTier::Bronze);
-        assert_eq!(member.total_paid, 5 * DUST);
+        assert_eq!(member.total_paid, 5 * COS);
 
         // Check expiration (300 blocks = 1 month in test)
         let now = System::block_number();
         assert_eq!(member.expires_at, now + 300);
 
         // Check treasury received 90% (treasury started with existential deposit of 1)
-        assert_eq!(treasury_balance(), 1 + 5 * DUST * 9 / 10);
+        assert_eq!(treasury_balance(), 1 + 5 * COS * 9 / 10);
 
         // Check reward pool received 10%
-        let pool_initial = 100_000 * DUST;
-        assert_eq!(reward_pool_balance(), pool_initial + 5 * DUST / 10);
+        let pool_initial = 100_000 * COS;
+        assert_eq!(reward_pool_balance(), pool_initial + 5 * COS / 10);
 
         // Check event
         System::assert_last_event(
@@ -44,7 +44,7 @@ fn subscribe_bronze_works() {
                 who: user,
                 tier: MemberTier::Bronze,
                 duration: SubscriptionDuration::Monthly,
-                amount_paid: 5 * DUST,
+                amount_paid: 5 * COS,
                 expires_at: now + 300,
             }
             .into(),
@@ -57,7 +57,7 @@ fn subscribe_yearly_with_discount_works() {
     new_test_ext().execute_with(|| {
         let user = 1;
 
-        // Subscribe to Silver yearly (25 * 10 = 250 DUST instead of 25 * 12 = 300)
+        // Subscribe to Silver yearly (25 * 10 = 250 COS instead of 25 * 12 = 300)
         assert_ok!(Membership::subscribe(
             RuntimeOrigin::signed(user),
             MemberTier::Silver,
@@ -66,7 +66,7 @@ fn subscribe_yearly_with_discount_works() {
         ));
 
         let member = Membership::members(user).unwrap();
-        assert_eq!(member.total_paid, 250 * DUST); // 10 months for 12
+        assert_eq!(member.total_paid, 250 * COS); // 10 months for 12
 
         // Check expiration (300 * 12 blocks = 1 year in test)
         let now = System::block_number();
@@ -159,11 +159,11 @@ fn upgrade_tier_works() {
         let member = Membership::members(user).unwrap();
         assert_eq!(member.tier, MemberTier::Silver);
 
-        // Check prorated cost deducted (approximately 20 DUST for full month)
-        // Silver(25) - Bronze(5) = 20 DUST/month difference
+        // Check prorated cost deducted (approximately 20 COS for full month)
+        // Silver(25) - Bronze(5) = 20 COS/month difference
         let upgrade_cost = balance_after_bronze - balance(user);
         assert!(upgrade_cost > 0);
-        assert!(upgrade_cost <= 20 * DUST);
+        assert!(upgrade_cost <= 20 * COS);
     });
 }
 
@@ -194,11 +194,11 @@ fn downgrade_tier_fails() {
 fn tier_monthly_fees_are_correct() {
     new_test_ext().execute_with(|| {
         assert_eq!(Membership::get_tier_monthly_fee(MemberTier::Free), 0);
-        assert_eq!(Membership::get_tier_monthly_fee(MemberTier::Bronze), 5 * DUST);
-        assert_eq!(Membership::get_tier_monthly_fee(MemberTier::Silver), 25 * DUST);
-        assert_eq!(Membership::get_tier_monthly_fee(MemberTier::Gold), 80 * DUST);
-        assert_eq!(Membership::get_tier_monthly_fee(MemberTier::Platinum), 200 * DUST);
-        assert_eq!(Membership::get_tier_monthly_fee(MemberTier::Diamond), 500 * DUST);
+        assert_eq!(Membership::get_tier_monthly_fee(MemberTier::Bronze), 5 * COS);
+        assert_eq!(Membership::get_tier_monthly_fee(MemberTier::Silver), 25 * COS);
+        assert_eq!(Membership::get_tier_monthly_fee(MemberTier::Gold), 80 * COS);
+        assert_eq!(Membership::get_tier_monthly_fee(MemberTier::Platinum), 200 * COS);
+        assert_eq!(Membership::get_tier_monthly_fee(MemberTier::Diamond), 500 * COS);
     });
 }
 
@@ -599,16 +599,16 @@ fn check_in_reward_with_member_bonus() {
         // Check-in
         assert_ok!(Membership::check_in(RuntimeOrigin::signed(user)));
 
-        // Base reward: 0.001 DUST
+        // Base reward: 0.001 COS
         // Gold multiplier: 2.0x
         // Pool adjustment: 1.0x (pool is well-funded)
-        // Expected: 0.001 * 2.0 * 1.0 = 0.002 DUST
+        // Expected: 0.001 * 2.0 * 1.0 = 0.002 COS
         let balance_after = balance(user);
         let reward_received = balance_after - balance_before;
 
         assert!(reward_received > 0);
         // Allow for some rounding
-        assert!(reward_received <= DUST / 500); // ~0.002 DUST
+        assert!(reward_received <= COS / 500); // ~0.002 COS
     });
 }
 
@@ -656,7 +656,7 @@ fn global_stats_update_on_subscription() {
         ));
 
         let stats_after = Membership::global_stats();
-        assert_eq!(stats_after.total_revenue, 5 * DUST);
+        assert_eq!(stats_after.total_revenue, 5 * COS);
         assert_eq!(stats_after.tier_counts[MemberTier::Bronze as usize], 1);
     });
 }

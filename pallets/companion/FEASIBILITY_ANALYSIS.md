@@ -59,7 +59,7 @@ pallet-chat-ai
 
 ### 1.2 现有存储机制
 
-#### IPFS 存储（pallet-stardust-ipfs）
+#### IPFS 存储（pallet-cosmos-ipfs）
 
 **功能**：
 - 内容固定（Pin）
@@ -107,7 +107,7 @@ pallet-ai-companion（新模块）
 
 2. **架构兼容性好**
    - ✅ 可以复用 `pallet-chat-ai` 的OCW机制
-   - ✅ 可以复用 `pallet-stardust-ipfs` 的存储机制
+   - ✅ 可以复用 `pallet-cosmos-ipfs` 的存储机制
    - ✅ 可以复用 `pallet-chat-core` 的消息管理机制
    - ✅ 与现有模块低耦合，易于集成
 
@@ -180,7 +180,7 @@ pallet-ai-companion（新模块）
 **实施策略**：
 1. **复用现有基础设施**
    - 复用 `pallet-chat-ai` 的OCW机制
-   - 复用 `pallet-stardust-ipfs` 的存储机制
+   - 复用 `pallet-cosmos-ipfs` 的存储机制
    - 复用 `pallet-chat-core` 的消息管理
 
 2. **明确模块边界**
@@ -378,7 +378,7 @@ AI陪伴机器人（基础功能）
 |---------|--------|------|
 | **pallet-chat-ai** | ⭐⭐⭐ | 可以复用OCW机制，但需要区分场景 |
 | **pallet-chat-core** | ⭐⭐⭐⭐ | 可以复用消息管理机制 |
-| **pallet-stardust-ipfs** | ⭐⭐⭐⭐⭐ | 完美兼容，可直接使用 |
+| **pallet-cosmos-ipfs** | ⭐⭐⭐⭐⭐ | 完美兼容，可直接使用 |
 | **pallet-divination-ai** | ⭐⭐⭐ | 可以复用AI服务调用机制 |
 
 **兼容性评分**：⭐⭐⭐⭐（良好）
@@ -389,7 +389,7 @@ AI陪伴机器人（基础功能）
 |---------|--------|------|
 | **pallet-chat-ai** | ⭐⭐⭐⭐⭐ | 完美兼容，可直接集成 |
 | **pallet-chat-core** | ⭐⭐⭐⭐⭐ | 完美兼容，对话内容已存储在IPFS |
-| **pallet-stardust-ipfs** | ⭐⭐⭐⭐⭐ | 完美兼容，可直接使用IPFS内容 |
+| **pallet-cosmos-ipfs** | ⭐⭐⭐⭐⭐ | 完美兼容，可直接使用IPFS内容 |
 | **所有AI模块** | ⭐⭐⭐⭐⭐ | 完美兼容，可以增强所有AI功能 |
 
 **兼容性评分**：⭐⭐⭐⭐⭐（完美）
@@ -401,7 +401,7 @@ AI陪伴机器人（基础功能）
 ```
 pallet-ai-companion（新）
     ├── 复用 pallet-chat-ai 的OCW机制
-    ├── 复用 pallet-stardust-ipfs 的存储
+    ├── 复用 pallet-cosmos-ipfs 的存储
     └── 复用 pallet-chat-core 的消息管理
 
 pallet-chat-memory（新，向量存储）
@@ -462,7 +462,7 @@ pallet-chat-ai（扩展）
 **成本**：
 - 开发成本：6-8周（MVP）
 - 运营成本：AI调用 $0.001-0.03/次
-- 用户成本：~0.01 DUST/次对话
+- 用户成本：~0.01 COS/次对话
 
 **收益**：
 - 用户价值：情感陪伴、个性化体验
@@ -564,7 +564,7 @@ pallet-chat-ai（扩展）
 |------|------|----------|---------------|
 | **pallet-chat-ai** | 逝者数字代理对话 | 纪念馆场景 | 可以复用OCW机制 |
 | **pallet-chat-core** | 私聊功能 | 用户间聊天 | 可以复用消息管理 |
-| **pallet-stardust-ipfs** | IPFS存储 | 内容存储 | 完美兼容 |
+| **pallet-cosmos-ipfs** | IPFS存储 | 内容存储 | 完美兼容 |
 | **pallet-divination-ai** | 占卜AI解读 | 占卜场景 | 可以复用AI服务调用 |
 
 ### 9.2 技术栈对比
@@ -581,9 +581,9 @@ pallet-chat-ai（扩展）
 
 | 方案 | 开发成本 | 运营成本/月 | 用户成本/月 | 总成本 |
 |------|---------|-----------|-----------|--------|
-| **AI陪伴机器人** | 6-8周 | $5-15 | ~0.3 DUST | 中等 |
+| **AI陪伴机器人** | 6-8周 | $5-15 | ~0.3 COS | 中等 |
 | **向量存储** | 3-4周 | $0.32-1.28 | $0 | 极低 |
-| **两者结合** | 9-12周 | $5.32-16.28 | ~0.3 DUST | 中等 |
+| **两者结合** | 9-12周 | $5.32-16.28 | ~0.3 COS | 中等 |
 
 ---
 

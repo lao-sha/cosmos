@@ -4,7 +4,7 @@
 //!
 //! 本模块负责 OTC（场外交易）订单的完整生命周期管理，包括：
 //! - 订单创建与管理
-//! - 首购订单特殊逻辑（固定USD价值，动态DUST数量）
+//! - 首购订单特殊逻辑（固定USD价值，动态COS数量）
 //! - 订单状态流转（创建→付款→释放→完成）
 //! - 订单争议与仲裁
 //! - 自动清理过期订单
@@ -91,7 +91,7 @@ pub mod pallet {
         Created,
         /// 买家已标记付款或做市商已确认
         PaidOrCommitted,
-        /// DUST已释放
+        /// COS已释放
         Released,
         /// 已退款
         Refunded,
@@ -172,8 +172,8 @@ pub mod pallet {
         pub maker_id: u64,
         /// 买家账户
         pub buyer: T::AccountId,
-        /// DUST 数量
-        pub dust_amount: BalanceOf<T>,
+        /// COS 数量
+        pub cos_amount: BalanceOf<T>,
         /// USDT 金额
         pub usdt_amount: BalanceOf<T>,
         /// 创建时间（Unix秒）
@@ -198,7 +198,7 @@ pub mod pallet {
         pub maker_id: u64,
         /// 买家账户
         pub taker: T::AccountId,
-        /// 数量（DUST数量，压缩为u64）
+        /// 数量（COS数量，压缩为u64）
         pub qty: u64,
         /// 总金额（USDT金额，压缩为u64）
         pub amount: u64,
@@ -246,9 +246,9 @@ pub mod pallet {
         pub maker: T::AccountId,
         /// 买家账户
         pub taker: T::AccountId,
-        /// 单价（USDT/DUST，精度10^6）
+        /// 单价（USDT/COS，精度10^6）
         pub price: BalanceOf<T>,
-        /// 数量（DUST数量）
+        /// 数量（COS数量）
         pub qty: BalanceOf<T>,
         /// 总金额（USDT金额）
         pub amount: BalanceOf<T>,
@@ -374,13 +374,13 @@ pub mod pallet {
         #[pallet::constant]
         type FirstPurchaseUsdValue: Get<u128>;
 
-        /// 首购订单最小DUST数量（防止汇率异常）
+        /// 首购订单最小COS数量（防止汇率异常）
         #[pallet::constant]
-        type MinFirstPurchaseDustAmount: Get<BalanceOf<Self>>;
+        type MinFirstPurchaseCosAmount: Get<BalanceOf<Self>>;
 
-        /// 首购订单最大DUST数量（防止汇率异常）
+        /// 首购订单最大COS数量（防止汇率异常）
         #[pallet::constant]
-        type MaxFirstPurchaseDustAmount: Get<BalanceOf<Self>>;
+        type MaxFirstPurchaseCosAmount: Get<BalanceOf<Self>>;
 
         /// OTC订单最大USD金额（200 USD，精度10^6）
         #[pallet::constant]
@@ -691,7 +691,7 @@ pub mod pallet {
             order_id: u64,
             maker_id: u64,
             buyer: T::AccountId,
-            dust_amount: BalanceOf<T>,
+            cos_amount: BalanceOf<T>,
             is_first_purchase: bool,
         },
         /// 订单状态已变更
@@ -707,7 +707,7 @@ pub mod pallet {
             buyer: T::AccountId,
             maker_id: u64,
             usd_value: u128,
-            dust_amount: BalanceOf<T>,
+            cos_amount: BalanceOf<T>,
         },
         /// TRON 交易哈希已记录
         TronTxHashRecorded {
@@ -754,7 +754,7 @@ pub mod pallet {
             order_id: u64,
             buyer: T::AccountId,
             maker_id: u64,
-            dust_amount: BalanceOf<T>,
+            cos_amount: BalanceOf<T>,
         },
         /// 过期订单批量处理完成
         ExpiredOrdersProcessed {
@@ -900,7 +900,7 @@ pub mod pallet {
         /// # 参数
         /// - `origin`: 调用者（买家，必须是签名账户）
         /// - `maker_id`: 做市商ID
-        /// - `dust_amount`: DUST数量
+        /// - `cos_amount`: COS数量
         /// - `payment_commit`: 支付承诺哈希
         /// - `contact_commit`: 联系方式承诺哈希
         ///
@@ -911,7 +911,7 @@ pub mod pallet {
         pub fn create_order(
             origin: OriginFor<T>,
             maker_id: u64,
-            dust_amount: BalanceOf<T>,
+            cos_amount: BalanceOf<T>,
             payment_commit: H256,
             contact_commit: H256,
         ) -> DispatchResult {
@@ -919,7 +919,7 @@ pub mod pallet {
             let _order_id = Self::do_create_order(
                 &buyer,
                 maker_id,
-                dust_amount,
+                cos_amount,
                 payment_commit,
                 contact_commit,
             )?;
@@ -974,7 +974,7 @@ pub mod pallet {
             Self::do_mark_paid(&buyer, order_id, tron_tx_hash)
         }
         
-        /// 函数级详细中文注释：做市商释放DUST
+        /// 函数级详细中文注释：做市商释放COS
         ///
         /// # 参数
         /// - `origin`: 调用者（做市商，必须是签名账户）
@@ -984,12 +984,12 @@ pub mod pallet {
         /// - `DispatchResult`: 成功或错误
         #[pallet::call_index(3)]
         #[pallet::weight(<T as Config>::WeightInfo::create_order())]
-        pub fn release_dust(
+        pub fn release_cos(
             origin: OriginFor<T>,
             order_id: u64,
         ) -> DispatchResult {
             let maker = ensure_signed(origin)?;
-            Self::do_release_dust(&maker, order_id)
+            Self::do_release_cos(&maker, order_id)
         }
         
         /// 函数级详细中文注释：取消订单
@@ -1227,9 +1227,9 @@ pub mod pallet {
         /// 
         /// ## 功能说明
         /// 1. 验证做市商存在且激活
-        /// 2. 获取当前DUST/USD价格
+        /// 2. 获取当前COS/USD价格
         /// 3. 计算订单总金额
-        /// 4. 将做市商的DUST锁定到托管
+        /// 4. 将做市商的COS锁定到托管
         /// 5. 创建订单记录
         /// 6. 更新买家和做市商的订单列表
         /// 7. 发出订单创建事件
@@ -1237,7 +1237,7 @@ pub mod pallet {
         /// ## 参数
         /// - `buyer`: 买家账户
         /// - `maker_id`: 做市商ID
-        /// - `dust_amount`: 购买的DUST数量
+        /// - `cos_amount`: 购买的COS数量
         /// - `payment_commit`: 支付承诺哈希
         /// - `contact_commit`: 联系方式承诺哈希
         /// 
@@ -1247,7 +1247,7 @@ pub mod pallet {
         pub fn do_create_order(
             buyer: &T::AccountId,
             maker_id: u64,
-            dust_amount: BalanceOf<T>,
+            cos_amount: BalanceOf<T>,
             payment_commit: H256,
             contact_commit: H256,
         ) -> Result<u64, DispatchError> {
@@ -1257,7 +1257,7 @@ pub mod pallet {
             Self::enforce_kyc_requirement(buyer)?;
 
             // 1. 验证订单金额（新增）
-            let _usd_amount = Self::validate_order_amount(dust_amount, false)?;
+            let _usd_amount = Self::validate_order_amount(cos_amount, false)?;
 
             // 2. 🆕 使用统一的做市商验证逻辑
             let maker_app = T::MakerPallet::validate_maker(maker_id)
@@ -1267,7 +1267,7 @@ pub mod pallet {
                 })?;
             
             // 2.5 验证做市商押金USD价值（使用pricing模块换算）
-            // MakerPallet::get_deposit_usd_value 内部使用 Pricing::get_dust_to_usd_rate 换算
+            // MakerPallet::get_deposit_usd_value 内部使用 Pricing::get_cos_to_usd_rate 换算
             let min_deposit_usd = T::MinMakerDepositUsd::get(); // 500_000_000 (500 USDT, 精度10^6)
             let maker_deposit_usd = T::MakerPallet::get_deposit_usd_value(maker_id)
                 .unwrap_or(0);
@@ -1276,18 +1276,18 @@ pub mod pallet {
                 Error::<T>::MakerDepositInsufficient
             );
             
-            // 3. 获取当前DUST/USD价格
-            let price = T::Pricing::get_dust_to_usd_rate()
+            // 3. 获取当前COS/USD价格
+            let price = T::Pricing::get_cos_to_usd_rate()
                 .ok_or(Error::<T>::PricingUnavailable)?;
             
-            // 4. 计算总金额（USDT）= dust_amount * price
-            let amount = dust_amount
+            // 4. 计算总金额（USDT）= cos_amount * price
+            let amount = cos_amount
                 .checked_mul(&price)
                 .ok_or(Error::<T>::CalculationOverflow)?;
 
             // 🆕 方案C+：买家额度检查和占用
             // 5. 计算订单USD金额（精度10^6）
-            let amount_usd: u64 = Self::calculate_usd_amount_from_dust(dust_amount, price)?;
+            let amount_usd: u64 = Self::calculate_usd_amount_from_cos(cos_amount, price)?;
 
             // 6. 检查并占用买家额度
             T::Credit::occupy_quota(buyer, amount_usd)?;
@@ -1300,15 +1300,15 @@ pub mod pallet {
             // 8. 获取订单ID（提前）
             let order_id = NextOrderId::<T>::get();
 
-            // 9. 将做市商的DUST锁定到托管（使用 order_id 作为托管 ID）
+            // 9. 将做市商的COS锁定到托管（使用 order_id 作为托管 ID）
             T::Escrow::lock_from(
                 &maker_app.account,
                 order_id,
-                dust_amount,
+                cos_amount,
             )?;
             
             // 🆕 2026-01-18: 计算并锁定买家押金
-            let buyer_deposit = Self::calculate_buyer_deposit(buyer, dust_amount);
+            let buyer_deposit = Self::calculate_buyer_deposit(buyer, cos_amount);
             let deposit_status = if buyer_deposit.is_zero() {
                 DepositStatus::None
             } else {
@@ -1331,7 +1331,7 @@ pub mod pallet {
                 maker: maker_app.account.clone(),
                 taker: buyer.clone(),
                 price,
-                qty: dust_amount,
+                qty: cos_amount,
                 amount,
                 created_at: now,
                 expire_at,
@@ -1367,7 +1367,7 @@ pub mod pallet {
                 order_id,
                 maker_id,
                 buyer: buyer.clone(),
-                dust_amount,
+                cos_amount,
                 is_first_purchase: false,
             });
             
@@ -1405,9 +1405,9 @@ pub mod pallet {
         /// ## 功能说明
         /// 1. 验证买家未进行过首购
         /// 2. 验证做市商首购配额未用完
-        /// 3. 获取当前DUST/USD价格
-        /// 4. 根据固定USD价值计算DUST数量
-        /// 5. 验证DUST数量在合理范围内
+        /// 3. 获取当前COS/USD价格
+        /// 4. 根据固定USD价值计算COS数量
+        /// 5. 验证COS数量在合理范围内
         /// 6. 创建首购订单
         /// 
         /// ## 参数
@@ -1448,44 +1448,44 @@ pub mod pallet {
                 Error::<T>::FirstPurchaseQuotaExhausted
             );
             
-            // 5. 获取当前DUST/USD价格
-            let price = T::Pricing::get_dust_to_usd_rate()
+            // 5. 获取当前COS/USD价格
+            let price = T::Pricing::get_cos_to_usd_rate()
                 .ok_or(Error::<T>::PricingUnavailable)?;
             
-            // 6. 计算DUST数量
-            // USD价值 / 价格 = DUST数量
-            // 注意：price 是 USDT/DUST，所以需要除法
+            // 6. 计算COS数量
+            // USD价值 / 价格 = COS数量
+            // 注意：price 是 USDT/COS，所以需要除法
             let usd_value = T::FirstPurchaseUsdValue::get();
             let price_u128 = TryInto::<u128>::try_into(price)
                 .map_err(|_| Error::<T>::CalculationOverflow)?;
             
             ensure!(price_u128 > 0, Error::<T>::InvalidPrice);
             
-            // dust_amount = usd_value * 10^12 / price (考虑精度)
-            let dust_amount_u128 = usd_value
-                .checked_mul(1_000_000_000_000) // 10^12 (DUST精度)
+            // cos_amount = usd_value * 10^12 / price (考虑精度)
+            let cos_amount_u128 = usd_value
+                .checked_mul(1_000_000_000_000) // 10^12 (COS精度)
                 .and_then(|v| v.checked_div(price_u128))
                 .ok_or(Error::<T>::CalculationOverflow)?;
             
-            let dust_amount: BalanceOf<T> = TryInto::<u128>::try_into(dust_amount_u128)
+            let cos_amount: BalanceOf<T> = TryInto::<u128>::try_into(cos_amount_u128)
                 .ok()
                 .and_then(|v| TryInto::<BalanceOf<T>>::try_into(v).ok())
                 .ok_or(Error::<T>::CalculationOverflow)?;
             
-            // 7. 验证DUST数量在合理范围内
+            // 7. 验证COS数量在合理范围内
             ensure!(
-                dust_amount >= T::MinFirstPurchaseDustAmount::get(),
+                cos_amount >= T::MinFirstPurchaseCosAmount::get(),
                 Error::<T>::InvalidPrice
             );
             ensure!(
-                dust_amount <= T::MaxFirstPurchaseDustAmount::get(),
+                cos_amount <= T::MaxFirstPurchaseCosAmount::get(),
                 Error::<T>::InvalidPrice
             );
             
             // 8. 验证做市商余额
             let maker_balance = <T as Config>::Currency::free_balance(&maker_app.account);
             ensure!(
-                maker_balance >= dust_amount,
+                maker_balance >= cos_amount,
                 Error::<T>::MakerInsufficientBalance
             );
             
@@ -1497,11 +1497,11 @@ pub mod pallet {
             // 10. 获取订单ID（提前）
             let order_id = NextOrderId::<T>::get();
             
-            // 11. 将做市商的DUST锁定到托管（使用 order_id 作为托管 ID）
+            // 11. 将做市商的COS锁定到托管（使用 order_id 作为托管 ID）
             T::Escrow::lock_from(
                 &maker_app.account,
                 order_id,
-                dust_amount,
+                cos_amount,
             )?;
             
             // 12. 获取当前时间并计算超时时间
@@ -1528,7 +1528,7 @@ pub mod pallet {
                 maker: maker_app.account.clone(),
                 taker: buyer.clone(),
                 price,
-                qty: dust_amount,
+                qty: cos_amount,
                 amount,
                 created_at: now,
                 expire_at,
@@ -1575,7 +1575,7 @@ pub mod pallet {
                 buyer: buyer.clone(),
                 maker_id,
                 usd_value,
-                dust_amount,
+                cos_amount,
             });
 
             // 19. 🆕 2025-11-28: 授予买卖双方聊天权限
@@ -1677,12 +1677,12 @@ pub mod pallet {
             Ok(())
         }
         
-        /// 函数级详细中文注释：做市商释放DUST
+        /// 函数级详细中文注释：做市商释放COS
         /// 
         /// ## 功能说明
         /// 1. 验证订单存在且状态为 PaidOrCommitted
         /// 2. 验证调用者是订单做市商
-        /// 3. 从托管释放DUST到买家
+        /// 3. 从托管释放COS到买家
         /// 4. 更新订单状态为 Released
         /// 5. 更新信用记录
         /// 6. 更新首购状态（如是首购订单）
@@ -1695,7 +1695,7 @@ pub mod pallet {
         /// ## 返回
         /// - `Ok(())`: 成功
         /// - `Err(...)`: 各种错误情况
-        pub fn do_release_dust(
+        pub fn do_release_cos(
             maker: &T::AccountId,
             order_id: u64,
         ) -> DispatchResult {
@@ -1714,7 +1714,7 @@ pub mod pallet {
             // 3. 验证调用者是做市商
             ensure!(order.maker == *maker, Error::<T>::NotAuthorized);
             
-            // 4. 从托管释放DUST到买家（使用 order_id 作为托管 ID）
+            // 4. 从托管释放COS到买家（使用 order_id 作为托管 ID）
             T::Escrow::release_all(order_id, &order.taker)?;
             
             // 5. 更新订单状态
@@ -1734,7 +1734,7 @@ pub mod pallet {
 
             // 🆕 方案C+：买家额度管理
             // 7. 释放买家占用的额度
-            let amount_usd: u64 = Self::calculate_usd_amount_from_dust(order.qty, order.price)?;
+            let amount_usd: u64 = Self::calculate_usd_amount_from_cos(order.qty, order.price)?;
             let _ = T::Credit::release_quota(&order.taker, amount_usd);
 
             // 8. 记录订单完成，提升买家信用分
@@ -1790,7 +1790,7 @@ pub mod pallet {
         /// 1. 验证订单存在
         /// 2. 验证调用者权限（买家或做市商）
         /// 3. 验证订单状态可以取消
-        /// 4. 从托管退还DUST给做市商
+        /// 4. 从托管退还COS给做市商
         /// 5. 更新订单状态为 Canceled
         /// 6. 发出状态变更事件
         /// 
@@ -1823,7 +1823,7 @@ pub mod pallet {
                 Error::<T>::InvalidOrderStatus
             );
             
-            // 4. 从托管退还DUST给做市商（使用 order_id 作为托管 ID）
+            // 4. 从托管退还COS给做市商（使用 order_id 作为托管 ID）
             T::Escrow::refund_all(order_id, &order.maker)?;
             
             // 5. 更新订单状态
@@ -1835,7 +1835,7 @@ pub mod pallet {
 
             // 🆕 方案C+：买家额度管理
             // 6. 释放买家占用的额度
-            let amount_usd: u64 = Self::calculate_usd_amount_from_dust(order.qty, order.price)?;
+            let amount_usd: u64 = Self::calculate_usd_amount_from_cos(order.qty, order.price)?;
             let _ = T::Credit::release_quota(&order.taker, amount_usd);
 
             // 7. 记录订单取消（轻度降低信用）
@@ -2147,7 +2147,7 @@ pub mod pallet {
                     let _ = Self::release_buyer_deposit(&order.taker, order.buyer_deposit);
                 }
                 
-                // 2. 释放托管的 DUST 给买家（订单完成）
+                // 2. 释放托管的 COS 给买家（订单完成）
                 let _ = T::Escrow::release_all(order_id, &order.taker);
                 
                 // 3. 更新订单状态
@@ -2170,7 +2170,7 @@ pub mod pallet {
                     let _ = Self::forfeit_buyer_deposit(&order.maker, order.buyer_deposit);
                 }
                 
-                // 2. 退还托管的 DUST 给做市商（订单取消）
+                // 2. 退还托管的 COS 给做市商（订单取消）
                 let _ = T::Escrow::refund_all(order_id, &order.maker);
                 
                 // 3. 更新订单状态
@@ -2260,7 +2260,7 @@ pub mod pallet {
                 order_id,
                 maker_id: order.maker_id,
                 buyer: order.taker.clone(),
-                dust_amount: order.qty,
+                cos_amount: order.qty,
                 usdt_amount: order.amount,
                 created_at: order.created_at,
                 expire_at: order.expire_at,
@@ -2306,7 +2306,7 @@ pub mod pallet {
         /// 
         /// ## 参数
         /// - `buyer`: 买家账户
-        /// - `order_amount`: 订单 DUST 金额
+        /// - `order_amount`: 订单 COS 金额
         /// 
         /// ## 返回
         /// - 应缴押金金额（0 表示免押金）
@@ -2585,7 +2585,7 @@ pub mod pallet {
                 order_id,
                 buyer: order.taker.clone(),
                 maker_id: order.maker_id,
-                dust_amount: order.qty,  // qty 是 DUST 数量
+                cos_amount: order.qty,  // qty 是 COS 数量
             });
             
             Ok(())
@@ -2685,14 +2685,14 @@ pub mod pallet {
         /// 函数级详细中文注释：验证订单金额是否符合限制
         ///
         /// # 参数
-        /// - dust_amount: 购买的DUST数量
+        /// - cos_amount: 购买的COS数量
         /// - is_first_purchase: 是否为首购订单
         ///
         /// # 返回
         /// - Ok(usd_amount): 验证通过，返回对应的USD金额
         /// - Err(DispatchError): 验证失败
         pub fn validate_order_amount(
-            dust_amount: BalanceOf<T>,
+            cos_amount: BalanceOf<T>,
             is_first_purchase: bool,
         ) -> Result<u64, DispatchError> {
             // 首购订单使用固定价格，无需验证限额
@@ -2700,14 +2700,14 @@ pub mod pallet {
                 return Ok(T::FirstPurchaseUsdAmount::get());
             }
 
-            // 获取当前DUST/USD价格
-            let dust_to_usd_rate = T::Pricing::get_dust_to_usd_rate()
+            // 获取当前COS/USD价格
+            let cos_to_usd_rate = T::Pricing::get_cos_to_usd_rate()
                 .ok_or(Error::<T>::PricingServiceUnavailable)?;
 
             // 计算订单的USD金额
-            let usd_amount = Self::calculate_usd_amount_from_dust(
-                dust_amount,
-                dust_to_usd_rate,
+            let usd_amount = Self::calculate_usd_amount_from_cos(
+                cos_amount,
+                cos_to_usd_rate,
             )?;
 
             // 验证最小金额（至少20 USD，首购除外）
@@ -2726,29 +2726,29 @@ pub mod pallet {
             Ok(usd_amount)
         }
 
-        /// 函数级详细中文注释：计算DUST对应的USD金额
+        /// 函数级详细中文注释：计算COS对应的USD金额
         ///
         /// # 参数
-        /// - dust_amount: DUST数量
-        /// - dust_to_usd_rate: DUST/USD汇率
+        /// - cos_amount: COS数量
+        /// - cos_to_usd_rate: COS/USD汇率
         ///
         /// # 返回
         /// - Ok(u64): USD金额（精度10^6）
         /// - Err(DispatchError): 计算错误
-        fn calculate_usd_amount_from_dust(
-            dust_amount: BalanceOf<T>,
-            dust_to_usd_rate: BalanceOf<T>,
+        fn calculate_usd_amount_from_cos(
+            cos_amount: BalanceOf<T>,
+            cos_to_usd_rate: BalanceOf<T>,
         ) -> Result<u64, DispatchError> {
             // 转换为u128进行高精度计算
-            let dust_u128: u128 = dust_amount.saturated_into();
-            let rate_u128: u128 = dust_to_usd_rate.saturated_into();
+            let cos_u128: u128 = cos_amount.saturated_into();
+            let rate_u128: u128 = cos_to_usd_rate.saturated_into();
 
-            // 计算USD金额 = DUST数量 × DUST/USD汇率 ÷ DUST精度
-            // DUST精度为10^12，USD精度为10^6
-            let usd_u128 = dust_u128
+            // 计算USD金额 = COS数量 × COS/USD汇率 ÷ COS精度
+            // COS精度为10^12，USD精度为10^6
+            let usd_u128 = cos_u128
                 .checked_mul(rate_u128)
                 .ok_or(Error::<T>::AmountCalculationOverflow)?
-                .checked_div(1_000_000_000_000u128) // 除以DUST精度10^12
+                .checked_div(1_000_000_000_000u128) // 除以COS精度10^12
                 .ok_or(Error::<T>::AmountCalculationOverflow)?;
 
             // 验证结果是否在u64范围内
@@ -2759,75 +2759,75 @@ pub mod pallet {
             Ok(usd_amount)
         }
 
-        /// 函数级详细中文注释：计算指定USD金额对应的最大DUST数量
+        /// 函数级详细中文注释：计算指定USD金额对应的最大COS数量
         ///
         /// # 参数
         /// - usd_amount: USD金额（精度10^6）
         ///
         /// # 返回
-        /// - Ok(BalanceOf<T>): 对应的DUST数量
+        /// - Ok(BalanceOf<T>): 对应的COS数量
         /// - Err(DispatchError): 计算错误
-        pub fn calculate_max_dust_for_usd_amount(
+        pub fn calculate_max_cos_for_usd_amount(
             usd_amount: u64,
         ) -> Result<BalanceOf<T>, DispatchError> {
-            // 获取当前DUST/USD价格
-            let dust_to_usd_rate = T::Pricing::get_dust_to_usd_rate()
+            // 获取当前COS/USD价格
+            let cos_to_usd_rate = T::Pricing::get_cos_to_usd_rate()
                 .ok_or(Error::<T>::PricingServiceUnavailable)?;
 
-            // 计算DUST数量 = USD金额 × DUST精度 ÷ DUST/USD汇率
+            // 计算COS数量 = USD金额 × COS精度 ÷ COS/USD汇率
             let usd_u128 = usd_amount as u128;
-            let rate_u128: u128 = dust_to_usd_rate.saturated_into();
+            let rate_u128: u128 = cos_to_usd_rate.saturated_into();
 
-            let dust_u128 = usd_u128
-                .checked_mul(1_000_000_000_000u128) // 乘以DUST精度10^12
+            let cos_u128 = usd_u128
+                .checked_mul(1_000_000_000_000u128) // 乘以COS精度10^12
                 .ok_or(Error::<T>::AmountCalculationOverflow)?
                 .checked_div(rate_u128)
                 .ok_or(Error::<T>::AmountCalculationOverflow)?;
 
             // 转换为BalanceOf<T>
-            let dust_amount: BalanceOf<T> = dust_u128
+            let cos_amount: BalanceOf<T> = cos_u128
                 .try_into()
                 .map_err(|_| Error::<T>::AmountCalculationOverflow)?;
 
-            Ok(dust_amount)
+            Ok(cos_amount)
         }
 
-        /// 函数级详细中文注释：查询当前最大可购买DUST数量
+        /// 函数级详细中文注释：查询当前最大可购买COS数量
         ///
         /// # 返回
-        /// - Ok(BalanceOf<T>): 当前价格下最大可购买的DUST数量
+        /// - Ok(BalanceOf<T>): 当前价格下最大可购买的COS数量
         /// - Err(DispatchError): 查询失败
-        pub fn get_max_purchasable_dust() -> Result<BalanceOf<T>, DispatchError> {
-            Self::calculate_max_dust_for_usd_amount(T::MaxOrderUsdAmount::get())
+        pub fn get_max_purchasable_cos() -> Result<BalanceOf<T>, DispatchError> {
+            Self::calculate_max_cos_for_usd_amount(T::MaxOrderUsdAmount::get())
         }
 
-        /// 函数级详细中文注释：查询指定DUST数量对应的USD金额
+        /// 函数级详细中文注释：查询指定COS数量对应的USD金额
         ///
         /// # 参数
-        /// - dust_amount: DUST数量
+        /// - cos_amount: COS数量
         ///
         /// # 返回
         /// - Ok(u64): 对应的USD金额
         /// - Err(DispatchError): 查询失败
-        pub fn get_usd_amount_for_dust(
-            dust_amount: BalanceOf<T>
+        pub fn get_usd_amount_for_cos(
+            cos_amount: BalanceOf<T>
         ) -> Result<u64, DispatchError> {
-            let dust_to_usd_rate = T::Pricing::get_dust_to_usd_rate()
+            let cos_to_usd_rate = T::Pricing::get_cos_to_usd_rate()
                 .ok_or(Error::<T>::PricingServiceUnavailable)?;
 
-            Self::calculate_usd_amount_from_dust(dust_amount, dust_to_usd_rate)
+            Self::calculate_usd_amount_from_cos(cos_amount, cos_to_usd_rate)
         }
 
-        /// 函数级详细中文注释：检查指定DUST数量是否符合订单限制
+        /// 函数级详细中文注释：检查指定COS数量是否符合订单限制
         ///
         /// # 参数
-        /// - dust_amount: 要检查的DUST数量
+        /// - cos_amount: 要检查的COS数量
         ///
         /// # 返回
         /// - true: 符合限制
         /// - false: 超过限制
-        pub fn is_dust_amount_valid(dust_amount: BalanceOf<T>) -> bool {
-            Self::validate_order_amount(dust_amount, false).is_ok()
+        pub fn is_cos_amount_valid(cos_amount: BalanceOf<T>) -> bool {
+            Self::validate_order_amount(cos_amount, false).is_ok()
         }
 
         // ========================================

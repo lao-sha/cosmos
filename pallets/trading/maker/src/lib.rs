@@ -94,7 +94,7 @@ pub mod pallet {
         pub maker_id: u64,
         /// 扣除类型
         pub penalty_type: PenaltyType,
-        /// 扣除的DUST数量
+        /// 扣除的COS数量
         pub deducted_amount: BalanceOf<T>,
         /// 扣除时的USD价值
         pub usd_value: u64,
@@ -171,9 +171,9 @@ pub mod pallet {
     /// 函数级详细中文注释：做市商业务方向
     #[derive(Clone, Copy, Encode, Decode, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
     pub enum Direction {
-        /// 仅买入（仅Bridge）- 做市商购买DUST，支付USDT
+        /// 仅买入（仅Bridge）- 做市商购买COS，支付USDT
         Buy = 0,
-        /// 仅卖出（仅OTC）- 做市商出售DUST，收取USDT
+        /// 仅卖出（仅OTC）- 做市商出售COS，收取USDT
         Sell = 1,
         /// 双向（OTC + Bridge）- 既可以买入也可以卖出
         BuyAndSell = 2,
@@ -337,7 +337,7 @@ pub mod pallet {
 
         /// 🆕 P3: IPFS 内容注册接口（用于自动 Pin 做市商资料）
         /// 
-        /// 集成 pallet-stardust-ipfs 的 ContentRegistry trait，
+        /// 集成 pallet-cosmos-ipfs 的 ContentRegistry trait，
         /// 在做市商注册/更新资料时自动 Pin 内容到 IPFS。
         /// 
         /// Pin 策略：
@@ -1350,55 +1350,55 @@ pub mod pallet {
     // ===== 新增：动态押金管理和扣除机制 =====
 
     impl<T: Config> Pallet<T> {
-        /// 函数级详细中文注释：计算指定USD价值对应的DUST数量
-        pub fn calculate_dust_amount_for_usd(usd_value: u64) -> Result<BalanceOf<T>, DispatchError> {
-            // 获取当前DUST/USD价格
-            let dust_to_usd_rate = T::Pricing::get_dust_to_usd_rate()
+        /// 函数级详细中文注释：计算指定USD价值对应的COS数量
+        pub fn calculate_cos_amount_for_usd(usd_value: u64) -> Result<BalanceOf<T>, DispatchError> {
+            // 获取当前COS/USD价格
+            let cos_to_usd_rate = T::Pricing::get_cos_to_usd_rate()
                 .ok_or(Error::<T>::PriceNotAvailable)?;
 
-            // 计算所需DUST数量
-            // DUST数量 = USD价值 / (DUST/USD价格)
-            Self::calculate_dust_from_usd_rate(usd_value, dust_to_usd_rate)
+            // 计算所需COS数量
+            // COS数量 = USD价值 / (COS/USD价格)
+            Self::calculate_cos_from_usd_rate(usd_value, cos_to_usd_rate)
         }
 
-        /// 函数级详细中文注释：根据USD价值和汇率计算DUST数量
-        fn calculate_dust_from_usd_rate(
+        /// 函数级详细中文注释：根据USD价值和汇率计算COS数量
+        fn calculate_cos_from_usd_rate(
             usd_value: u64,
-            dust_to_usd_rate: BalanceOf<T>
+            cos_to_usd_rate: BalanceOf<T>
         ) -> Result<BalanceOf<T>, DispatchError> {
             // 转换为u128进行高精度计算
             let usd_u128 = usd_value as u128;
-            let rate_u128: u128 = dust_to_usd_rate.saturated_into();
+            let rate_u128: u128 = cos_to_usd_rate.saturated_into();
 
-            // 计算DUST数量 = USD价值 × DUST精度 ÷ DUST/USD汇率
-            let dust_u128 = usd_u128
-                .checked_mul(1_000_000_000_000u128) // DUST精度10^12
+            // 计算COS数量 = USD价值 × COS精度 ÷ COS/USD汇率
+            let cos_u128 = usd_u128
+                .checked_mul(1_000_000_000_000u128) // COS精度10^12
                 .ok_or(Error::<T>::CalculationOverflow)?
                 .checked_div(rate_u128)
                 .ok_or(Error::<T>::CalculationOverflow)?;
 
             // 转换为BalanceOf<T>
-            let dust_amount: BalanceOf<T> = dust_u128
+            let cos_amount: BalanceOf<T> = cos_u128
                 .try_into()
                 .map_err(|_| Error::<T>::CalculationOverflow)?;
 
-            Ok(dust_amount)
+            Ok(cos_amount)
         }
 
-        /// 函数级详细中文注释：计算DUST押金的USD价值
+        /// 函数级详细中文注释：计算COS押金的USD价值
         pub fn calculate_usd_value_of_deposit(deposit: BalanceOf<T>) -> Result<u64, DispatchError> {
-            let dust_to_usd_rate = T::Pricing::get_dust_to_usd_rate()
+            let cos_to_usd_rate = T::Pricing::get_cos_to_usd_rate()
                 .ok_or(Error::<T>::PriceNotAvailable)?;
 
             // 转换为u128进行高精度计算
             let deposit_u128: u128 = deposit.saturated_into();
-            let rate_u128: u128 = dust_to_usd_rate.saturated_into();
+            let rate_u128: u128 = cos_to_usd_rate.saturated_into();
 
-            // 计算USD价值 = DUST数量 × DUST/USD汇率 ÷ DUST精度
+            // 计算USD价值 = COS数量 × COS/USD汇率 ÷ COS精度
             let usd_u128 = deposit_u128
                 .checked_mul(rate_u128)
                 .ok_or(Error::<T>::CalculationOverflow)?
-                .checked_div(1_000_000_000_000u128) // 除以DUST精度10^12
+                .checked_div(1_000_000_000_000u128) // 除以COS精度10^12
                 .ok_or(Error::<T>::CalculationOverflow)?;
 
             // 转换为u64
@@ -1433,12 +1433,12 @@ pub mod pallet {
                 );
 
                 // 计算补充目标数量
-                let target_dust_amount = Self::calculate_dust_amount_for_usd(
+                let target_cos_amount = Self::calculate_cos_amount_for_usd(
                     T::DepositReplenishTarget::get()
                 )?;
 
                 // 计算需要补充的金额
-                let replenish_amount = target_dust_amount
+                let replenish_amount = target_cos_amount
                     .saturating_sub(app.deposit);
 
                 if replenish_amount.is_zero() {
@@ -1482,38 +1482,38 @@ pub mod pallet {
 
             // 2. 计算扣除金额
             let (deduct_usd, reason) = Self::calculate_penalty_amount(&penalty_type)?;
-            let deduct_dust = Self::calculate_dust_amount_for_usd(deduct_usd)?;
+            let deduct_cos = Self::calculate_cos_amount_for_usd(deduct_usd)?;
 
             // 3. 验证押金是否充足
             ensure!(
-                app.deposit >= deduct_dust,
+                app.deposit >= deduct_cos,
                 Error::<T>::InsufficientDeposit
             );
 
             // 4. 执行扣除
             let penalty_id = Self::next_penalty_id();
-            app.deposit = app.deposit.saturating_sub(deduct_dust);
+            app.deposit = app.deposit.saturating_sub(deduct_cos);
 
             // 5. 处理扣除的资金
             match beneficiary.as_ref() {
                 Some(beneficiary_account) => {
                     // 转给受益人
-                    T::Currency::unreserve(&app.owner, deduct_dust);
+                    T::Currency::unreserve(&app.owner, deduct_cos);
                     T::Currency::transfer(
                         &app.owner,
                         beneficiary_account,
-                        deduct_dust,
+                        deduct_cos,
                         ExistenceRequirement::KeepAlive,
                     )?;
                 },
                 None => {
                     // 转入国库账户
-                    T::Currency::unreserve(&app.owner, deduct_dust);
+                    T::Currency::unreserve(&app.owner, deduct_cos);
                     let treasury = T::TreasuryAccount::get();
                     T::Currency::transfer(
                         &app.owner,
                         &treasury,
-                        deduct_dust,
+                        deduct_cos,
                         ExistenceRequirement::AllowDeath,
                     )?;
                 }
@@ -1523,7 +1523,7 @@ pub mod pallet {
             let record = PenaltyRecord {
                 maker_id,
                 penalty_type: penalty_type.clone(),
-                deducted_amount: deduct_dust,
+                deducted_amount: deduct_cos,
                 usd_value: deduct_usd,
                 beneficiary: beneficiary.clone(),
                 deducted_at: frame_system::Pallet::<T>::block_number(),
@@ -1550,7 +1550,7 @@ pub mod pallet {
             Self::deposit_event(Event::DepositDeducted {
                 maker_id,
                 penalty_id,
-                deducted_amount: deduct_dust,
+                deducted_amount: deduct_cos,
                 usd_value: deduct_usd,
                 reason: BoundedVec::try_from(reason.as_bytes().to_vec()).unwrap_or_default(),
                 beneficiary,

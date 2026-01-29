@@ -56,7 +56,7 @@ pub mod pallet {
         #[pallet::constant]
         type MaxSuperLikesReceived: Get<u32>;
 
-        /// 超级喜欢费用（DUST，以 u128 表示）
+        /// 超级喜欢费用（COS，以 u128 表示）
         #[pallet::constant]
         type SuperLikeCost: Get<u128>;
 

@@ -349,7 +349,7 @@ interface DivinerStore {
 **Validates: Requirements 1.3, 1.4**
 
 ### Property 2: Deposit locking
-*For any* successful registration, the user's balance SHALL decrease by exactly the minimum deposit amount (100 DUST).
+*For any* successful registration, the user's balance SHALL decrease by exactly the minimum deposit amount (100 COS).
 **Validates: Requirements 1.5**
 
 ### Property 3: Status transitions
@@ -361,7 +361,7 @@ interface DivinerStore {
 **Validates: Requirements 3.3**
 
 ### Property 5: Price validation
-*For any* package creation or update, if price < minimum (1 DUST), the operation SHALL be rejected.
+*For any* package creation or update, if price < minimum (1 COS), the operation SHALL be rejected.
 **Validates: Requirements 3.1**
 
 ### Property 6: Order acceptance timeout
@@ -396,7 +396,7 @@ interface DivinerStore {
 
 | 错误场景 | 处理方式 | 用户提示 |
 |---------|---------|---------|
-| 余额不足注册 | 阻止提交 | "DUST 余额不足，需要至少 100 DUST 作为保证金" |
+| 余额不足注册 | 阻止提交 | "COS 余额不足，需要至少 100 COS 作为保证金" |
 | 重复注册 | 阻止提交 | "您已经是占卜师，无需重复注册" |
 | 套餐数量超限 | 阻止创建 | "套餐数量已达上限（10个），请删除旧套餐后再创建" |
 | 订单超时 | 自动取消 | "订单已超时自动取消" |

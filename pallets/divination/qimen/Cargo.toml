@@ -2,10 +2,10 @@
 name = "pallet-qimen"
 version = "0.1.0"
 description = "奇门遁甲排盘系统 - 区块链玄学占卜模块"
-authors = ["Stardust Team"]
+authors = ["Cosmos Team"]
 license = "MIT"
 edition = "2021"
-repository = "https://github.com/parity-tech/stardust"
+repository = "https://github.com/memoio/cosmos"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]

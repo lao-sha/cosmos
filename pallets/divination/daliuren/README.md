@@ -367,8 +367,8 @@ pub struct SanChuan {
 |------|------|------|
 | `MaxCidLen` | u32 | IPFS CID 最大长度（默认 64） |
 | `MaxDailyDivinations` | u32 | 每日最大起课次数（默认 100） |
-| `DivinationFee` | Balance | 起课费用（默认 1 DUST） |
-| `AiInterpretationFee` | Balance | AI 解读费用（默认 5 DUST） |
+| `DivinationFee` | Balance | 起课费用（默认 1 COS） |
+| `AiInterpretationFee` | Balance | AI 解读费用（默认 5 COS） |
 
 ## 事件
 

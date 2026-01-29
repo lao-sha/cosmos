@@ -2,13 +2,13 @@
 
 ## 📋 模块概述
 
-`pallet-pricing` 是 Stardust 区块链的 **动态定价与市场统计模块**，负责聚合 OTC 和 Bridge 两个市场的交易数据，计算 DUST/USD 市场参考价格，并提供完整的市场统计信息。
+`pallet-pricing` 是 Cosmos 区块链的 **动态定价与市场统计模块**，负责聚合 OTC 和 Bridge 两个市场的交易数据，计算 COS/USD 市场参考价格，并提供完整的市场统计信息。
 
 ### 核心特性
 
 - ✅ **双市场价格聚合**：同时聚合 OTC 和 Bridge 市场的价格数据
 - ✅ **循环缓冲区设计**：最多存储 10,000 笔订单快照，自动滚动更新
-- ✅ **交易量限制**：维护最近累计 1,000,000 DUST 的订单统计
+- ✅ **交易量限制**：维护最近累计 1,000,000 COS 的订单统计
 - ✅ **加权平均价格**：基于交易量的加权平均，更准确反映市场情况
 - ✅ **简单平均价格**：两个市场均价的简单平均，用于快速参考
 - ✅ **冷启动保护**：市场初期使用默认价格，达到阈值后自动退出
@@ -27,9 +27,9 @@
 
 **流程：**
 1. 读取当前 OTC 聚合数据
-2. 如果累计超过 1,000,000 DUST，删除最旧的订单直到满足限制
+2. 如果累计超过 1,000,000 COS，删除最旧的订单直到满足限制
 3. 添加新订单到循环缓冲区（索引 0-9999）
-4. 更新聚合统计数据（总 DUST、总 USDT、订单数）
+4. 更新聚合统计数据（总 COS、总 USDT、订单数）
 5. 发出 `OtcOrderAdded` 事件
 
 **调用者：** `pallet-otc-order`（内部调用）
@@ -37,7 +37,7 @@
 **参数：**
 - `timestamp`: 订单时间戳（Unix 毫秒）
 - `price_usdt`: USDT 单价（精度 10^6）
-- `dust_qty`: DUST 数量（精度 10^12）
+- `cos_qty`: COS 数量（精度 10^12）
 
 #### 添加 Bridge 兑换（`add_bridge_swap`）
 
@@ -53,9 +53,9 @@
 
 ### 2. 价格查询接口
 
-#### 获取 DUST 市场参考价格（`get_memo_reference_price`）
+#### 获取 COS 市场参考价格（`get_memo_reference_price`）
 
-获取 DUST/USD 市场参考价格（简单平均 + 冷启动保护）。
+获取 COS/USD 市场参考价格（简单平均 + 冷启动保护）。
 
 **算法：**
 - **冷启动阶段**：如果两个市场交易量都未达阈值，返回默认价格
@@ -64,20 +64,20 @@
   - 如果只有一个市场有数据：使用该市场的均价
   - 如果都无数据：返回默认价格（兜底）
 
-**返回：** `u64`（USDT/DUST 价格，精度 10^6）
+**返回：** `u64`（USDT/COS 价格，精度 10^6）
 
 **用途：**
 - 前端显示参考价格
 - 价格偏离度计算
 - 简单的市场概览
 
-#### 获取 DUST 市场价格（`get_dust_market_price_weighted`）
+#### 获取 COS 市场价格（`get_cos_market_price_weighted`）
 
-获取 DUST/USD 市场价格（加权平均 + 冷启动保护）。
+获取 COS/USD 市场价格（加权平均 + 冷启动保护）。
 
 **算法：**
 - **冷启动阶段**：如果两个市场交易量都未达阈值，返回默认价格
-- **正常阶段**：加权平均 = `(OTC 总 USDT + Bridge 总 USDT) / (OTC 总 DUST + Bridge 总 DUST)`
+- **正常阶段**：加权平均 = `(OTC 总 USDT + Bridge 总 USDT) / (OTC 总 COS + Bridge 总 COS)`
 
 **优点：**
 - 考虑交易量权重，更准确反映市场情况
@@ -85,7 +85,7 @@
 - 符合市值加权指数的计算方式
 - 冷启动保护避免初期价格为 0 或被操纵
 
-**返回：** `u64`（USDT/DUST 价格，精度 10^6）
+**返回：** `u64`（USDT/COS 价格，精度 10^6）
 
 **用途：**
 - 资产估值（钱包总值计算）
@@ -94,7 +94,7 @@
 
 #### 获取市场统计信息（`get_market_stats`）
 
-获取完整的 DUST 市场统计信息。
+获取完整的 COS 市场统计信息。
 
 **返回：** `MarketStats` 结构，包含：
 - OTC 和 Bridge 各自的均价
@@ -123,11 +123,11 @@
 4. 检查偏离率是否超过 `MaxPriceDeviation` 配置的限制
 
 **示例：**
-- 基准价格：1.0 USDT/DUST（1,000,000）
+- 基准价格：1.0 USDT/COS（1,000,000）
 - `MaxPriceDeviation`：2000 bps（20%）
-- 允许范围：0.8 ~ 1.2 USDT/DUST
-- 订单价格 1.1 USDT/DUST → 偏离 10% → 通过 ✅
-- 订单价格 1.5 USDT/DUST → 偏离 50% → 拒绝 ❌
+- 允许范围：0.8 ~ 1.2 USDT/COS
+- 订单价格 1.1 USDT/COS → 偏离 10% → 通过 ✅
+- 订单价格 1.5 USDT/COS → 偏离 50% → 拒绝 ❌
 
 **用途：**
 - OTC 订单创建时的价格合理性检查
@@ -144,8 +144,8 @@
 
 **机制：**
 1. **冷启动阶段**：
-   - 如果 OTC 和 Bridge 的交易量都低于 `ColdStartThreshold`（默认 1 亿 DUST）
-   - 返回 `DefaultPrice`（默认 0.000001 USDT/DUST）
+   - 如果 OTC 和 Bridge 的交易量都低于 `ColdStartThreshold`（默认 1 亿 COS）
+   - 返回 `DefaultPrice`（默认 0.000001 USDT/COS）
    
 2. **退出冷启动**：
    - 当任一市场交易量达到阈值时，自动退出冷启动
@@ -163,8 +163,8 @@
 **权限：** Root（治理投票）
 
 **参数：**
-- `threshold`: 可选，新的冷启动阈值（DUST 数量，精度 10^12）
-- `default_price`: 可选，新的默认价格（USDT/DUST，精度 10^6）
+- `threshold`: 可选，新的冷启动阈值（COS 数量，精度 10^12）
+- `default_price`: 可选，新的默认价格（USDT/COS，精度 10^6）
 
 **限制：**
 - 只能在冷启动期间调整（`ColdStartExited = false`）
@@ -204,7 +204,7 @@
 pub struct OrderSnapshot {
     pub timestamp: u64,     // 订单时间戳（Unix 毫秒）
     pub price_usdt: u64,    // USDT 单价（精度 10^6）
-    pub dust_qty: u128,     // DUST 数量（精度 10^12）
+    pub cos_qty: u128,     // COS 数量（精度 10^12）
 }
 ```
 
@@ -212,7 +212,7 @@ pub struct OrderSnapshot {
 
 ```rust
 pub struct PriceAggregateData {
-    pub total_dust: u128,      // 累计 DUST 数量（精度 10^12）
+    pub total_cos: u128,      // 累计 COS 数量（精度 10^12）
     pub total_usdt: u128,      // 累计 USDT 金额（精度 10^6）
     pub order_count: u32,      // 订单数量
     pub oldest_index: u32,     // 最旧订单索引（循环缓冲区指针，0-9999）
@@ -246,8 +246,8 @@ pub struct MarketStats {
 | `OtcOrderRingBuffer` | `Map<u32, OrderSnapshot>` | OTC 订单历史循环缓冲区（0-9999） |
 | `BridgePriceAggregate` | `PriceAggregateData` | Bridge 兑换价格聚合数据 |
 | `BridgeOrderRingBuffer` | `Map<u32, OrderSnapshot>` | Bridge 兑换历史循环缓冲区（0-9999） |
-| `ColdStartThreshold` | `u128` | 冷启动阈值（默认 1 亿 DUST） |
-| `DefaultPrice` | `u64` | 默认价格（默认 0.000001 USDT/DUST） |
+| `ColdStartThreshold` | `u128` | 冷启动阈值（默认 1 亿 COS） |
+| `DefaultPrice` | `u64` | 默认价格（默认 0.000001 USDT/COS） |
 | `ColdStartExited` | `bool` | 冷启动退出标记（单向锁定） |
 
 ---
@@ -260,7 +260,7 @@ pub enum Event<T: Config> {
     OtcOrderAdded {
         timestamp: u64,
         price_usdt: u64,
-        dust_qty: u128,
+        cos_qty: u128,
         new_avg_price: u64,
     },
     
@@ -268,7 +268,7 @@ pub enum Event<T: Config> {
     BridgeSwapAdded {
         timestamp: u64,
         price_usdt: u64,
-        dust_qty: u128,
+        cos_qty: u128,
         new_avg_price: u64,
     },
     
@@ -338,13 +338,13 @@ import { ApiPromise } from '@polkadot/api';
 // 获取市场参考价格（简单平均）
 async function getReferencePrice(api: ApiPromise) {
   const price = await api.query.pricing.getRemarkablePrice();
-  console.log('DUST 市场参考价格:', price.toNumber() / 1_000_000, 'USDT');
+  console.log('COS 市场参考价格:', price.toNumber() / 1_000_000, 'USDT');
 }
 
 // 获取市场价格（加权平均）
 async function getMarketPrice(api: ApiPromise) {
-  const price = await api.query.pricing.getDustMarketPriceWeighted();
-  console.log('DUST 市场价格:', price.toNumber() / 1_000_000, 'USDT');
+  const price = await api.query.pricing.getCosMarketPriceWeighted();
+  console.log('COS 市场价格:', price.toNumber() / 1_000_000, 'USDT');
 }
 ```
 
@@ -377,7 +377,7 @@ async function getOtcStats(api: ApiPromise) {
   const aggregate = await api.query.pricing.otcAggregate();
   
   console.log('OTC 聚合数据:', {
-    totalDust: aggregate.totalDust.toString(),
+    totalCos: aggregate.totalCos.toString(),
     totalUsdt: aggregate.totalUsdt.toString(),
     orderCount: aggregate.orderCount.toNumber(),
     oldestIndex: aggregate.oldestIndex.toNumber(),
@@ -385,9 +385,9 @@ async function getOtcStats(api: ApiPromise) {
   });
   
   // 计算均价
-  const avgPrice = aggregate.totalDust.isZero() 
+  const avgPrice = aggregate.totalCos.isZero() 
     ? 0 
-    : aggregate.totalUsdt.mul(1_000_000_000_000).div(aggregate.totalDust).toNumber();
+    : aggregate.totalUsdt.mul(1_000_000_000_000).div(aggregate.totalCos).toNumber();
   console.log('OTC 均价:', avgPrice / 1_000_000, 'USDT');
 }
 
@@ -462,28 +462,28 @@ async function resetColdStart(
 ### 1. OTC 均价计算
 
 ```
-OTC 均价 = (总 USDT / 总 DUST)
-         = total_usdt / (total_dust / 10^12)
-         = (total_usdt * 10^12) / total_dust
+OTC 均价 = (总 USDT / 总 COS)
+         = total_usdt / (total_cos / 10^12)
+         = (total_usdt * 10^12) / total_cos
 ```
 
 **示例：**
 - 总 USDT：1000（精度 10^6）= 0.001 USDT
-- 总 DUST：1,000,000,000,000（精度 10^12）= 1 DUST
-- 均价 = (1000 * 10^12) / 1,000,000,000,000 = 1,000,000（精度 10^6）= 1 USDT/DUST
+- 总 COS：1,000,000,000,000（精度 10^12）= 1 COS
+- 均价 = (1000 * 10^12) / 1,000,000,000,000 = 1,000,000（精度 10^6）= 1 USDT/COS
 
 ### 2. 加权平均价格计算
 
 ```
-加权平均价格 = (OTC 总 USDT + Bridge 总 USDT) / (OTC 总 DUST + Bridge 总 DUST)
+加权平均价格 = (OTC 总 USDT + Bridge 总 USDT) / (OTC 总 COS + Bridge 总 COS)
 ```
 
 **示例：**
 - OTC 总 USDT：1000（0.001 USDT）
-- OTC 总 DUST：1,000,000,000,000（1 DUST）
+- OTC 总 COS：1,000,000,000,000（1 COS）
 - Bridge 总 USDT：2000（0.002 USDT）
-- Bridge 总 DUST：1,000,000,000,000（1 DUST）
-- 加权平均 = (1000 + 2000) * 10^12 / (1,000,000,000,000 + 1,000,000,000,000) = 1,500,000（1.5 USDT/DUST）
+- Bridge 总 COS：1,000,000,000,000（1 COS）
+- 加权平均 = (1000 + 2000) * 10^12 / (1,000,000,000,000 + 1,000,000,000,000) = 1,500,000（1.5 USDT/COS）
 
 ### 3. 简单平均价格计算
 
@@ -492,9 +492,9 @@ OTC 均价 = (总 USDT / 总 DUST)
 ```
 
 **示例：**
-- OTC 均价：1,000,000（1 USDT/DUST）
-- Bridge 均价：2,000,000（2 USDT/DUST）
-- 简单平均 = (1,000,000 + 2,000,000) / 2 = 1,500,000（1.5 USDT/DUST）
+- OTC 均价：1,000,000（1 USDT/COS）
+- Bridge 均价：2,000,000（2 USDT/COS）
+- 简单平均 = (1,000,000 + 2,000,000) / 2 = 1,500,000（1.5 USDT/COS）
 
 ### 4. 价格偏离计算
 
@@ -503,8 +503,8 @@ OTC 均价 = (总 USDT / 总 DUST)
 ```
 
 **示例：**
-- 基准价格：1,000,000（1 USDT/DUST）
-- 订单价格：1,200,000（1.2 USDT/DUST）
+- 基准价格：1,000,000（1 USDT/COS）
+- 订单价格：1,200,000（1.2 USDT/COS）
 - 偏离率 = (1,200,000 - 1,000,000) / 1,000,000 × 10000 = 2000 bps = 20%
 
 ---
@@ -520,7 +520,7 @@ OTC 均价 = (总 USDT / 总 DUST)
 ### 2. 循环缓冲区
 
 - ✅ **自动滚动**：最多存储 10,000 笔订单，自动删除最旧的
-- ✅ **交易量限制**：维护最近累计 1,000,000 DUST 的订单
+- ✅ **交易量限制**：维护最近累计 1,000,000 COS 的订单
 - ✅ **防止存储膨胀**：存储空间固定，不会无限增长
 
 ### 3. 价格偏离检查
@@ -569,7 +569,7 @@ OTC 均价 = (总 USDT / 总 DUST)
 ...
 
 添加第 10,001 笔订单：
-- 累计 DUST 超过 1,000,000 限制
+- 累计 COS 超过 1,000,000 限制
 - 删除索引 0 的订单
 - oldest_index = 1
 - 写入索引 1（覆盖）
@@ -580,13 +580,13 @@ OTC 均价 = (总 USDT / 总 DUST)
 ### 限制机制
 
 ```rust
-// 当累计 DUST 超过 1,000,000 时
+// 当累计 COS 超过 1,000,000 时
 while new_total > limit && agg.order_count > 0 {
     // 删除最旧的订单
     let oldest = OtcOrderRingBuffer::<T>::take(agg.oldest_index);
     // 从聚合数据中减去
-    agg.total_dust -= oldest.dust_qty;
-    agg.total_usdt -= oldest.dust_qty / 10^12 * oldest.price_usdt;
+    agg.total_cos -= oldest.cos_qty;
+    agg.total_usdt -= oldest.cos_qty / 10^12 * oldest.price_usdt;
     agg.order_count -= 1;
     // 移动最旧索引
     agg.oldest_index = (agg.oldest_index + 1) % 10000;
@@ -598,7 +598,7 @@ while new_total > limit && agg.order_count > 0 {
 ## 📚 相关模块
 
 - **pallet-otc-order**: OTC 订单管理（调用 `add_otc_order`）
-- **pallet-bridge**: DUST ↔ USDT 桥接（调用 `add_bridge_swap`）
+- **pallet-bridge**: COS ↔ USDT 桥接（调用 `add_bridge_swap`）
 - **pallet-trading**: 统一接口层
 - **pallet-trading-common**: 公共工具库
 

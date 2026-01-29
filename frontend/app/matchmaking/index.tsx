@@ -1,252 +1,220 @@
-/**
- * 婚恋模块首页
- * 显示用户资料状态和主要功能入口
- */
-
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Alert,
-  ActivityIndicator,
-  RefreshControl,
-} from 'react-native';
+import { useAuthStore } from '@/src/stores/auth';
+import { useChainStore } from '@/src/stores/chain';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { PageHeader } from '@/components/PageHeader';
-import { BottomNavBar } from '@/components/BottomNavBar';
-import { matchmakingService, UserProfile, MatchmakingPrivacyMode } from '@/services/matchmaking.service';
-import { useWalletStore } from '@/stores/wallet.store';
+import { useState } from 'react';
+import {
+    Alert,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View
+} from 'react-native';
 
-const THEME_COLOR = '#B2955D';
+interface MatchProfile {
+  id: string;
+  nickname: string;
+  age: number;
+  gender: 'male' | 'female';
+  location: string;
+  zodiac: string;
+  baziScore?: number;
+  bio: string;
+  isVerified: boolean;
+  photos: string[];
+}
 
-export default function MatchmakingIndexPage() {
+const MOCK_PROFILES: MatchProfile[] = [
+  {
+    id: '1',
+    nickname: '星辰',
+    age: 28,
+    gender: 'female',
+    location: '北京',
+    zodiac: '双鱼座',
+    baziScore: 92,
+    bio: '喜欢阅读和旅行，希望找到志同道合的人',
+    isVerified: true,
+    photos: [],
+  },
+  {
+    id: '2',
+    nickname: '明月',
+    age: 26,
+    gender: 'female',
+    location: '上海',
+    zodiac: '天蝎座',
+    baziScore: 88,
+    bio: '热爱生活，期待美好的缘分',
+    isVerified: true,
+    photos: [],
+  },
+  {
+    id: '3',
+    nickname: '云飞',
+    age: 30,
+    gender: 'male',
+    location: '深圳',
+    zodiac: '狮子座',
+    baziScore: 85,
+    bio: '程序员一枚，工作之余喜欢运动',
+    isVerified: false,
+    photos: [],
+  },
+];
+
+export default function MatchmakingScreen() {
   const router = useRouter();
-  const { address } = useWalletStore();
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [matchCount, setMatchCount] = useState(0);
+  const { isLoggedIn } = useAuthStore();
+  const { isConnected } = useChainStore();
+  const [profiles] = useState<MatchProfile[]>(MOCK_PROFILES);
+  const [hasProfile, setHasProfile] = useState(false);
 
-  const loadData = useCallback(async () => {
-    if (!address) return;
-
-    try {
-      const userProfile = await matchmakingService.getProfile(address);
-      setProfile(userProfile);
-
-      if (userProfile) {
-        const matches = await matchmakingService.getUserMatches(address);
-        setMatchCount(matches.length);
-      }
-    } catch (error) {
-      console.error('Load matchmaking data error:', error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+  const handleProfilePress = (profile: MatchProfile) => {
+    if (!isLoggedIn) {
+      showAlert('请先登录钱包');
+      return;
     }
-  }, [address]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  const onRefresh = () => {
-    setRefreshing(true);
-    loadData();
+    if (!hasProfile) {
+      showAlert('请先创建个人资料');
+      return;
+    }
+    showAlert(`查看 ${profile.nickname} 的详细资料`);
   };
 
-  const getPrivacyModeText = (mode: MatchmakingPrivacyMode) => {
-    switch (mode) {
-      case MatchmakingPrivacyMode.Public:
-        return '公开';
-      case MatchmakingPrivacyMode.MembersOnly:
-        return '仅会员可见';
-      case MatchmakingPrivacyMode.MatchedOnly:
-        return '仅匹配后可见';
-      default:
-        return '未知';
+  const handleLike = (profile: MatchProfile) => {
+    if (!isLoggedIn) {
+      showAlert('请先登录钱包');
+      return;
+    }
+    showAlert(`已向 ${profile.nickname} 发送好感`);
+  };
+
+  const showAlert = (msg: string) => {
+    if (Platform.OS === 'web') {
+      window.alert(msg);
+    } else {
+      Alert.alert('提示', msg);
     }
   };
 
-  const isMembershipActive = profile?.membershipExpiry
-    ? profile.membershipExpiry > Date.now() / 1000
-    : false;
+  const renderProfileCard = (profile: MatchProfile) => (
+    <Pressable
+      key={profile.id}
+      style={({ pressed }) => [styles.profileCard, pressed && styles.profileCardPressed]}
+      onPress={() => handleProfilePress(profile)}
+    >
+      <View style={styles.avatarContainer}>
+        <View style={[styles.avatar, profile.gender === 'female' ? styles.avatarFemale : styles.avatarMale]}>
+          <Text style={styles.avatarText}>{profile.nickname[0]}</Text>
+        </View>
+        {profile.isVerified && (
+          <View style={styles.verifiedBadge}>
+            <Text style={styles.verifiedText}>✓</Text>
+          </View>
+        )}
+      </View>
 
-  if (loading) {
+      <View style={styles.profileInfo}>
+        <View style={styles.nameRow}>
+          <Text style={styles.nickname}>{profile.nickname}</Text>
+          <Text style={styles.age}>{profile.age}岁</Text>
+          <Text style={styles.gender}>{profile.gender === 'female' ? '♀' : '♂'}</Text>
+        </View>
+        
+        <View style={styles.tagsRow}>
+          <View style={styles.tag}>
+            <Text style={styles.tagText}>📍 {profile.location}</Text>
+          </View>
+          <View style={styles.tag}>
+            <Text style={styles.tagText}>⭐ {profile.zodiac}</Text>
+          </View>
+        </View>
+
+        <Text style={styles.bio} numberOfLines={2}>{profile.bio}</Text>
+
+        {profile.baziScore && (
+          <View style={styles.scoreRow}>
+            <Text style={styles.scoreLabel}>八字匹配度</Text>
+            <View style={styles.scoreBar}>
+              <View style={[styles.scoreFill, { width: `${profile.baziScore}%` }]} />
+            </View>
+            <Text style={styles.scoreValue}>{profile.baziScore}%</Text>
+          </View>
+        )}
+      </View>
+
+      <Pressable
+        style={({ pressed }) => [styles.likeButton, pressed && styles.likeButtonPressed]}
+        onPress={() => handleLike(profile)}
+      >
+        <Text style={styles.likeIcon}>💕</Text>
+      </Pressable>
+    </Pressable>
+  );
+
+  if (!isLoggedIn) {
     return (
       <View style={styles.container}>
-        <PageHeader title="缘分天成" showBack />
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={THEME_COLOR} />
-          <Text style={styles.loadingText}>加载中...</Text>
+        <View style={styles.header}>
+          <Pressable style={styles.backButton} onPress={() => router.back()}>
+            <Text style={styles.backText}>‹ 返回</Text>
+          </Pressable>
+          <Text style={styles.headerTitle}>缘分匹配</Text>
+          <View style={{ width: 60 }} />
         </View>
-        <BottomNavBar />
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyIcon}>💕</Text>
+          <Text style={styles.emptyTitle}>登录后开启缘分之旅</Text>
+          <Text style={styles.emptySubtitle}>请先在"我的"页面创建钱包</Text>
+        </View>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <PageHeader title="缘分天成" showBack />
+      <View style={styles.header}>
+        <Pressable style={styles.backButton} onPress={() => router.back()}>
+          <Text style={styles.backText}>‹ 返回</Text>
+        </Pressable>
+        <Text style={styles.headerTitle}>缘分匹配</Text>
+        <Pressable
+          style={styles.editButton}
+          onPress={() => router.push('/matchmaking/profile' as any)}
+        >
+          <Text style={styles.editButtonText}>资料</Text>
+        </Pressable>
+      </View>
 
-      <ScrollView
-        style={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
-        {!profile ? (
-          // 未创建资料
-          <View style={styles.emptyContainer}>
-            <Ionicons name="heart-outline" size={80} color="#ccc" />
-            <Text style={styles.emptyTitle}>开启您的缘分之旅</Text>
-            <Text style={styles.emptyText}>
-              创建个人资料，寻找命中注定的另一半
-            </Text>
-            <Pressable
-              style={styles.createButton}
-              onPress={() => router.push('/matchmaking/create-profile' as any)}
-            >
-              <Text style={styles.createButtonText}>创建资料</Text>
-            </Pressable>
+      <View style={styles.infoBar}>
+        <Text style={styles.infoText}>
+          {isConnected ? '🟢 链上数据' : '🔴 链未连接'}
+        </Text>
+        <Text style={styles.infoText}>
+          {hasProfile ? '资料已创建' : '⚠️ 请先创建资料'}
+        </Text>
+      </View>
+
+      {!hasProfile && (
+        <Pressable
+          style={styles.createProfileBanner}
+          onPress={() => router.push('/matchmaking/profile' as any)}
+        >
+          <Text style={styles.bannerIcon}>👤</Text>
+          <View style={styles.bannerContent}>
+            <Text style={styles.bannerTitle}>创建个人资料</Text>
+            <Text style={styles.bannerSubtitle}>完善资料后才能查看匹配</Text>
           </View>
-        ) : (
-          // 已创建资料
-          <>
-            {/* 会员状态卡片 */}
-            <View style={[styles.card, isMembershipActive ? styles.memberCard : styles.expiredCard]}>
-              <View style={styles.cardHeader}>
-                <Ionicons
-                  name={isMembershipActive ? 'diamond' : 'diamond-outline'}
-                  size={24}
-                  color={isMembershipActive ? THEME_COLOR : '#999'}
-                />
-                <Text style={[styles.cardTitle, !isMembershipActive && styles.expiredText]}>
-                  {isMembershipActive ? '会员有效' : '会员已过期'}
-                </Text>
-              </View>
-              {isMembershipActive ? (
-                <Text style={styles.memberExpiry}>
-                  有效期至: {new Date(profile.membershipExpiry! * 1000).toLocaleDateString()}
-                </Text>
-              ) : (
-                <Pressable
-                  style={styles.renewButton}
-                  onPress={() => router.push('/matchmaking/membership' as any)}
-                >
-                  <Text style={styles.renewButtonText}>续费会员</Text>
-                </Pressable>
-              )}
-            </View>
+          <Text style={styles.bannerArrow}>›</Text>
+        </Pressable>
+      )}
 
-            {/* 统计卡片 */}
-            <View style={styles.statsRow}>
-              <Pressable
-                style={styles.statCard}
-                onPress={() => router.push('/matchmaking/matches' as any)}
-              >
-                <Text style={styles.statNumber}>{matchCount}</Text>
-                <Text style={styles.statLabel}>匹配成功</Text>
-              </Pressable>
-              <Pressable
-                style={styles.statCard}
-                onPress={() => router.push('/matchmaking/likes' as any)}
-              >
-                <Ionicons name="heart" size={24} color="#FF6B6B" />
-                <Text style={styles.statLabel}>喜欢我的</Text>
-              </Pressable>
-              <Pressable
-                style={styles.statCard}
-                onPress={() => router.push('/matchmaking/requests' as any)}
-              >
-                <Ionicons name="git-merge" size={24} color={THEME_COLOR} />
-                <Text style={styles.statLabel}>合婚请求</Text>
-              </Pressable>
-            </View>
-
-            {/* 功能入口 */}
-            <View style={styles.menuSection}>
-              <Text style={styles.sectionTitle}>功能</Text>
-
-              <Pressable
-                style={styles.menuItem}
-                onPress={() => router.push('/matchmaking/discover' as any)}
-              >
-                <View style={styles.menuIcon}>
-                  <Ionicons name="compass" size={24} color={THEME_COLOR} />
-                </View>
-                <View style={styles.menuContent}>
-                  <Text style={styles.menuTitle}>发现</Text>
-                  <Text style={styles.menuDesc}>浏览推荐的优质对象</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color="#999" />
-              </Pressable>
-
-              <Pressable
-                style={styles.menuItem}
-                onPress={() => router.push('/matchmaking/profile' as any)}
-              >
-                <View style={styles.menuIcon}>
-                  <Ionicons name="person" size={24} color={THEME_COLOR} />
-                </View>
-                <View style={styles.menuContent}>
-                  <Text style={styles.menuTitle}>我的资料</Text>
-                  <Text style={styles.menuDesc}>编辑个人信息和照片</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color="#999" />
-              </Pressable>
-
-              <Pressable
-                style={styles.menuItem}
-                onPress={() => router.push('/matchmaking/preferences' as any)}
-              >
-                <View style={styles.menuIcon}>
-                  <Ionicons name="options" size={24} color={THEME_COLOR} />
-                </View>
-                <View style={styles.menuContent}>
-                  <Text style={styles.menuTitle}>择偶条件</Text>
-                  <Text style={styles.menuDesc}>设置理想对象的条件</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color="#999" />
-              </Pressable>
-
-              <Pressable
-                style={styles.menuItem}
-                onPress={() => router.push('/matchmaking/bazi-matching' as any)}
-              >
-                <View style={styles.menuIcon}>
-                  <Ionicons name="git-compare" size={24} color={THEME_COLOR} />
-                </View>
-                <View style={styles.menuContent}>
-                  <Text style={styles.menuTitle}>八字合婚</Text>
-                  <Text style={styles.menuDesc}>基于八字的深度匹配分析</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color="#999" />
-              </Pressable>
-
-              <Pressable
-                style={styles.menuItem}
-                onPress={() => router.push('/matchmaking/settings' as any)}
-              >
-                <View style={styles.menuIcon}>
-                  <Ionicons name="settings" size={24} color={THEME_COLOR} />
-                </View>
-                <View style={styles.menuContent}>
-                  <Text style={styles.menuTitle}>隐私设置</Text>
-                  <Text style={styles.menuDesc}>当前: {getPrivacyModeText(profile.privacyMode)}</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color="#999" />
-              </Pressable>
-            </View>
-          </>
-        )}
+      <ScrollView contentContainerStyle={styles.profilesList}>
+        <Text style={styles.sectionTitle}>今日推荐</Text>
+        {profiles.map(renderProfileCard)}
       </ScrollView>
-
-      <BottomNavBar />
     </View>
   );
 }
@@ -256,154 +224,244 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
-  content: {
-    flex: 1,
-    padding: 16,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    paddingTop: 50,
+    paddingBottom: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
   },
-  loadingContainer: {
+  backButton: {
+    padding: 8,
+    width: 60,
+  },
+  backText: {
+    fontSize: 16,
+    color: '#6D28D9',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  editButton: {
+    padding: 8,
+    width: 60,
+    alignItems: 'flex-end',
+  },
+  editButtonText: {
+    fontSize: 14,
+    color: '#6D28D9',
+    fontWeight: '500',
+  },
+  infoBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  infoText: {
+    fontSize: 13,
+    color: '#6b7280',
+  },
+  createProfileBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fef3c7',
+    margin: 12,
+    padding: 16,
+    borderRadius: 12,
+  },
+  bannerIcon: {
+    fontSize: 32,
+    marginRight: 12,
+  },
+  bannerContent: {
     flex: 1,
+  },
+  bannerTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#92400e',
+  },
+  bannerSubtitle: {
+    fontSize: 13,
+    color: '#b45309',
+    marginTop: 2,
+  },
+  bannerArrow: {
+    fontSize: 24,
+    color: '#92400e',
+  },
+  profilesList: {
+    padding: 12,
+    paddingBottom: 30,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 12,
+  },
+  profileCard: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+  },
+  profileCardPressed: {
+    backgroundColor: '#f9fafb',
+  },
+  avatarContainer: {
+    position: 'relative',
+    marginRight: 14,
+  },
+  avatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    alignItems: 'center',
     justifyContent: 'center',
+  },
+  avatarFemale: {
+    backgroundColor: '#fce7f3',
+  },
+  avatarMale: {
+    backgroundColor: '#dbeafe',
+  },
+  avatarText: {
+    fontSize: 24,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  verifiedBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    backgroundColor: '#22c55e',
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  verifiedText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  profileInfo: {
+    flex: 1,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  nickname: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginRight: 8,
+  },
+  age: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginRight: 4,
+  },
+  gender: {
+    fontSize: 14,
+  },
+  tagsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 6,
+  },
+  tag: {
+    backgroundColor: '#f3f4f6',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  tagText: {
+    fontSize: 11,
+    color: '#6b7280',
+  },
+  bio: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginBottom: 8,
+  },
+  scoreRow: {
+    flexDirection: 'row',
     alignItems: 'center',
   },
-  loadingText: {
-    marginTop: 12,
-    color: '#666',
+  scoreLabel: {
+    fontSize: 11,
+    color: '#9ca3af',
+    marginRight: 8,
+  },
+  scoreBar: {
+    flex: 1,
+    height: 6,
+    backgroundColor: '#e5e7eb',
+    borderRadius: 3,
+    marginRight: 8,
+  },
+  scoreFill: {
+    height: '100%',
+    backgroundColor: '#ec4899',
+    borderRadius: 3,
+  },
+  scoreValue: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#ec4899',
+    width: 36,
+  },
+  likeButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#fce7f3',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+  },
+  likeButtonPressed: {
+    backgroundColor: '#fbcfe8',
+  },
+  likeIcon: {
+    fontSize: 20,
   },
   emptyContainer: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 80,
+    justifyContent: 'center',
+    padding: 20,
+  },
+  emptyIcon: {
+    fontSize: 64,
+    marginBottom: 16,
   },
   emptyTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#333',
-    marginTop: 20,
+    color: '#1f2937',
+    marginBottom: 8,
   },
-  emptyText: {
+  emptySubtitle: {
     fontSize: 14,
-    color: '#666',
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  createButton: {
-    backgroundColor: THEME_COLOR,
-    paddingHorizontal: 32,
-    paddingVertical: 14,
-    borderRadius: 25,
-    marginTop: 24,
-  },
-  createButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-  },
-  memberCard: {
-    borderWidth: 1,
-    borderColor: THEME_COLOR,
-  },
-  expiredCard: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginLeft: 8,
-    color: THEME_COLOR,
-  },
-  expiredText: {
-    color: '#999',
-  },
-  memberExpiry: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 8,
-  },
-  renewButton: {
-    backgroundColor: THEME_COLOR,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 16,
-    marginTop: 12,
-    alignSelf: 'flex-start',
-  },
-  renewButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    marginBottom: 16,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    marginHorizontal: 4,
-  },
-  statNumber: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: THEME_COLOR,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
-  },
-  menuSection: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 12,
-  },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  menuIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#f8f4e8',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  menuContent: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  menuTitle: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#333',
-  },
-  menuDesc: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 2,
+    color: '#9ca3af',
   },
 });

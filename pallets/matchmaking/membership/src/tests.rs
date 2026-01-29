@@ -79,9 +79,9 @@ impl pallet_balances::Config for Test {
 parameter_types! {
     pub const BlocksPerMonth: u64 = 216000;
     pub const BlocksPerDay: u64 = 7200;
-    pub const MonthlyFee: u128 = 10_000_000_000_000; // 10 DUST
+    pub const MonthlyFee: u128 = 10_000_000_000_000; // 10 COS
     pub const MonthlyFeeUsd: u64 = 10_000_000; // 10 USDT
-    pub const LifetimeFee: u128 = 500_000_000_000_000; // 500 DUST
+    pub const LifetimeFee: u128 = 500_000_000_000_000; // 500 COS
     pub const LifetimeFeeUsd: u64 = 500_000_000; // 500 USDT
     pub TreasuryAccount: u64 = 100;
     pub BurnAccount: u64 = 101;
@@ -100,12 +100,12 @@ impl pallet_affiliate::UserFundingProvider<u64> for MockUserFundingProvider {
 pub struct MockPricing;
 
 impl pallet_trading_common::PricingProvider<u128> for MockPricing {
-    fn get_dust_to_usd_rate() -> Option<u128> {
+    fn get_cos_to_usd_rate() -> Option<u128> {
         // 返回 None 使用兜底值
         None
     }
 
-    fn report_swap_order(_timestamp: u64, _price_usdt: u64, _dust_qty: u128) -> sp_runtime::DispatchResult {
+    fn report_swap_order(_timestamp: u64, _price_usdt: u64, _cos_qty: u128) -> sp_runtime::DispatchResult {
         Ok(())
     }
 }
@@ -148,9 +148,9 @@ fn new_test_ext() -> sp_io::TestExternalities {
 
     pallet_balances::GenesisConfig::<Test> {
         balances: vec![
-            (1, 1_000_000_000_000_000), // 1000 DUST
+            (1, 1_000_000_000_000_000), // 1000 COS
             (2, 1_000_000_000_000_000),
-            (3, 100_000_000_000),       // 0.1 DUST (不足)
+            (3, 100_000_000_000),       // 0.1 COS (不足)
             (100, 1), // Treasury (最小存在存款)
             (101, 1), // Burn
         ],
@@ -197,7 +197,7 @@ fn subscribe_with_discount() {
             None,
         ));
 
-        // 检查扣费（12个月 * 10 DUST * 80% = 96 DUST）
+        // 检查扣费（12个月 * 10 COS * 80% = 96 COS）
         let expected_fee = 10_000_000_000_000u128 * 12 * 8000 / 10000;
         let actual_balance = Balances::free_balance(1);
         assert_eq!(initial_balance - actual_balance, expected_fee);

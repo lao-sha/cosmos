@@ -2,11 +2,11 @@
 name = "pallet-trading-credit"
 version = "0.1.0"
 description = "信用风控模块 - Credit Risk Control Pallet (原 pallet-credit)"
-authors = ["StarDust Team"]
+authors = ["Cosmos Team"]
 edition = "2021"
 license = "Unlicense"
 publish = false
-repository = "https://github.com/memoio/stardust"
+repository = "https://github.com/memoio/cosmos"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]

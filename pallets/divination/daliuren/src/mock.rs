@@ -52,9 +52,9 @@ parameter_types! {
     /// 加密数据最大长度
     pub const MaxEncryptedLen: u32 = 512;
     /// 起课费用
-    pub const DivinationFee: u64 = 1_000_000_000; // 1 DUST (12 decimals scaled down)
+    pub const DivinationFee: u64 = 1_000_000_000; // 1 COS (12 decimals scaled down)
     /// AI 解读费用
-    pub const AiInterpretationFee: u64 = 5_000_000_000; // 5 DUST
+    pub const AiInterpretationFee: u64 = 5_000_000_000; // 5 COS
 }
 
 /// 测试随机数生成器
@@ -89,7 +89,7 @@ pub const BOB: u64 = 2;
 pub const AI_SERVICE: u64 = 100;
 
 /// 初始余额
-pub const INITIAL_BALANCE: u64 = 1_000_000_000_000_000; // 1000 DUST
+pub const INITIAL_BALANCE: u64 = 1_000_000_000_000_000; // 1000 COS
 
 /// 构建测试环境
 pub fn new_test_ext() -> sp_io::TestExternalities {

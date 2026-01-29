@@ -1,6 +1,6 @@
 # Livestream Backend
 
-直播模块后端服务，为 Stardust 平台提供 LiveKit Token 生成、链上数据查询代理、实时通信等功能。
+直播模块后端服务，为 Cosmos 平台提供 LiveKit Token 生成、链上数据查询代理、实时通信等功能。
 
 ## 快速开始
 

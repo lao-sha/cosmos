@@ -1,414 +1,433 @@
-/**
- * 星尘玄鉴 - 转账页面
- * 发送代币到其他地址
- * 主题色：金棕色 #B2955D
- */
-
+import { TransactionModal } from '@/src/components/TransactionModal';
+import { useTransaction } from '@/src/hooks/useTransaction';
+import { useAuthStore } from '@/src/stores/auth';
+import { useChainStore } from '@/src/stores/chain';
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  Pressable,
-  ScrollView,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
+    Alert,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { useWalletStore } from '@/stores';
-import { BottomNavBar } from '@/components/BottomNavBar';
-import { Card, Button, Input, LoadingSpinner } from '@/components/common';
-import { useAsync, useClipboard, useWallet } from '@/hooks';
-import { getApi } from '@/lib/api';
-import { signAndSend } from '@/lib/signer';
 
-// 主题色
-const THEME_COLOR = '#B2955D';
-const THEME_COLOR_LIGHT = '#F7D3A1';
-const THEME_BG = '#F5F5F7';
-
-export default function TransferPage() {
+export default function TransferScreen() {
   const router = useRouter();
-  const { address, balance, isUnlocked, ensureUnlocked } = useWallet();
-  const { execute, isLoading } = useAsync();
-  const { getFromClipboard } = useClipboard();
+  const { isLoggedIn, address } = useAuthStore();
+  const { isConnected } = useChainStore();
+  const { status, isLoading, error, transfer, reset } = useTransaction();
 
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
-  const [memo, setMemo] = useState('');
-  const [recipientError, setRecipientError] = useState('');
-  const [amountError, setAmountError] = useState('');
+  const [modalVisible, setModalVisible] = useState(false);
 
   const isValidAddress = (addr: string) => {
-    // Substrate 地址以 5 开头，长度 48
-    return addr.startsWith('5') && addr.length === 48;
+    return addr.length >= 47 && addr.length <= 48 && addr.startsWith('5');
   };
 
-  const validateForm = (): boolean => {
-    let isValid = true;
+  const canSubmit =
+    isValidAddress(recipient) &&
+    parseFloat(amount) > 0 &&
+    recipient !== address;
 
-    // 验证收款地址
-    if (!recipient) {
-      setRecipientError('请输入收款地址');
-      isValid = false;
-    } else if (!isValidAddress(recipient)) {
-      setRecipientError('收款地址格式不正确');
-      isValid = false;
-    } else if (recipient === address) {
-      setRecipientError('不能转账给自己');
-      isValid = false;
-    } else {
-      setRecipientError('');
-    }
+  const handlePreview = () => {
+    if (!canSubmit) {
+      const msg = recipient === address
+        ? '不能转账给自己'
+        : !isValidAddress(recipient)
+        ? '请输入有效的接收地址'
+        : '请输入有效的转账金额';
 
-    // 验证金额
-    const amountNum = parseFloat(amount);
-    const balanceNum = Number(balance) / 1e12;
-    if (!amount || isNaN(amountNum) || amountNum <= 0) {
-      setAmountError('请输入有效的转账金额');
-      isValid = false;
-    } else if (amountNum > balanceNum) {
-      setAmountError('余额不足');
-      isValid = false;
-    } else {
-      setAmountError('');
-    }
-
-    return isValid;
-  };
-
-  const handleTransfer = async () => {
-    if (!validateForm()) return;
-
-    // 确保钱包已解锁
-    const unlocked = await ensureUnlocked();
-    if (!unlocked) {
-      Alert.alert('提示', '请先解锁钱包');
+      if (Platform.OS === 'web') {
+        alert(msg);
+      } else {
+        Alert.alert('提示', msg);
+      }
       return;
     }
 
-    // 确认转账
-    Alert.alert(
-      '确认转账',
-      `确定要向 ${recipient.slice(0, 8)}...${recipient.slice(-8)} 转账 ${amount} DUST 吗？`,
-      [
-        { text: '取消', style: 'cancel' },
-        {
-          text: '确认',
-          onPress: () => executeTransfer(),
-        },
-      ]
-    );
+    setModalVisible(true);
+    reset();
   };
 
-  const executeTransfer = async () => {
-    try {
-      await execute(async () => {
-        const api = await getApi();
-        const amountBigInt = BigInt(Math.floor(parseFloat(amount) * 1e12));
+  const handleConfirm = async () => {
+    await transfer(recipient, amount);
+  };
 
-        const tx = api.tx.balances.transfer(recipient, amountBigInt.toString());
-
-        await signAndSend(api, tx, address!, (status) => {
-          console.log('Transfer status:', status);
-        });
-
-        Alert.alert('成功', '转账已提交', [
-          {
-            text: '查看记录',
-            onPress: () => router.push('/wallet/transactions' as any),
-          },
-          { text: '确定', style: 'cancel' },
-        ]);
-      });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '转账失败';
-      Alert.alert('转账失败', errorMessage);
+  const handleClose = () => {
+    setModalVisible(false);
+    if (status === 'finalized') {
+      setRecipient('');
+      setAmount('');
+      router.back();
     }
+    reset();
   };
 
-  const handlePasteAddress = async () => {
-    const text = await getFromClipboard();
-    if (text && isValidAddress(text)) {
-      setRecipient(text);
-      setRecipientError('');
+  const handleMax = () => {
+    // TODO: 获取实际余额并设置最大值
+    setAmount('0');
+  };
+
+  const handleScan = () => {
+    // TODO: 实现扫码功能
+    const msg = '扫码功能开发中';
+    if (Platform.OS === 'web') {
+      alert(msg);
     } else {
-      Alert.alert('提示', '剪贴板中没有有效的地址');
+      Alert.alert('提示', msg);
     }
   };
 
-  const handleScanQR = () => {
-    Alert.alert('提示', '二维码扫描功能即将上线');
-  };
-
-  const handleMaxAmount = () => {
-    const balanceNum = (Number(balance) / 1e12).toFixed(4);
-    setAmount(balanceNum);
-    setAmountError('');
-  };
+  if (!isLoggedIn) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Pressable style={styles.backButton} onPress={() => router.back()}>
+            <Text style={styles.backText}>‹ 返回</Text>
+          </Pressable>
+          <Text style={styles.headerTitle}>转账</Text>
+          <View style={styles.headerRight} />
+        </View>
+        <View style={styles.centerContent}>
+          <Text style={styles.emptyText}>请先登录</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      {/* 顶部导航 */}
-      <View style={styles.navBar}>
+    <View style={styles.container}>
+      <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="chevron-back" size={24} color="#333" />
+          <Text style={styles.backText}>‹ 返回</Text>
         </Pressable>
-        <Text style={styles.navTitle}>转账</Text>
-        <View style={styles.placeholder} />
+        <Text style={styles.headerTitle}>转账</Text>
+        <View style={styles.headerRight} />
       </View>
 
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* 余额显示 */}
-        <Card style={styles.balanceCard}>
-          <Text style={styles.balanceLabel}>可用余额</Text>
-          <Text style={styles.balanceAmount}>
-            {(Number(balance) / 1e12).toFixed(4)} DUST
-          </Text>
-        </Card>
-
-        {/* 表单卡片 */}
-        <Card>
-          {/* 收款地址 */}
-          <Input
-            label="收款地址"
-            placeholder="输入 Substrate 地址 (以 5 开头)"
-            value={recipient}
-            onChangeText={(text) => {
-              setRecipient(text);
-              setRecipientError('');
-            }}
-            error={recipientError}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <View style={styles.addressActions}>
-            <Pressable onPress={handlePasteAddress} style={styles.actionButton}>
-              <Ionicons name="clipboard-outline" size={18} color={THEME_COLOR} />
-              <Text style={styles.actionButtonText}>粘贴</Text>
-            </Pressable>
-            <Pressable onPress={handleScanQR} style={styles.actionButton}>
-              <Ionicons name="scan-outline" size={18} color={THEME_COLOR} />
-              <Text style={styles.actionButtonText}>扫码</Text>
-            </Pressable>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
+      >
+        {!isConnected && (
+          <View style={styles.warningBanner}>
+            <Text style={styles.warningIcon}>⚠️</Text>
+            <Text style={styles.warningText}>
+              当前未连接到区块链网络，转账功能暂不可用
+            </Text>
           </View>
+        )}
 
-          {/* 转账金额 */}
-          <View style={styles.amountContainer}>
-            <Input
-              label="转账金额"
-              placeholder="0.00"
-              value={amount}
-              onChangeText={(text) => {
-                setAmount(text);
-                setAmountError('');
-              }}
-              error={amountError}
-              keyboardType="decimal-pad"
-              containerStyle={styles.amountInput}
+        <View style={styles.formCard}>
+          <View style={styles.inputGroup}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>接收地址</Text>
+              <Pressable onPress={handleScan}>
+                <Text style={styles.scanButton}>📷 扫码</Text>
+              </Pressable>
+            </View>
+            <TextInput
+              style={styles.input}
+              placeholder="输入或粘贴接收方钱包地址"
+              placeholderTextColor="#9ca3af"
+              value={recipient}
+              onChangeText={setRecipient}
+              autoCapitalize="none"
+              autoCorrect={false}
             />
-            <Pressable onPress={handleMaxAmount} style={styles.maxButton}>
-              <Text style={styles.maxButtonText}>MAX</Text>
-            </Pressable>
+            {recipient.length > 0 && !isValidAddress(recipient) && (
+              <Text style={styles.inputError}>地址格式不正确</Text>
+            )}
+            {recipient === address && (
+              <Text style={styles.inputError}>不能转账给自己</Text>
+            )}
           </View>
 
-          {/* 备注 */}
-          <Input
-            label="备注（可选）"
-            placeholder="添加转账备注"
-            value={memo}
-            onChangeText={setMemo}
-            maxLength={100}
-          />
-
-          {/* 手续费提示 */}
-          <View style={styles.feeInfo}>
-            <Ionicons name="information-circle-outline" size={16} color="#999" />
-            <Text style={styles.feeText}>预估手续费: 0.001 DUST</Text>
-          </View>
-        </Card>
-
-        {/* 转账按钮 */}
-        <Button
-          title="确认转账"
-          onPress={handleTransfer}
-          loading={isLoading}
-          disabled={!recipient || !amount || isLoading}
-          style={styles.submitButton}
-        />
-
-        {/* 安全提示 */}
-        <View style={styles.tips}>
-          <View style={styles.tipItem}>
-            <Ionicons name="shield-checkmark-outline" size={18} color="#27AE60" />
-            <Text style={styles.tipText}>请仔细核对收款地址</Text>
-          </View>
-          <View style={styles.tipItem}>
-            <Ionicons name="alert-circle-outline" size={18} color="#F39C12" />
-            <Text style={styles.tipText}>转账后无法撤销</Text>
+          <View style={styles.inputGroup}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>转账金额</Text>
+              <Pressable onPress={handleMax}>
+                <Text style={styles.maxButton}>最大</Text>
+              </Pressable>
+            </View>
+            <View style={styles.amountInputContainer}>
+              <TextInput
+                style={styles.amountInput}
+                placeholder="0.00"
+                placeholderTextColor="#9ca3af"
+                value={amount}
+                onChangeText={setAmount}
+                keyboardType="decimal-pad"
+              />
+              <Text style={styles.amountUnit}>STAR</Text>
+            </View>
+            <Text style={styles.balanceHint}>可用余额: 0.00 STAR</Text>
           </View>
         </View>
+
+        <View style={styles.feeCard}>
+          <Text style={styles.feeTitle}>交易详情</Text>
+          <View style={styles.feeRow}>
+            <Text style={styles.feeLabel}>转账金额</Text>
+            <Text style={styles.feeValue}>{amount || '0'} STAR</Text>
+          </View>
+          <View style={styles.feeRow}>
+            <Text style={styles.feeLabel}>网络手续费</Text>
+            <Text style={styles.feeValue}>~0.001 STAR</Text>
+          </View>
+          <View style={styles.divider} />
+          <View style={styles.feeRow}>
+            <Text style={styles.totalLabel}>总计</Text>
+            <Text style={styles.totalValue}>
+              {(parseFloat(amount || '0') + 0.001).toFixed(3)} STAR
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.infoCard}>
+          <Text style={styles.infoTitle}>💡 转账须知</Text>
+          <Text style={styles.infoText}>
+            • 请仔细核对接收地址，转账不可撤销{'\n'}
+            • 确保账户有足够余额支付手续费{'\n'}
+            • 交易确认通常需要几秒钟
+          </Text>
+        </View>
+
+        <Pressable
+          style={[
+            styles.submitButton,
+            (!canSubmit || !isConnected) && styles.submitButtonDisabled,
+          ]}
+          onPress={handlePreview}
+          disabled={!canSubmit || !isConnected}
+        >
+          <Text style={styles.submitButtonText}>预览转账</Text>
+        </Pressable>
       </ScrollView>
 
-      {/* 底部导航栏 */}
-      <BottomNavBar activeTab="profile" />
-    </KeyboardAvoidingView>
+      <TransactionModal
+        visible={modalVisible}
+        status={status}
+        isLoading={isLoading}
+        title="确认转账"
+        description={`向 ${recipient.slice(0, 8)}...${recipient.slice(-6)} 转账 ${amount} STAR`}
+        amount={`${amount} STAR`}
+        onConfirm={handleConfirm}
+        onClose={handleClose}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: THEME_BG,
-    maxWidth: 414,
-    width: '100%',
-    alignSelf: 'center',
+    backgroundColor: '#f5f5f5',
   },
-  navBar: {
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    backgroundColor: '#fff',
     paddingTop: 50,
-    paddingHorizontal: 16,
     paddingBottom: 12,
-    backgroundColor: '#FFF',
+    paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    borderBottomColor: '#e5e7eb',
   },
   backButton: {
     padding: 4,
   },
-  navTitle: {
+  backText: {
+    fontSize: 17,
+    color: '#6D28D9',
+  },
+  headerTitle: {
     fontSize: 17,
     fontWeight: '600',
-    color: '#333',
+    color: '#1f2937',
   },
-  placeholder: {
-    width: 32,
-  },
-  scrollView: {
-    flex: 1,
+  headerRight: {
+    width: 50,
   },
   content: {
-    padding: 16,
-    paddingBottom: 40,
+    flex: 1,
   },
-  balanceCard: {
+  contentContainer: {
+    padding: 16,
+  },
+  centerContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#6b7280',
+  },
+  warningBanner: {
+    flexDirection: 'row',
+    backgroundColor: '#fef3c7',
+    borderRadius: 12,
+    padding: 16,
     marginBottom: 16,
     alignItems: 'center',
   },
-  balanceLabel: {
-    fontSize: 14,
-    color: '#999',
+  warningIcon: {
+    fontSize: 20,
+    marginRight: 12,
+  },
+  warningText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#92400e',
+  },
+  formCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+  },
+  inputGroup: {
+    marginBottom: 20,
+  },
+  labelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 8,
   },
-  balanceAmount: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: THEME_COLOR,
+  label: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#374151',
   },
-  addressActions: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: -8,
-    marginBottom: 16,
+  scanButton: {
+    fontSize: 14,
+    color: '#6D28D9',
   },
-  actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    backgroundColor: THEME_COLOR + '10',
-  },
-  actionButtonText: {
-    fontSize: 13,
-    color: THEME_COLOR,
+  maxButton: {
+    fontSize: 14,
+    color: '#6D28D9',
     fontWeight: '500',
   },
-  amountContainer: {
+  input: {
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 15,
+    color: '#1f2937',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  inputError: {
+    fontSize: 12,
+    color: '#dc2626',
+    marginTop: 6,
+  },
+  amountInputContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
+    alignItems: 'center',
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    paddingRight: 16,
   },
   amountInput: {
     flex: 1,
-  },
-  maxButton: {
-    backgroundColor: THEME_COLOR,
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginTop: 28,
-    height: 48,
-    justifyContent: 'center',
-  },
-  maxButtonText: {
-    fontSize: 14,
-    color: '#FFF',
+    paddingVertical: 14,
+    fontSize: 24,
     fontWeight: '600',
+    color: '#1f2937',
   },
-  feeInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  feeText: {
-    fontSize: 13,
-    color: '#999',
-  },
-  submitButton: {
-    marginTop: 8,
-  },
-  tips: {
-    gap: 12,
-  },
-  tipItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  tipText: {
-    fontSize: 13,
-    color: '#666',
-  },
-  bottomNav: {
-    position: 'absolute',
-    bottom: 0,
-    left: '50%',
-    transform: [{ translateX: -207 }],
-    width: 414,
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    backgroundColor: '#FFF',
-    paddingTop: 8,
-    paddingBottom: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#F0F0F0',
-  },
-  bottomNavItem: {
-    alignItems: 'center',
-    paddingVertical: 4,
-    flex: 1,
-  },
-  bottomNavItemActive: {},
-  bottomNavIcon: {
-    fontSize: 22,
-    marginBottom: 2,
-  },
-  bottomNavLabel: {
-    fontSize: 12,
-    color: '#999',
+  amountUnit: {
+    fontSize: 16,
+    color: '#6b7280',
     fontWeight: '500',
   },
-  bottomNavLabelActive: {
-    color: THEME_COLOR,
+  balanceHint: {
+    fontSize: 12,
+    color: '#9ca3af',
+    marginTop: 6,
+  },
+  feeCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+  },
+  feeTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 16,
+  },
+  feeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  feeLabel: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  feeValue: {
+    fontSize: 14,
+    color: '#1f2937',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#e5e7eb',
+    marginVertical: 12,
+  },
+  totalLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  totalValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#6D28D9',
+  },
+  infoCard: {
+    backgroundColor: '#eff6ff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+  },
+  infoTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1e40af',
+    marginBottom: 8,
+  },
+  infoText: {
+    fontSize: 13,
+    color: '#1e3a8a',
+    lineHeight: 20,
+  },
+  submitButton: {
+    backgroundColor: '#6D28D9',
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  submitButtonDisabled: {
+    backgroundColor: '#d1d5db',
+  },
+  submitButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

@@ -43,7 +43,7 @@ mod benchmarks {
     }
 
     #[benchmark]
-    fn release_dust() {
+    fn release_cos() {
         let caller: T::AccountId = whitelisted_caller();
         let order_id: u64 = 1;
 

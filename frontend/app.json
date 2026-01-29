@@ -1,63 +1,49 @@
 {
   "expo": {
-    "name": "星尘玄鉴",
-    "slug": "stardust-xuanjian",
-    "version": "0.1.0",
+    "name": "Cosmos",
+    "slug": "cosmos",
+    "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "dark",
-    "scheme": "stardust",
+    "icon": "./assets/images/icon.png",
+    "scheme": "frontend",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0F0A1A"
-    },
     "ios": {
-      "supportsTablet": false,
-      "bundleIdentifier": "com.stardust.xuanjian",
-      "infoPlist": {
-        "NSMotionUsageDescription": "需要访问传感器以支持摇卦功能",
-        "NSFaceIDUsageDescription": "使用 Face ID 保护您的钱包"
-      }
+      "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0F0A1A"
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "package": "com.stardust.xuanjian",
-      "permissions": [
-        "android.permission.VIBRATE",
-        "android.permission.USE_BIOMETRIC",
-        "android.permission.USE_FINGERPRINT"
-      ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png",
-      "bundler": "metro"
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
       "expo-router",
       [
-        "expo-secure-store",
+        "expo-splash-screen",
         {
-          "faceIDPermission": "使用 Face ID 保护您的钱包"
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff",
+          "dark": {
+            "backgroundColor": "#000000"
+          }
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
-      "typedRoutes": true
-    },
-    "extra": {
-      "router": {
-        "origin": false
-      },
-      "eas": {
-        "projectId": "stardust-xuanjian"
-      }
+      "typedRoutes": true,
+      "reactCompiler": true
     }
   }
 }

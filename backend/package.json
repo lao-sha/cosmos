@@ -1,7 +1,7 @@
 {
   "name": "livestream-backend",
   "version": "1.0.0",
-  "description": "Livestream backend service for Stardust platform",
+  "description": "Livestream backend service for Cosmos platform",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",

@@ -6,7 +6,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Stardust Blockchain                      │
+│                     Cosmos Blockchain                      │
 │                                                               │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │              pallet-almanac (Runtime)                   │ │
@@ -38,7 +38,7 @@
                            │ RPC Query
                            │
 ┌─────────────────────────────────────────────────────────────┐
-│                  stardust-dapp (Frontend)                    │
+│                  cosmos-dapp (Frontend)                    │
 │                                                               │
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │  AlmanacService                                       │  │
@@ -731,7 +731,7 @@ sp_api::decl_runtime_apis! {
 ### 6.1 服务层实现
 
 ```typescript
-// stardust-dapp/src/services/almanacService.ts
+// cosmos-dapp/src/services/almanacService.ts
 
 import { ApiPromise } from '@polkadot/api';
 
@@ -913,7 +913,7 @@ export class AlmanacService {
 ### 6.2 React 组件示例
 
 ```typescript
-// stardust-dapp/src/features/almanac/AlmanacPage.tsx
+// cosmos-dapp/src/features/almanac/AlmanacPage.tsx
 
 import React, { useEffect, useState } from 'react';
 import { Calendar, Card, Tag, Divider } from 'antd';
@@ -1209,7 +1209,7 @@ impl pallet_almanac::Config for Runtime {
 
 ```bash
 # 生成 OCW 密钥
-./target/release/solochain-template-node key insert \
+./target/release/cosmos-node key insert \
   --base-path /tmp/node01 \
   --chain local \
   --scheme Sr25519 \
@@ -1218,7 +1218,7 @@ impl pallet_almanac::Config for Runtime {
 
 # 启动节点时配置环境变量
 export ALMANAC_APPCODE="your_aliyun_appcode"
-./target/release/solochain-template-node \
+./target/release/cosmos-node \
   --dev \
   --offchain-worker=Always \
   --enable-offchain-indexing=true

@@ -2,7 +2,7 @@
 
 ## 📋 模块概述
 
-`pallet-credit` 是 Stardust 区块链的 **统一信用管理系统**，整合了买家信用（Buyer Credit）和做市商信用（Maker Credit）两个子系统，并提供买家额度管理（Buyer Quota）功能。该模块通过多维度信任评估、动态风控机制和信用等级管理，为 OTC 交易市场提供完善的信用风控体系。
+`pallet-credit` 是 Cosmos 区块链的 **统一信用管理系统**，整合了买家信用（Buyer Credit）和做市商信用（Maker Credit）两个子系统，并提供买家额度管理（Buyer Quota）功能。该模块通过多维度信任评估、动态风控机制和信用等级管理，为 OTC 交易市场提供完善的信用风控体系。
 
 ### 核心特性
 
@@ -36,7 +36,7 @@
 
 ```rust
 pub fn calculate_asset_trust(account: &T::AccountId) -> u8 {
-    // DUST 余额信任分
+    // COS 余额信任分
     let balance_score = if balance_multiplier >= 10000 {
         50  // >= 10000倍最小余额：高信任
     } else if balance_multiplier >= 1000 {
@@ -510,24 +510,24 @@ let dispute_loss_rate = dispute_loss_count * 100 / total_orders;
 
 #### 2.4 动态保证金机制
 
-**基础保证金**：1,000,000 DUST
+**基础保证金**：1,000,000 COS
 
 **根据信用等级调整**：
 
 ```rust
 pub fn calculate_required_deposit(maker_id: u64) -> BalanceOf<T> {
-    let base_deposit = 1_000_000 * 1e18;  // 1,000,000 DUST
+    let base_deposit = 1_000_000 * 1e18;  // 1,000,000 COS
 
     let credit_score = Self::query_maker_credit_score(maker_id).unwrap_or(820);
 
     let multiplier_percent = match credit_score {
-        950..=1000 => 50,   // Diamond: 0.5× = 500,000 DUST
-        900..=949  => 70,   // Platinum: 0.7× = 700,000 DUST
-        850..=899  => 80,   // Gold: 0.8× = 800,000 DUST
-        820..=849  => 90,   // Silver: 0.9× = 900,000 DUST
-        800..=819  => 100,  // Bronze: 1.0× = 1,000,000 DUST
-        750..=799  => 120,  // Warning: 1.2× = 1,200,000 DUST
-        _          => 200,  // Suspended: 2.0× = 2,000,000 DUST
+        950..=1000 => 50,   // Diamond: 0.5× = 500,000 COS
+        900..=949  => 70,   // Platinum: 0.7× = 700,000 COS
+        850..=899  => 80,   // Gold: 0.8× = 800,000 COS
+        820..=849  => 90,   // Silver: 0.9× = 900,000 COS
+        800..=819  => 100,  // Bronze: 1.0× = 1,000,000 COS
+        750..=799  => 120,  // Warning: 1.2× = 1,200,000 COS
+        _          => 200,  // Suspended: 2.0× = 2,000,000 COS
     };
 
     base_deposit * multiplier_percent / 100
@@ -641,7 +641,7 @@ pub fn rate_maker(
 
 #### 3.1 设计理念
 
-完全替代押金机制，通过信用额度控制买家行为，解决DUST押金的逻辑矛盾。
+完全替代押金机制，通过信用额度控制买家行为，解决COS押金的逻辑矛盾。
 
 **核心原则**：
 - 首购10 USD起步
@@ -934,7 +934,7 @@ pub struct CreditScore<T: Config> {
     /// 完成订单数
     pub completed_orders: u32,
 
-    /// 累计交易量（DUST）
+    /// 累计交易量（COS）
     pub total_volume: BalanceOf<T>,
 
     /// 违约次数

@@ -234,9 +234,9 @@ impl<T: Config> PercentageAdjustmentProposal<T> {
     pub fn calculate_deposit(&self) -> BalanceOf<T> {
         let units: u128 = 1_000_000_000_000_000_000u128; // 18位精度
         if self.is_major {
-            (10000u128 * units).saturated_into() // 10,000 DUST（重大提案）
+            (10000u128 * units).saturated_into() // 10,000 COS（重大提案）
         } else {
-            (1000u128 * units).saturated_into()  // 1,000 DUST（微调提案）
+            (1000u128 * units).saturated_into()  // 1,000 COS（微调提案）
         }
     }
 }
@@ -391,7 +391,7 @@ impl<T: Config> Pallet<T> {
         // 平方根权重
         let sqrt_balance = Self::integer_sqrt(balance_u128);
 
-        // 权重上限：相当于100万 DUST 的权重
+        // 权重上限：相当于100万 COS 的权重
         let max_weight = 1000u128; // sqrt(1,000,000) = 1000
 
         sqrt_balance.min(max_weight)
@@ -675,9 +675,9 @@ impl<T: Config> MembershipPriceProposal<T> {
     pub fn calculate_deposit(&self) -> BalanceOf<T> {
         let units: u128 = 1_000_000_000_000_000_000u128; // 18位精度
         if self.is_major {
-            (10000u128 * units).saturated_into() // 10,000 DUST
+            (10000u128 * units).saturated_into() // 10,000 COS
         } else {
-            (1000u128 * units).saturated_into()  // 1,000 DUST
+            (1000u128 * units).saturated_into()  // 1,000 COS
         }
     }
 }

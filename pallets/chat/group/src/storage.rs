@@ -1,4 +1,4 @@
-/// Stardust智能群聊系统 - 智能存储引擎
+/// Cosmos智能群聊系统 - 智能存储引擎
 ///
 /// 实现四层存储架构和智能存储策略
 
@@ -421,7 +421,7 @@ impl<T: frame_system::Config> SmartStorageEngine<T> {
         message_meta: &GroupMessageMeta<T>,
         content: &Vec<u8>,
     ) -> Result<StorageLocationInfo, StorageError> {
-        // 这里应该调用 pallet-stardust-ipfs 进行实际存储
+        // 这里应该调用 pallet-cosmos-ipfs 进行实际存储
         // 目前使用模拟实现
 
         let content_hash = sp_io::hashing::blake2_256(content);

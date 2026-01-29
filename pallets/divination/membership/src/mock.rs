@@ -90,7 +90,7 @@ parameter_types! {
     pub const BurnAccountId: u64 = 9999;
     pub const RewardPoolAllocation: u32 = 1000; // 10%
     pub const NewAccountCooldown: u64 = 100; // 100 blocks for testing (vs 50400 in prod)
-    pub const MinBalanceForRewards: u128 = 1_000_000_000_000; // 1 DUST
+    pub const MinBalanceForRewards: u128 = 1_000_000_000_000; // 1 COS
     pub const BlocksPerDay: u64 = 10; // 10 blocks for testing (vs 7200 in prod)
     pub const BlocksPerMonth: u64 = 300; // 300 blocks for testing (vs 216000 in prod)
     pub const MaxDisplayNameLength: u32 = 32;
@@ -124,11 +124,11 @@ impl pallet_affiliate::types::AffiliateDistributor<u64, u128, u64> for MockAffil
 pub struct MockPricingProvider;
 
 impl pallet_trading_common::PricingProvider<u128> for MockPricingProvider {
-    fn get_dust_to_usd_rate() -> Option<u128> {
-        Some(1_000_000) // 1 DUST = 1 USD
+    fn get_cos_to_usd_rate() -> Option<u128> {
+        Some(1_000_000) // 1 COS = 1 USD
     }
     
-    fn report_swap_order(_timestamp: u64, _price_usdt: u64, _dust_qty: u128) -> sp_runtime::DispatchResult {
+    fn report_swap_order(_timestamp: u64, _price_usdt: u64, _cos_qty: u128) -> sp_runtime::DispatchResult {
         Ok(())
     }
 }
@@ -161,12 +161,12 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 
     pallet_balances::GenesisConfig::<Test> {
         balances: vec![
-            (1, 1000 * DUST),  // User 1: 1000 DUST
-            (2, 500 * DUST),   // User 2: 500 DUST
-            (3, 10 * DUST),    // User 3: 10 DUST
+            (1, 1000 * COS),  // User 1: 1000 COS
+            (2, 500 * COS),   // User 2: 500 COS
+            (3, 10 * COS),    // User 3: 10 COS
             // User 4 is omitted (zero balance)
             (TreasuryAccountId::get(), 1), // Treasury (needs existential deposit)
-            (Membership::reward_pool_account(), 100_000 * DUST), // Reward pool
+            (Membership::reward_pool_account(), 100_000 * COS), // Reward pool
         ],
         dev_accounts: None,
     }
@@ -178,8 +178,8 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
     ext
 }
 
-/// DUST unit (10^12).
-pub const DUST: u128 = 1_000_000_000_000;
+/// COS unit (10^12).
+pub const COS: u128 = 1_000_000_000_000;
 
 /// Advance to specified block number.
 pub fn run_to_block(n: u64) {

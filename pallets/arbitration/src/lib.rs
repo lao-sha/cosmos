@@ -438,7 +438,7 @@ pub mod pallet {
         type RejectedSlashBps: Get<u16>;
         /// 部分胜诉罚没比例（基点，5000 = 50%）
         type PartialSlashBps: Get<u16>;
-        /// 投诉押金兜底金额（DUST数量，pricing不可用时使用）
+        /// 投诉押金兜底金额（COS数量，pricing不可用时使用）
         #[pallet::constant]
         type ComplaintDeposit: Get<BalanceOf<Self>>;
         /// 投诉押金USD价值（精度10^6，1_000_000 = 1 USDT）
@@ -1143,14 +1143,14 @@ pub mod pallet {
                 Error::<T>::InvalidComplaintType
             );
 
-            // 3.5 锁定投诉押金（使用pricing换算1 USDT价值的DUST）
+            // 3.5 锁定投诉押金（使用pricing换算1 USDT价值的COS）
             let min_deposit = T::ComplaintDeposit::get();
             let deposit_usd = T::ComplaintDepositUsd::get(); // 1_000_000 (1 USDT)
             
-            let deposit_amount = if let Some(price) = T::Pricing::get_dust_to_usd_rate() {
+            let deposit_amount = if let Some(price) = T::Pricing::get_cos_to_usd_rate() {
                 let price_u128: u128 = price.saturated_into();
                 if price_u128 > 0u128 {
-                    // DUST数量 = USD金额 * 精度 / 价格
+                    // COS数量 = USD金额 * 精度 / 价格
                     let required_u128 = (deposit_usd as u128).saturating_mul(1_000_000u128) / price_u128;
                     let required: BalanceOf<T> = required_u128.saturated_into();
                     // 取换算值和兜底值中的较大者

@@ -2,12 +2,12 @@
 name = "pallet-chat-group"
 version = "1.0.0"
 description = "智能群聊系统，支持四种加密模式和乐观UI更新"
-authors = ["Stardust Team"]
-homepage = "https://stardust.social"
+authors = ["Cosmos Team"]
+homepage = "https://cosmos.social"
 edition = "2021"
 license = "Apache-2.0"
 publish = false
-repository = "https://github.com/lao-sha/stardust"
+repository = "https://github.com/memoio/cosmos"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]

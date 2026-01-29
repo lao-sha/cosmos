@@ -198,7 +198,7 @@ impl pallet_affiliate::Config for Test {
     type MaxReadyProposals = MaxReadyProposals;
     type HistoryRetentionWeeks = HistoryRetentionWeeks;
     type ProposalExpiry = ProposalExpiry;
-    type ProposalDeposit = frame_support::traits::ConstU128<50_000_000_000_000_000_000>; // 50 DUST
+    type ProposalDeposit = frame_support::traits::ConstU128<50_000_000_000_000_000_000>; // 50 COS
     type ProposalDepositUsd = frame_support::traits::ConstU64<50_000_000>; // 50 USDT
     type DepositCalculator = (); // 使用空实现，返回兜底值
     type WeightInfo = ();
@@ -213,17 +213,17 @@ impl pallet_affiliate::Config for Test {
 /// 初始化测试环境，并为测试账户分配初始余额。
 ///
 /// **测试账户**：
-/// - Alice (1): 10,000 DUST
-/// - Bob (2): 10,000 DUST
-/// - Charlie (3): 10,000 DUST
-/// - Dave (4): 10,000 DUST
-/// - Eve (5): 10,000 DUST
-/// - Frank (6): 10,000 DUST
-/// - Grace (7): 10,000 DUST
-/// - Heidi (8): 10,000 DUST
-/// - Ivan (9): 10,000 DUST
-/// - Judy (10): 10,000 DUST
-/// - Treasury (999): 1,000 DUST
+/// - Alice (1): 10,000 COS
+/// - Bob (2): 10,000 COS
+/// - Charlie (3): 10,000 COS
+/// - Dave (4): 10,000 COS
+/// - Eve (5): 10,000 COS
+/// - Frank (6): 10,000 COS
+/// - Grace (7): 10,000 COS
+/// - Heidi (8): 10,000 COS
+/// - Ivan (9): 10,000 COS
+/// - Judy (10): 10,000 COS
+/// - Treasury (999): 1,000 COS
 pub fn new_test_ext() -> sp_io::TestExternalities {
     let mut t = frame_system::GenesisConfig::<Test>::default()
         .build_storage()
@@ -231,17 +231,17 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 
     pallet_balances::GenesisConfig::<Test> {
         balances: vec![
-            (1, 10_000_000_000_000_000),   // Alice: 10,000 DUST
-            (2, 10_000_000_000_000_000),   // Bob: 10,000 DUST
-            (3, 10_000_000_000_000_000),   // Charlie: 10,000 DUST
-            (4, 10_000_000_000_000_000),   // Dave: 10,000 DUST
-            (5, 10_000_000_000_000_000),   // Eve: 10,000 DUST
-            (6, 10_000_000_000_000_000),   // Frank: 10,000 DUST
-            (7, 10_000_000_000_000_000),   // Grace: 10,000 DUST
-            (8, 10_000_000_000_000_000),   // Heidi: 10,000 DUST
-            (9, 10_000_000_000_000_000),   // Ivan: 10,000 DUST
-            (10, 10_000_000_000_000_000),  // Judy: 10,000 DUST
-            (999, 1_000_000_000_000_000),  // Treasury: 1,000 DUST
+            (1, 10_000_000_000_000_000),   // Alice: 10,000 COS
+            (2, 10_000_000_000_000_000),   // Bob: 10,000 COS
+            (3, 10_000_000_000_000_000),   // Charlie: 10,000 COS
+            (4, 10_000_000_000_000_000),   // Dave: 10,000 COS
+            (5, 10_000_000_000_000_000),   // Eve: 10,000 COS
+            (6, 10_000_000_000_000_000),   // Frank: 10,000 COS
+            (7, 10_000_000_000_000_000),   // Grace: 10,000 COS
+            (8, 10_000_000_000_000_000),   // Heidi: 10,000 COS
+            (9, 10_000_000_000_000_000),   // Ivan: 10,000 COS
+            (10, 10_000_000_000_000_000),  // Judy: 10,000 COS
+            (999, 1_000_000_000_000_000),  // Treasury: 1,000 COS
         ],
         dev_accounts: None,
     }

@@ -109,7 +109,7 @@ fn calculate_room_bond_returns_fallback() {
     new_test_ext().execute_with(|| {
         // 使用空实现的 DepositCalculator，应返回兜底值
         let bond = Livestream::calculate_room_bond();
-        assert_eq!(bond, 10_000_000_000_000u128); // 10 DUST
+        assert_eq!(bond, 10_000_000_000_000u128); // 10 COS
     });
 }
 
@@ -122,7 +122,7 @@ fn create_gift_works() {
         assert_ok!(Livestream::create_gift(
             RuntimeOrigin::root(),
             b"Rose".to_vec(),
-            1_000_000_000_000, // 1 DUST
+            1_000_000_000_000, // 1 COS
             b"QmTestIconCid".to_vec(),
         ));
 

@@ -1,4 +1,4 @@
-/// 函数级详细中文注释：pallet-stardust-ipfs 类型定义模块
+/// 函数级详细中文注释：pallet-cosmos-ipfs 类型定义模块
 /// 
 /// 本模块包含优化后的IPFS Pin管理系统的所有类型定义：
 /// - 分层配置（PinTier, TierConfig）

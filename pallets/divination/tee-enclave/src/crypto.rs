@@ -281,7 +281,7 @@ pub mod client {
         let shared_secret = ephemeral_secret.diffie_hellman(&enclave_public);
 
         // 派生会话密钥
-        let session_key = derive_session_key(shared_secret.as_bytes(), b"stardust-enclave-v1")?;
+        let session_key = derive_session_key(shared_secret.as_bytes(), b"cosmos-enclave-v1")?;
 
         // 生成随机 nonce
         let mut nonce = [0u8; NONCE_SIZE];
@@ -435,7 +435,7 @@ mod tests {
         let ephemeral_public = X25519PublicKey::from(encrypted.ephemeral_pubkey);
         let shared_secret = enclave_secret.diffie_hellman(&ephemeral_public);
         let session_key =
-            derive_session_key(shared_secret.as_bytes(), b"stardust-enclave-v1").unwrap();
+            derive_session_key(shared_secret.as_bytes(), b"cosmos-enclave-v1").unwrap();
 
         let decrypted = aes_gcm_decrypt(
             &session_key,

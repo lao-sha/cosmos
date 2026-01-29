@@ -2,10 +2,10 @@
 name = "pallet-divination-nft"
 version = "0.1.0"
 description = "通用玄学占卜 NFT 模块 - 支持多种占卜类型的 NFT 铸造、交易、收藏"
-authors = ["Stardust Team"]
+authors = ["Cosmos Team"]
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/stardust/stardust"
+repository = "https://github.com/memoio/cosmos"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]

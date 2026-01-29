@@ -21,7 +21,7 @@
 
 ## 概述
 
-`pallet-referral` 是 Stardust 平台的推荐关系管理模块，从 `pallet-affiliate` 抽离而来，专注于管理用户之间的推荐关系。
+`pallet-referral` 是 Cosmos 平台的推荐关系管理模块，从 `pallet-affiliate` 抽离而来，专注于管理用户之间的推荐关系。
 
 ### 核心功能
 
@@ -736,7 +736,7 @@ pub trait WeightInfo {
 ```bash
 # 生成权重
 cargo build --release --features runtime-benchmarks
-./target/release/stardust-node benchmark pallet \
+./target/release/cosmos-node benchmark pallet \
     --chain dev \
     --pallet pallet_referral \
     --extrinsic "*" \
@@ -820,10 +820,10 @@ cargo build --release --features runtime-benchmarks
 
 ## 联系方式
 
-- **项目主页**: https://github.com/memoio/stardust
-- **文档**: https://docs.stardust.io
-- **Discord**: https://discord.gg/stardust
+- **项目主页**: https://github.com/memoio/cosmos
+- **文档**: https://docs.cosmos.io
+- **Discord**: https://discord.gg/cosmos
 
 ---
 
-**维护者**: StarDust Team
+**维护者**: Cosmos Team

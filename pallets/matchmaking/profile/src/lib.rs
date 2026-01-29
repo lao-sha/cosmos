@@ -104,7 +104,7 @@ pub mod pallet {
         /// RuntimeHoldReason：保证金锁定原因标识
         type RuntimeHoldReason: From<HoldReason>;
         
-        /// 保证金兆底金额（DUST数量，pricing不可用时使用）
+        /// 保证金兆底金额（COS数量，pricing不可用时使用）
         #[pallet::constant]
         type ProfileDeposit: Get<BalanceOf<Self>>;
         
@@ -112,7 +112,7 @@ pub mod pallet {
         #[pallet::constant]
         type ProfileDepositUsd: Get<u64>;
         
-        /// 月费兆底金额（DUST数量，pricing不可用时使用）
+        /// 月费兆底金额（COS数量，pricing不可用时使用）
         #[pallet::constant]
         type MonthlyFee: Get<BalanceOf<Self>>;
         
@@ -659,7 +659,7 @@ pub mod pallet {
     impl<T: Config> Pallet<T> {
         /// 创建用户资料
         /// 
-        /// 需要支付 50 USDT 等值的 DUST 作为保证金，保证金将被锁定。
+        /// 需要支付 50 USDT 等值的 COS 作为保证金，保证金将被锁定。
         /// 如果用户被投诉成功，保证金将被部分或全部罚没。
         #[pallet::call_index(0)]
         #[pallet::weight(T::WeightInfo::create_profile())]
@@ -680,7 +680,7 @@ pub mod pallet {
             // 验证昵称
             ensure!(!nickname.is_empty(), Error::<T>::NicknameEmpty);
 
-            // 计算并锁定保证金（50 USDT 等值的 DUST）
+            // 计算并锁定保证金（50 USDT 等值的 COS）
             let deposit_amount = Self::calculate_deposit_amount();
             
             // 检查用户余额是否足够
@@ -962,7 +962,7 @@ pub mod pallet {
 
         /// 支付月费
         /// 
-        /// 支付 2 USDT 等值的 DUST 作为每月会员费。
+        /// 支付 2 USDT 等值的 COS 作为每月会员费。
         /// 可以一次性支付多个月。
         /// 
         /// 费用分配（15层推荐链）：
@@ -1569,19 +1569,19 @@ impl<T: Config> Pallet<T> {
         Profiles::<T>::get(account).map(|p| p.verified).unwrap_or(false)
     }
 
-    /// 计算月费金额（2 USDT 等值的 DUST）
+    /// 计算月费金额（2 USDT 等值的 COS）
     /// 
     /// 优先使用实时汇率计算，如果汇率不可用则使用兆底金额
     pub fn calculate_monthly_fee_amount() -> BalanceOf<T> {
         // 尝试使用实时汇率计算
-        if let Some(rate) = T::Pricing::get_dust_to_usd_rate() {
+        if let Some(rate) = T::Pricing::get_cos_to_usd_rate() {
             let usd_amount = T::MonthlyFeeUsd::get(); // 2_000_000 = 2 USD
             if !rate.is_zero() {
                 let usd_u128 = usd_amount as u128;
                 let rate_u128: u128 = rate.try_into().unwrap_or(1_000_000u128);
-                let dust_precision: u128 = 1_000_000_000_000_000_000u128; // 10^18
-                let dust_amount_u128 = usd_u128.saturating_mul(dust_precision) / rate_u128;
-                if let Ok(amount) = dust_amount_u128.try_into() {
+                let cos_precision: u128 = 1_000_000_000_000_000_000u128; // 10^18
+                let cos_amount_u128 = usd_u128.saturating_mul(cos_precision) / rate_u128;
+                if let Ok(amount) = cos_amount_u128.try_into() {
                     return amount;
                 }
             }
@@ -1614,24 +1614,24 @@ impl<T: Config> Pallet<T> {
         result_u128.try_into().unwrap_or(BalanceOf::<T>::default())
     }
 
-    /// 计算保证金金额（50 USDT 等值的 DUST）
+    /// 计算保证金金额（50 USDT 等值的 COS）
     /// 
     /// 优先使用实时汇率计算，如果汇率不可用则使用兆底金额
     pub fn calculate_deposit_amount() -> BalanceOf<T> {
         // 尝试使用实时汇率计算
-        if let Some(rate) = T::Pricing::get_dust_to_usd_rate() {
+        if let Some(rate) = T::Pricing::get_cos_to_usd_rate() {
             // rate 精度为 10^6，即 1_000_000 = 1 USD
             // ProfileDepositUsd 精度也为 10^6，即 50_000_000 = 50 USD
             let usd_amount = T::ProfileDepositUsd::get(); // 50_000_000
-            // dust_amount = usd_amount / rate * 10^18 (DUST 精度)
-            // 简化：dust_amount = usd_amount * 10^18 / rate
+            // cos_amount = usd_amount / rate * 10^18 (COS 精度)
+            // 简化：cos_amount = usd_amount * 10^18 / rate
             if !rate.is_zero() {
                 // 为避免溢出，使用 u128 计算
                 let usd_u128 = usd_amount as u128;
                 let rate_u128: u128 = rate.try_into().unwrap_or(1_000_000u128);
-                let dust_precision: u128 = 1_000_000_000_000_000_000u128; // 10^18
-                let dust_amount_u128 = usd_u128.saturating_mul(dust_precision) / rate_u128;
-                if let Ok(amount) = dust_amount_u128.try_into() {
+                let cos_precision: u128 = 1_000_000_000_000_000_000u128; // 10^18
+                let cos_amount_u128 = usd_u128.saturating_mul(cos_precision) / rate_u128;
+                if let Ok(amount) = cos_amount_u128.try_into() {
                     return amount;
                 }
             }

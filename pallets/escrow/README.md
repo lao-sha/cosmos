@@ -2,7 +2,7 @@
 
 ## 📋 模块概述
 
-`pallet-escrow` 是 Stardust 区块链的**资金托管系统**，提供安全的资金锁定、释放、退款和分账功能。本模块作为交易、仲裁等业务模块的底层基础设施，确保资金在交易过程中的安全托管。
+`pallet-escrow` 是 Cosmos 区块链的**资金托管系统**，提供安全的资金锁定、释放、退款和分账功能。本模块作为交易、仲裁等业务模块的底层基础设施，确保资金在交易过程中的安全托管。
 
 ### 核心特性
 
@@ -124,7 +124,7 @@ pub fn lock(
 
 **示例**：
 ```rust
-// 锁定 100 DUST 到托管 ID 12345
+// 锁定 100 COS 到托管 ID 12345
 Escrow::lock(RuntimeOrigin::root(), 12345, alice, 100 * UNIT)?;
 ```
 
@@ -202,7 +202,7 @@ pub fn release_split(
 
 **示例**：
 ```rust
-// 将托管资金分配：Alice 70 DUST, Bob 30 DUST
+// 将托管资金分配：Alice 70 COS, Bob 30 COS
 let entries = vec![
     (alice, 70 * UNIT),
     (bob, 30 * UNIT),
@@ -445,7 +445,7 @@ impl ExpiryPolicy<AccountId, BlockNumber> for DefaultExpiryPolicy {
 ### 示例 1：OTC 交易托管流程
 
 ```rust
-// 1. 买家下单，锁定做市商 DUST 到托管
+// 1. 买家下单，锁定做市商 COS 到托管
 let order_id = 12345u64;
 let amount = 1000 * UNIT;
 <Escrow as EscrowTrait>::lock_from(&maker, order_id, amount)?;
@@ -562,4 +562,4 @@ MIT-0
 
 **最后更新**：2026-01-22  
 **版本**：v1.0  
-**维护者**：Stardust Team
+**维护者**：Cosmos Team

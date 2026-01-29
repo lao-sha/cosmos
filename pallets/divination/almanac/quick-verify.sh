@@ -23,7 +23,7 @@ fi
 echo ""
 
 echo "[2/4] 检查编译..."
-if cargo check -p stardust-node --message-format=short 2>&1 | grep -q "^error"; then
+if cargo check -p cosmos-node --message-format=short 2>&1 | grep -q "^error"; then
     echo -e "${RED}❌ 存在编译错误${NC}"
     exit 1
 else
@@ -47,13 +47,13 @@ echo -e "${GREEN}✅ 可以通过以下方式配置 AppCode:${NC}"
 echo ""
 echo "   方式一 (环境变量,推荐):"
 echo "   $ export ALMANAC_APPCODE=\"your_appcode\""
-echo "   $ ./target/release/stardust-node --dev"
+echo "   $ ./target/release/cosmos-node --dev"
 echo ""
 echo "   方式二 (命令行参数):"
-echo "   $ ./target/release/stardust-node --dev --almanac-appcode \"your_appcode\""
+echo "   $ ./target/release/cosmos-node --dev --almanac-appcode \"your_appcode\""
 echo ""
 echo "   方式三 (临时设置):"
-echo "   $ ALMANAC_APPCODE=\"your_appcode\" ./target/release/stardust-node --dev"
+echo "   $ ALMANAC_APPCODE=\"your_appcode\" ./target/release/cosmos-node --dev"
 echo ""
 
 echo "========================================="

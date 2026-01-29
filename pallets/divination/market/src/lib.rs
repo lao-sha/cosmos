@@ -82,7 +82,7 @@ pub mod pallet {
         /// IPFS 内容注册接口（用于自动 Pin 市场内容）
         type ContentRegistry: pallet_storage_service::ContentRegistry;
 
-        /// 最小保证金（DUST数量）
+        /// 最小保证金（COS数量）
         #[pallet::constant]
         type MinDeposit: Get<BalanceOf<Self>>;
 
@@ -1261,27 +1261,27 @@ pub mod pallet {
                 BoundedVec::try_from(bio).map_err(|_| Error::<T>::BioTooLong)?;
 
             // 计算保证金：使用pricing换算，确保不低于100 USDT价值
-            let min_deposit_dust = T::MinDeposit::get();
+            let min_deposit_cos = T::MinDeposit::get();
             let min_deposit_usd = T::MinDepositUsd::get(); // 100_000_000 (100 USDT)
             
-            // 使用pricing模块换算100 USDT对应的DUST数量
-            let deposit = if let Some(price) = T::Pricing::get_dust_to_usd_rate() {
+            // 使用pricing模块换算100 USDT对应的COS数量
+            let deposit = if let Some(price) = T::Pricing::get_cos_to_usd_rate() {
                 let price_u128: u128 = price.saturated_into();
                 if price_u128 > 0u128 {
-                    // DUST数量 = USD金额 * 精度 / 价格
-                    let required_dust_u128 = (min_deposit_usd as u128).saturating_mul(1_000_000u128) / price_u128;
-                    let required_dust: BalanceOf<T> = required_dust_u128.saturated_into();
+                    // COS数量 = USD金额 * 精度 / 价格
+                    let required_cos_u128 = (min_deposit_usd as u128).saturating_mul(1_000_000u128) / price_u128;
+                    let required_cos: BalanceOf<T> = required_cos_u128.saturated_into();
                     // 取pricing换算值和最小值中的较大者
-                    if required_dust > min_deposit_dust {
-                        required_dust
+                    if required_cos > min_deposit_cos {
+                        required_cos
                     } else {
-                        min_deposit_dust
+                        min_deposit_cos
                     }
                 } else {
-                    min_deposit_dust
+                    min_deposit_cos
                 }
             } else {
-                min_deposit_dust
+                min_deposit_cos
             };
             
             // 锁定保证金

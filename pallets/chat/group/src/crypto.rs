@@ -1,4 +1,4 @@
-/// Stardust智能群聊系统 - 加密模块
+/// Cosmos智能群聊系统 - 加密模块
 ///
 /// 实现四种加密模式的核心加密算法
 
@@ -617,7 +617,7 @@ impl<T: frame_system::Config> KeyManager<T> {
         // 使用 HKDF 进行密钥强化
         KeyDerivation::hkdf_expand(
             base_key,
-            b"stardust-group-chat-v1",
+            b"cosmos-group-chat-v1",
             key_length,
         )
     }

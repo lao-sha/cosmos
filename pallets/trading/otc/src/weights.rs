@@ -8,7 +8,7 @@ use frame_support::weights::Weight;
 pub trait WeightInfo {
     fn create_order() -> Weight;
     fn mark_paid() -> Weight;
-    fn release_dust() -> Weight;
+    fn release_cos() -> Weight;
     fn cancel_order() -> Weight;
     fn dispute_order() -> Weight;
 
@@ -30,7 +30,7 @@ impl WeightInfo for () {
         Weight::from_parts(10_000, 0)
     }
 
-    fn release_dust() -> Weight {
+    fn release_cos() -> Weight {
         Weight::from_parts(10_000, 0)
     }
 

@@ -152,7 +152,7 @@ impl EnclaveRuntime {
             .derive_shared_secret(&encrypted_request.ephemeral_pubkey)?;
 
         // 2. 创建加密上下文
-        let ctx = CryptoContext::from_shared_secret(&shared_secret, b"stardust-enclave-v1")?;
+        let ctx = CryptoContext::from_shared_secret(&shared_secret, b"cosmos-enclave-v1")?;
 
         // 3. 解密请求
         let plaintext = ctx.decrypt_request(encrypted_request)?;
@@ -201,7 +201,7 @@ impl EnclaveRuntime {
             response,
             encrypted_response,
             proof,
-            session_key: derive_session_key(&shared_secret, b"stardust-enclave-v1")?,
+            session_key: derive_session_key(&shared_secret, b"cosmos-enclave-v1")?,
         })
     }
 

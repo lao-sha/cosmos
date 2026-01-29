@@ -138,7 +138,7 @@ pub fn report_room(
 
 **功能**：
 - 用户举报违规直播间
-- 收取押金（10 DUST）
+- 收取押金（10 COS）
 - 验证冷却期（1天）
 - 不能举报自己的直播间
 - 支持匿名举报
@@ -355,7 +355,7 @@ ReportExpired,
 
 ```rust
 // 举报系统配置
-type MinReportDeposit = ConstU128<{ 10 * UNIT }>; // 10 DUST
+type MinReportDeposit = ConstU128<{ 10 * UNIT }>; // 10 COS
 type ReportTimeout = ConstU32<{ 7 * DAYS }>; // 7 天
 type ReportCooldownPeriod = ConstU32<{ 1 * DAYS }>; // 1 天
 type ReportWithdrawWindow = ConstU32<{ 12 * HOURS }>; // 12 小时
@@ -394,7 +394,7 @@ test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
 ### 1. 防滥用保护
 
-- **押金机制**: 10 DUST 押金，防止恶意举报
+- **押金机制**: 10 COS 押金，防止恶意举报
 - **冷却期**: 1天冷却期，防止骚扰式举报
 - **自我保护**: 不能举报自己的直播间
 
@@ -427,7 +427,7 @@ test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ### 押金流转
 
 ```
-举报提交: 用户 -> 锁定 (10 DUST)
+举报提交: 用户 -> 锁定 (10 COS)
 
 举报成立: 锁定 -> 用户 (全额退还)
 举报驳回: 锁定 -> 用户 (全额退还)
@@ -449,7 +449,7 @@ test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 用户发现违规
   ↓
-提交举报 (锁定10 DUST)
+提交举报 (锁定10 COS)
   ↓
 [12小时内可撤回，退还80%]
   ↓
@@ -573,7 +573,7 @@ test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 - 13 个单元测试，100%通过
 
 **配置参数**:
-- MinReportDeposit: 10 DUST
+- MinReportDeposit: 10 COS
 - ReportTimeout: 7 天
 - ReportCooldownPeriod: 1 天
 - ReportWithdrawWindow: 12 小时

@@ -551,7 +551,7 @@ pub struct UserProfile<T: ProfileConfig> {
     /// 生活方式（可选）
     pub lifestyle: Option<Lifestyle>,
     
-    // ========== 玄学信息（Stardust 特色） ==========
+    // ========== 玄学信息（Cosmos 特色） ==========
     /// 八字命盘 ID（可选，用于合婚分析）
     pub bazi_chart_id: Option<u64>,
     /// 合婚偏好（可选）
@@ -662,7 +662,7 @@ pub struct PartnerPreferences<T: ProfileConfig> {
     /// 期望的生活方式
     pub desired_lifestyle: Option<Lifestyle>,
     
-    // 玄学条件（Stardust 特色）
+    // 玄学条件（Cosmos 特色）
     /// 最低八字合婚评分要求
     pub min_bazi_compatibility: Option<u8>,
 }

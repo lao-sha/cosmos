@@ -99,8 +99,8 @@ parameter_types! {
     pub const DailyFreeDivinations: u32 = 3;
     /// 每日最大占卜10次
     pub const MaxDailyDivinations: u32 = 10;
-    /// AI 解读费用：10 DUST
-    pub const AiInterpretationFee: Balance = 10_000_000_000_000; // 10 DUST (12 decimals)
+    /// AI 解读费用：10 COS
+    pub const AiInterpretationFee: Balance = 10_000_000_000_000; // 10 COS (12 decimals)
     /// 国库账户
     pub const TreasuryAccountId: u64 = 999;
 }
@@ -149,7 +149,7 @@ pub const CHARLIE: u64 = 3;
 pub const TREASURY: u64 = 999;
 
 /// 初始余额
-pub const INITIAL_BALANCE: Balance = 100_000_000_000_000_000; // 100,000 DUST
+pub const INITIAL_BALANCE: Balance = 100_000_000_000_000_000; // 100,000 COS
 
 /// 构建测试环境
 pub fn new_test_ext() -> sp_io::TestExternalities {

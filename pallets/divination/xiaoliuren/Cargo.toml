@@ -3,9 +3,9 @@ name = "pallet-xiaoliuren"
 description = "小六壬排盘区块链模块 - 中国传统掐指速算占卜系统"
 version = "0.1.0"
 license = "MIT-0"
-authors = ["Stardust Team"]
+authors = ["Cosmos Team"]
 edition = "2021"
-repository = "https://github.com/stardust/pallets"
+repository = "https://github.com/memoio/cosmos"
 
 [dependencies]
 # Substrate 核心

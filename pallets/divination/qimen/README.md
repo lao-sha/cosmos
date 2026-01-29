@@ -7,7 +7,7 @@
 
 ## 概述
 
-`pallet-qimen` 是 Stardust 区块链上的奇门遁甲排盘系统，实现了完整的奇门遁甲四盘排布算法和多层次解卦系统。本模块支持：
+`pallet-qimen` 是 Cosmos 区块链上的奇门遁甲排盘系统，实现了完整的奇门遁甲四盘排布算法和多层次解卦系统。本模块支持：
 
 - **双排盘方法**：转盘奇门（主流）和飞盘奇门（古法）
 - **四种排盘类型**：时家、日家、月家、年家奇门
@@ -525,7 +525,7 @@ pub trait Config: frame_system::Config + pallet_timestamp::Config {
     /// 每日最大排盘次数（默认: 20）
     type MaxDailyCharts: Get<u32>;
 
-    /// AI 解读费用（默认: 15 DUST）
+    /// AI 解读费用（默认: 15 COS）
     type AiInterpretationFee: Get<BalanceOf<Self>>;
 
     /// 国库账户

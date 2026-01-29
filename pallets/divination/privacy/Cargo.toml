@@ -2,7 +2,7 @@
 name = "pallet-divination-privacy"
 version = "0.1.0"
 description = "统一隐私授权模块 - 为所有占卜系统提供加密存储和多方授权功能"
-authors = ["Stardust Team"]
+authors = ["Cosmos Team"]
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/parity-asia/hackathon-2023-summer/polkadot-hackathon-2024"

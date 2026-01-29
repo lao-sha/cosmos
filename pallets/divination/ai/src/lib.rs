@@ -84,7 +84,7 @@ pub mod pallet {
         #[pallet::constant]
         type MinOracleStake: Get<BalanceOf<Self>>;
 
-        /// 争议押金兜底值（DUST数量，pricing不可用时使用）
+        /// 争议押金兜底值（COS数量，pricing不可用时使用）
         #[pallet::constant]
         type DisputeDeposit: Get<BalanceOf<Self>>;
 
@@ -1038,7 +1038,7 @@ pub mod pallet {
                 );
             }
 
-            // 收取争议押金（1 USDT 等值的 DUST）
+            // 收取争议押金（1 USDT 等值的 COS）
             let deposit = Self::calculate_dispute_deposit();
             T::AiCurrency::reserve(&who, deposit)?;
 
@@ -1491,7 +1491,7 @@ pub mod pallet {
             Ok(())
         }
 
-        /// 计算争议押金金额（1 USDT 等值的 DUST）
+        /// 计算争议押金金额（1 USDT 等值的 COS）
         /// 
         /// 使用统一的 DepositCalculator trait 计算
         pub fn calculate_dispute_deposit() -> BalanceOf<T> {

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>纯 HTML 点击测试</title>
+  <style>
+    body { font-family: sans-serif; padding: 40px; text-align: center; }
+    button { padding: 16px 32px; font-size: 18px; margin: 10px; cursor: pointer; }
+    .purple { background: #6D28D9; color: white; border: none; border-radius: 8px; }
+    .red { background: #DC2626; color: white; border: none; border-radius: 8px; }
+    #count { font-size: 24px; margin: 20px 0; }
+  </style>
+</head>
+<body>
+  <h1>纯 HTML 点击测试</h1>
+  <p>这个页面完全不依赖 React/Expo</p>
+  <div id="count">点击次数: 0</div>
+  <button class="purple" onclick="increment()">按钮 1</button>
+  <button class="red" onclick="increment()">按钮 2</button>
+  <script>
+    var count = 0;
+    function increment() {
+      count++;
+      document.getElementById('count').textContent = '点击次数: ' + count;
+      console.log('clicked:', count);
+    }
+  </script>
+</body>
+</html>

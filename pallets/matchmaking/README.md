@@ -172,7 +172,7 @@ pallet-matchmaking-profile
     │
     ├── pallet-matchmaking-common
     ├── pallet-divination-privacy
-    └── pallet-stardust-ipfs
+    └── pallet-cosmos-ipfs
 
 pallet-matchmaking-matching
     │

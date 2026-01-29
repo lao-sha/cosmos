@@ -2,7 +2,7 @@
 name = "pallet-ziwei"
 version = "0.1.0"
 description = "紫微斗数排盘系统 - 区块链星命学模块"
-authors = ["Stardust Team"]
+authors = ["Cosmos Team"]
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/parity-asia/hackathon-2023-winter/"

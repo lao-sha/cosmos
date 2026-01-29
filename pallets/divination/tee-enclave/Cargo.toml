@@ -2,10 +2,10 @@
 name = "tee-enclave"
 version = "0.1.0"
 description = "TEE Enclave 应用 - 可信执行环境内的占卜计算引擎"
-authors = ["Stardust Team"]
+authors = ["Cosmos Team"]
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/stardust/stardust"
+repository = "https://github.com/memoio/cosmos"
 
 # 独立工作区，不属于主项目工作区
 [workspace]

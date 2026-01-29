@@ -2,12 +2,12 @@
 
 ## 模块概述
 
-OTC（场外交易）订单模块负责管理 OTC 订单的完整生命周期，是 Stardust 交易系统的核心组件之一。本模块提供了从订单创建到完成的全流程管理，包括首购订单特殊逻辑、订单争议与仲裁、自动过期处理等功能。
+OTC（场外交易）订单模块负责管理 OTC 订单的完整生命周期，是 Cosmos 交易系统的核心组件之一。本模块提供了从订单创建到完成的全流程管理，包括首购订单特殊逻辑、订单争议与仲裁、自动过期处理等功能。
 
 ### 主要特性
 
-- **订单生命周期管理**：支持订单创建、付款标记、DUST 释放、取消等完整流程
-- **首购订单机制**：为新用户提供固定 USD 价值的首购订单，动态计算 DUST 数量
+- **订单生命周期管理**：支持订单创建、付款标记、COS 释放、取消等完整流程
+- **首购订单机制**：为新用户提供固定 USD 价值的首购订单，动态计算 COS 数量
 - **KYC 身份认证**：集成 pallet-identity，支持可配置的 KYC 认证要求
 - **买家押金机制**：根据买家信用分动态计算押金比例，保护做市商权益
 - **订单争议与仲裁**：支持买卖双方发起争议，由仲裁员进行裁决
@@ -32,13 +32,13 @@ OTC（场外交易）订单模块负责管理 OTC 订单的完整生命周期，
 
 #### 普通订单 (`create_order`)
 
-买家指定做市商和 DUST 数量创建订单：
+买家指定做市商和 COS 数量创建订单：
 
 1. 验证买家 KYC 认证状态
 2. 验证订单金额在允许范围内（20-200 USD）
 3. 验证做市商状态和押金充足
-4. 获取当前 DUST/USD 价格计算总金额
-5. 锁定做市商 DUST 到托管账户
+4. 获取当前 COS/USD 价格计算总金额
+5. 锁定做市商 COS 到托管账户
 6. 计算并锁定买家押金（根据信用分）
 7. 创建订单记录并授予聊天权限
 
@@ -47,14 +47,14 @@ OTC（场外交易）订单模块负责管理 OTC 订单的完整生命周期，
 为新用户提供的特殊订单类型：
 
 - **固定 USD 价值**：10 USD（可配置）
-- **动态 DUST 数量**：根据当前价格实时计算
+- **动态 COS 数量**：根据当前价格实时计算
 - **免押金**：首购用户无需缴纳押金
 - **配额限制**：每个做市商同时最多接收 5 个首购订单
 
 ### 2. 订单状态流转
 
 ```
-┌─────────┐    mark_paid    ┌─────────────────┐   release_dust   ┌──────────┐
+┌─────────┐    mark_paid    ┌─────────────────┐   release_cos   ┌──────────┐
 │ Created │ ──────────────► │ PaidOrCommitted │ ───────────────► │ Released │
 └─────────┘                 └─────────────────┘                  └──────────┘
      │                              │                                  │
@@ -79,7 +79,7 @@ OTC（场外交易）订单模块负责管理 OTC 订单的完整生命周期，
 |------|----------|----------|
 | 最小金额 | 20 USD | 10 USD（固定） |
 | 最大金额 | 200 USD | 10 USD（固定） |
-| DUST 数量 | 买家指定 | 系统计算 |
+| COS 数量 | 买家指定 | 系统计算 |
 | 买家押金 | 根据信用分 | 免押金 |
 | 每用户限制 | 无 | 仅限一次 |
 
@@ -140,7 +140,7 @@ OTC（场外交易）订单模块负责管理 OTC 订单的完整生命周期，
 pub enum OrderState {
     Created,          // 已创建，等待买家付款
     PaidOrCommitted,  // 买家已标记付款
-    Released,         // DUST 已释放
+    Released,         // COS 已释放
     Refunded,         // 已退款
     Canceled,         // 已取消
     Disputed,         // 争议中
@@ -180,8 +180,8 @@ pub struct Order<T: Config> {
     pub maker_id: u64,                        // 做市商 ID
     pub maker: T::AccountId,                  // 做市商账户
     pub taker: T::AccountId,                  // 买家账户
-    pub price: BalanceOf<T>,                  // 单价（USDT/DUST，精度 10^6）
-    pub qty: BalanceOf<T>,                    // 数量（DUST 数量）
+    pub price: BalanceOf<T>,                  // 单价（USDT/COS，精度 10^6）
+    pub cos_amount: BalanceOf<T>,             // 数量（COS 数量）
     pub amount: BalanceOf<T>,                 // 总金额（USDT 金额）
     pub created_at: MomentOf,                 // 创建时间（Unix 秒）
     pub expire_at: MomentOf,                  // 超时时间
@@ -219,7 +219,7 @@ pub struct Dispute<T: Config> {
 pub struct ArchivedOrder<T: Config> {
     pub maker_id: u64,           // 做市商 ID
     pub taker: T::AccountId,     // 买家账户
-    pub qty: u64,                // DUST 数量（压缩）
+    pub cos_amount: u64,         // COS 数量（压缩）
     pub amount: u64,             // USDT 金额（压缩）
     pub state: OrderState,       // 订单状态
     pub completed_at: u64,       // 完成时间
@@ -286,7 +286,7 @@ pub struct KycConfig<BlockNumber> {
 | `create_order` | 买家 | 创建 OTC 订单 |
 | `create_first_purchase` | 买家 | 创建首购订单 |
 | `mark_paid` | 买家 | 标记已付款 |
-| `release_dust` | 做市商 | 释放 DUST 给买家 |
+| `release_cos` | 做市商 | 释放 COS 给买家 |
 | `cancel_order` | 买家/做市商 | 取消订单 |
 | `dispute_order` | 买家/做市商 | 发起订单争议 |
 
@@ -461,8 +461,8 @@ pub struct KycConfig<BlockNumber> {
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `MinFirstPurchaseDustAmount` | - | 首购订单最小 DUST 数量 |
-| `MaxFirstPurchaseDustAmount` | - | 首购订单最大 DUST 数量 |
+| `MinFirstPurchaseCosAmount` | - | 首购订单最小 COS 数量 |
+| `MaxFirstPurchaseCosAmount` | - | 首购订单最大 COS 数量 |
 | `MaxFirstPurchaseOrdersPerMaker` | 5 | 每个做市商最多同时接收的首购订单数 |
 | `AmountValidationTolerance` | 100（1%） | 金额验证容差 |
 
@@ -487,13 +487,13 @@ pub struct KycConfig<BlockNumber> {
 ```rust
 // 买家创建 OTC 订单
 // maker_id: 做市商 ID
-// dust_amount: 购买的 DUST 数量
+// cos_amount: 购买的 COS 数量
 // payment_commit: 支付承诺哈希（用于验证付款）
 // contact_commit: 联系方式承诺哈希
 OtcOrder::create_order(
     origin,
     maker_id,
-    dust_amount,
+    cos_amount,
     payment_commit,
     contact_commit,
 )?;
@@ -523,11 +523,11 @@ OtcOrder::mark_paid(
 )?;
 ```
 
-### 4. 做市商释放 DUST
+### 4. 做市商释放 COS
 
 ```rust
-// 做市商确认收到付款后，释放 DUST 给买家
-OtcOrder::release_dust(
+// 做市商确认收到付款后，释放 COS 给买家
+OtcOrder::release_cos(
     origin,
     order_id,
 )?;
@@ -603,13 +603,13 @@ let count = OtcOrder::get_maker_first_purchase_count(maker_id);
 
 | 模块 | 用途 |
 |------|------|
-| `pallet-escrow` | 托管服务，锁定/释放 DUST |
+| `pallet-escrow` | 托管服务，锁定/释放 COS |
 | `pallet-trading-credit` | 买家信用记录和额度管理 |
 | `pallet-trading-common` | 公共类型和 Trait 定义 |
 | `pallet-chat-permission` | 聊天权限管理 |
 | `pallet-identity` | KYC 身份认证 |
 | `pallet-arbitration` | 统一仲裁服务 |
-| `pallet-stardust-ipfs` | CID 锁定管理（争议证据） |
+| `pallet-cosmos-ipfs` | CID 锁定管理（争议证据） |
 | `pallet-storage-lifecycle` | 存储生命周期管理 |
 
 ---

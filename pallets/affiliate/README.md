@@ -10,9 +10,25 @@
 - **灵活**：支持三种结算模式（即时/周结算/混合），适应不同业务场景
 - **高效**：15层推荐链压缩算法，自动分配奖励
 - **易用**：简化的API设计，降低集成难度
+- **🆕 治理驱动**：关键参数（分成比例、年费价格）通过全民投票修改
 
-**版本**: v1.0.0
-**整合日期**: 2025-10-28
+**版本**: v1.1.0
+**最后更新**: 2025-12-30
+
+## 架构变更（🆕 2025-12-30）
+
+### 推荐关系抽离
+
+推荐关系管理功能已抽离到独立的 `pallet-affiliate-referral` 模块：
+
+| 原模块 | 新模块 | 说明 |
+|--------|--------|------|
+| `pallet-affiliate::referral` | `pallet-affiliate-referral` | 推荐人绑定、推荐码管理、推荐链查询 |
+
+**迁移影响**：
+- 存储项 `Sponsors`、`AccountByCode`、`CodeByAccount` 已迁移到 `pallet-affiliate-referral`
+- 本模块通过 `Config: pallet_affiliate_referral::Config` 继承推荐关系功能
+- 对外接口保持兼容，`bind_sponsor` 和 `claim_code` 委托到 referral pallet
 
 ## 整合自
 
@@ -22,7 +38,7 @@
 - `pallet-affiliate-config`: 配置管理
 - `pallet-affiliate-instant`: 即时分成
 - `pallet-affiliate-weekly`: 周结算
-- `pallet-memo-referrals`: 推荐关系
+- ~~`pallet-memo-referrals`: 推荐关系~~ → 已抽离到 `pallet-affiliate-referral`
 
 ## 核心功能
 
@@ -163,9 +179,9 @@
 分成金额 = 可分配金额 × 层级比例 / 100
 ```
 
-**示例**（假设可分配金额1000 DUST，L1=30%）：
+**示例**（假设可分配金额1000 COS，L1=30%）：
 ```
-L1奖励 = 1000 × 30 / 100 = 300 DUST
+L1奖励 = 1000 × 30 / 100 = 300 COS
 ```
 
 #### 4.4 累计统计
@@ -236,16 +252,18 @@ L1奖励 = 1000 × 30 / 100 = 300 DUST
 **扣费规则**（通用分配场景）：
 - **销毁**：5%（发送到 BurnAccount）
 - **国库**：2%（发送到 TreasuryAccount）
-- **存储**：3%（发送到 StorageAccount）
+- **存储**：3%（发送到用户的 UserFunding 账户，🆕 2025-12-30 更新）
 - **可分配**：90%（进入联盟奖励池）
 
-**示例**（假设总金额1000 DUST）：
+**示例**（假设总金额1000 COS）：
 ```
-销毁：1000 × 5% = 50 DUST
-国库：1000 × 2% = 20 DUST
-存储：1000 × 3% = 30 DUST
-可分配：1000 - 50 - 20 - 30 = 900 DUST
+销毁：1000 × 5% = 50 COS
+国库：1000 × 2% = 20 COS
+存储：1000 × 3% = 30 COS（充值到用户存储资金账户）
+可分配：1000 - 50 - 20 - 30 = 900 COS
 ```
+
+> **🆕 2025-12-30 变更**：存储费用不再发送到全局 StorageAccount，而是通过 `UserFundingProvider` trait 充值到用户的 UserFunding 派生账户。
 
 #### 6.2 会员专用分配
 
@@ -273,6 +291,175 @@ do_distribute_membership_rewards(buyer, amount)
 - **链条中断**：单个账户失败不影响其他账户
 - **转账失败**：记录失败原因（通过日志），继续分配
 - **原子操作**：分配过程使用事务，失败自动回滚
+
+## 15层压缩算法详解
+
+### 算法目标
+
+从推荐链中找到最多15层合格的推荐人，根据配置的分成比例分配奖励。
+
+## 🆕 治理系统（governance.rs）
+
+本模块实现全民投票机制修改关键参数，包括：
+- **即时分成比例**（InstantLevelPercents）：15层联盟分成比例
+- **年费等级价格**（MembershipPrices）：4个等级的USDT价格
+
+### 核心特性
+
+- **提案创建**：持币大户、社区联署可发起提案
+- **投票机制**：加权投票（持币70% + 参与20% + 贡献10%）+ 信念投票
+- **自动执行**：通过后自动生效，无需人工干预
+- **紧急机制**：技术委员会可紧急暂停治理（但无法否决提案）
+- **🔥 技术委员会无否决权**：所有提案都必须通过全民投票
+
+### 7.1 分成比例治理
+
+#### 发起分成比例调整提案 - `propose_percentage_adjustment` (call_index 50)
+
+**参数**：
+- `new_percentages: Vec<u8>` - 新的15层分成比例
+- `title_cid: BoundedVec<u8, 64>` - 提案标题（IPFS CID）
+- `description_cid: BoundedVec<u8, 64>` - 提案详情（IPFS CID）
+- `rationale_cid: BoundedVec<u8, 64>` - 提案理由（IPFS CID）
+
+**验证规则**：
+- 前2层（第1、2层）不能为0，确保基础激励
+- 第3层可以为0，允许社区通过投票调整（🔥 2025-11-13 更新）
+- 第4-15层可以为0，提供灵活性
+- 总和必须在50-99%范围内
+- 前5层必须递减（包括0值）
+- L1比例不超过50%（防止寡头垄断）
+
+**押金机制**：
+- 微调提案：1,000 COS
+- 重大提案（>10%变化）：10,000 COS
+
+#### 对分成比例提案投票 - `vote_on_percentage_proposal` (call_index 51)
+
+**参数**：
+- `proposal_id: u64` - 提案ID
+- `vote_type: u8` - 投票选项（0=Aye, 1=Nay, 2=Abstain）
+- `conviction_type: u8` - 信念投票（0=None, 1-6=Locked1x-6x）
+
+**信念投票锁定**：
+
+| 信念等级 | 权重倍数 | 锁定周数 |
+|---------|---------|---------|
+| None | 1x | 0 |
+| Locked1x | 1.5x | 1 |
+| Locked2x | 2x | 2 |
+| Locked3x | 3x | 4 |
+| Locked4x | 4x | 8 |
+| Locked5x | 5x | 16 |
+| Locked6x | 6x | 32 |
+
+#### 取消提案 - `cancel_proposal` (call_index 52)
+
+仅提案发起人可在讨论期取消，投票开始后不可取消。
+
+### 7.2 年费价格治理（🆕）
+
+#### 发起年费价格调整提案 - `propose_membership_price_adjustment` (call_index 70)
+
+**参数**：
+- `new_prices_usdt: [u64; 4]` - 新的年费价格（USDT，精度 10^6）
+  - 按顺序：[Year1, Year3, Year5, Year10]
+- `title_cid: BoundedVec<u8, 64>` - 提案标题（IPFS CID）
+- `description_cid: BoundedVec<u8, 64>` - 提案详情（IPFS CID）
+- `rationale_cid: BoundedVec<u8, 64>` - 提案理由（IPFS CID）
+
+**验证规则**：
+- 价格范围：10-1000 USDT
+- 价格必须递增：Year1 ≤ Year3 ≤ Year5 ≤ Year10
+- 相邻价格差距不超过10倍
+
+**默认价格**：
+```rust
+[50_000_000, 100_000_000, 200_000_000, 300_000_000]
+// 即 [50, 100, 200, 300] USDT
+```
+
+#### 对年费价格提案投票 - `vote_on_membership_price_proposal` (call_index 71)
+
+**参数**：
+- `proposal_id: u64` - 提案ID
+- `vote_type: u8` - 投票选项（0=Aye, 1=Nay, 2=Abstain）
+- `conviction_type: u8` - 信念投票（0-6）
+
+#### 取消年费价格提案 - `cancel_membership_price_proposal` (call_index 72)
+
+仅提案发起人可在讨论期取消。
+
+### 7.3 紧急治理控制
+
+#### 紧急暂停治理 - `emergency_pause_governance` (call_index 60)
+
+**权限**：AdminOrigin（技术委员会超级多数 5/7）
+
+**参数**：
+- `reason_cid: BoundedVec<u8, 64>` - 暂停原因（IPFS CID）
+
+#### 恢复治理 - `resume_governance` (call_index 61)
+
+**权限**：AdminOrigin（Root 或委员会）
+
+### 7.4 投票权重计算
+
+**总投票权重 = 持币权重(70%) + 参与权重(20%) + 贡献权重(10%)**
+
+**持币权重**（平方根，避免巨鲸垄断）：
+```rust
+stake_weight = sqrt(balance).min(1000)  // 上限相当于100万COS
+```
+
+**参与权重**（历史投票次数）：
+| 投票次数 | 权重 |
+|---------|------|
+| 0-2 | 10（新手） |
+| 3-5 | 25（活跃） |
+| 6-10 | 50（资深） |
+| 11+ | 100（元老） |
+
+**贡献权重**（推荐贡献）：
+- 每个成功推荐 +2 分，最多50人 = 100分
+- 上限：300分
+
+### 7.5 通过条件
+
+**全民投票机制**：
+- 最低参与率：15%
+- 自适应支持率阈值：
+  - 50%参与 → 50%支持
+  - 30%参与 → 55%支持
+  - 15%参与 → 60%支持
+
+**年费价格微调提案**：在原基础上降低5%门槛
+
+## 🆕 存储膨胀防护
+
+### 配置参数
+
+| 参数 | 说明 | 默认值 |
+|-----|------|-------|
+| `MaxActiveProposals` | 最大活跃提案数 | 10 |
+| `MaxReadyProposals` | 最大待执行提案数 | 5 |
+| `HistoryRetentionWeeks` | 历史记录保留周数 | 52 |
+| `ProposalExpiry` | 提案过期区块数 | 604800（约30天） |
+
+### 自动清理机制
+
+**on_idle Hook**：
+- 清理过期提案（每次最多5个）
+- 清理旧周收入数据（每次最多3个周期）
+
+```rust
+fn on_idle(now: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
+    // 清理过期提案
+    Self::cleanup_expired_proposals(now, 5);
+    // 清理旧周收入数据
+    Self::cleanup_old_weekly_data(now, 3);
+}
+```
 
 ## 15层压缩算法详解
 
@@ -408,13 +595,15 @@ pub const MAX_CODE_LEN: u32 = 16;
 
 ### 存储项
 
-#### 推荐关系存储（3个）
+#### 推荐关系存储（🆕 已迁移到 pallet-affiliate-referral）
 
 | 存储项 | 键类型 | 值类型 | 说明 |
 |--------|--------|--------|------|
-| `Sponsors` | AccountId | AccountId | 账户的推荐人 |
-| `AccountByCode` | BoundedVec<u8> | AccountId | 推荐码→账户 |
-| `CodeByAccount` | AccountId | BoundedVec<u8> | 账户→推荐码 |
+| `Sponsors` | AccountId | AccountId | 账户的推荐人（已迁移） |
+| `AccountByCode` | BoundedVec<u8> | AccountId | 推荐码→账户（已迁移） |
+| `CodeByAccount` | AccountId | BoundedVec<u8> | 账户→推荐码（已迁移） |
+
+> **注意**：以上存储项已迁移到 `pallet-affiliate-referral`，本模块通过 trait 访问。
 
 #### 配置存储（4个）
 
@@ -438,7 +627,7 @@ pub const MAX_CODE_LEN: u32 = 16;
 |--------|--------|------|
 | `TotalInstantDistributed` | Balance | 累计即时分配金额 |
 
-#### 周结算存储（6个）
+#### 周结算存储（7个）
 
 | 存储项 | 键类型 | 值类型 | 说明 |
 |--------|--------|--------|------|
@@ -447,7 +636,47 @@ pub const MAX_CODE_LEN: u32 = 16;
 | `DirectActiveCount` | AccountId | u32 | 直推活跃数 |
 | `SettleCursor` | u32 | u32 | 结算游标（账户索引） |
 | `CurrentSettlingCycle` | - | Option<u32> | 当前结算周期 |
+| `CycleAccounts` | u32 | BoundedVec<AccountId, 1000> | 周期待结算账户列表 |
 | `TotalWeeklyDistributed` | - | Balance | 累计周结算金额 |
+
+#### 🆕 分成比例治理存储（14个）
+
+| 存储项 | 键类型 | 值类型 | 说明 |
+|--------|--------|--------|------|
+| `NextProposalId` | - | u64 | 下一个提案ID |
+| `ActiveProposals` | u64 | PercentageAdjustmentProposal | 活跃提案 |
+| `ActiveProposalIds` | - | BoundedVec<u64> | 活跃提案ID列表（有界） |
+| `ProposalDeposits` | u64 | (AccountId, Balance) | 提案押金 |
+| `ProposalVotes` | (u64, AccountId) | VoteRecord | 投票记录 |
+| `VoteTally` | u64 | VoteTally | 投票统计 |
+| `VoteHistory` | AccountId | BoundedVec<u64, 100> | 投票历史 |
+| `PercentageHistory` | u64 | PercentageChangeRecord | 比例变更历史 |
+| `GovernancePaused` | - | bool | 治理暂停标记 |
+| `PauseReason` | - | BoundedVec<u8, 64> | 暂停原因 |
+| `ProposalCooldown` | AccountId | BlockNumber | 账户冷却期 |
+| `ActiveProposalsByAccount` | AccountId | BoundedVec<u64, 3> | 账户活跃提案数 |
+| `LastProposalBlock` | AccountId | BlockNumber | 账户最后提案区块 |
+| `ReadyForExecution` | u64 | PercentageAdjustmentProposal | 待执行提案 |
+| `ReadyProposalIds` | - | BoundedVec<u64> | 待执行提案ID列表（有界） |
+
+#### 🆕 年费价格治理存储（8个）
+
+| 存储项 | 键类型 | 值类型 | 说明 |
+|--------|--------|--------|------|
+| `MembershipPrices` | - | [u64; 4] | 当前会员年费价格（USDT * 10^6） |
+| `ActiveMembershipPriceProposals` | u64 | MembershipPriceProposal | 活跃年费价格提案 |
+| `ActiveMembershipPriceProposalIds` | - | BoundedVec<u64> | 活跃年费价格提案ID列表 |
+| `MembershipPriceProposalDeposits` | u64 | (AccountId, Balance) | 年费价格提案押金 |
+| `MembershipPriceVoteTally` | u64 | VoteTally | 年费价格提案投票统计 |
+| `MembershipPriceProposalVotes` | (u64, AccountId) | VoteRecord | 年费价格提案投票记录 |
+| `ReadyForMembershipPriceExecution` | u64 | MembershipPriceProposal | 待执行年费价格提案 |
+| `MembershipPriceHistory` | - | BoundedVec<MembershipPriceChangeRecord, 100> | 年费价格变更历史 |
+
+#### 🆕 信念投票锁定存储（1个）
+
+| 存储项 | 键类型 | 值类型 | 说明 |
+|--------|--------|--------|------|
+| `VoteLocks` | (AccountId, u64) | (Balance, BlockNumber) | 投票锁定记录（锁定金额, 解锁区块） |
 
 ## 主要调用方法
 
@@ -708,6 +937,30 @@ await api.tx.affiliate
 |------|------|------|
 | `CycleSettled` | cycle, settled_count, total_amount | 周期已结算 |
 
+### 🆕 分成比例治理事件
+
+| 事件 | 字段 | 描述 |
+|------|------|------|
+| `PercentageAdjustmentProposed` | proposal_id, proposer, change_magnitude, is_major | 分成比例调整提案已创建 |
+| `VoteCast` | proposal_id, voter, vote_type, weight | 投票已提交 |
+| `ProposalPassed` | proposal_id, approval_rate, participation_rate, effective_block | 提案已通过 |
+| `ProposalRejected` | proposal_id, approval_rate, participation_rate | 提案已拒绝 |
+| `ProposalCancelled` | proposal_id, proposer | 提案已取消 |
+| `PercentageAdjustmentExecuted` | proposal_id, new_percentages, effective_block | 比例调整已执行 |
+| `GovernanceEmergencyPaused` | reason_cid | 治理紧急暂停 |
+| `GovernanceResumed` | by | 治理已恢复 |
+
+### 🆕 年费价格治理事件
+
+| 事件 | 字段 | 描述 |
+|------|------|------|
+| `MembershipPriceProposed` | proposal_id, proposer, new_prices_usdt, is_major, deposit | 年费价格调整提案已创建 |
+| `MembershipPriceVoteCast` | proposal_id, voter, vote, conviction, voting_power | 年费价格提案投票已提交 |
+| `MembershipPriceProposalPassed` | proposal_id, approval_rate, participation_rate, effective_block | 年费价格提案已通过 |
+| `MembershipPriceProposalRejected` | proposal_id, approval_rate, participation_rate | 年费价格提案已拒绝 |
+| `MembershipPriceProposalCancelled` | proposal_id, proposer | 年费价格提案已取消 |
+| `MembershipPriceAdjustmentExecuted` | proposal_id, new_prices_usdt, effective_block | 年费价格调整已执行 |
+
 ## 错误定义
 
 ### 推荐关系错误
@@ -738,6 +991,42 @@ await api.tx.affiliate
 |------|------|
 | `WithdrawFailed` | 提款失败 |
 
+### 🆕 分成比例治理错误
+
+| 错误 | 描述 |
+|------|------|
+| `InvalidPercentageLength` | 比例数组长度必须为15 |
+| `PercentageTooHigh` | 单层比例超过100% |
+| `CriticalLayerZero` | 前2层比例不能为0（第3层可以为0） |
+| `TotalPercentageTooLow` | 总比例低于50% |
+| `TotalPercentageTooHigh` | 总比例超过99% |
+| `NonDecreasingPercentage` | 前5层比例应递减 |
+| `FirstLayerTooHigh` | L1比例超过50% |
+| `InsufficientBalance` | 提案押金不足 |
+| `ProposalNotFound` | 提案不存在 |
+| `VotingNotActive` | 投票期未开始或已结束 |
+| `AlreadyVoted` | 已经投过票 |
+| `NotProposer` | 不是提案发起人 |
+| `CannotCancelAfterVoting` | 投票开始后不能取消 |
+| `TooManyActiveProposals` | 活跃提案过多 |
+| `ProposalTooFrequent` | 提案间隔过短 |
+| `InCooldownPeriod` | 冷却期内不能提案 |
+| `GovernancePausedError` | 治理功能已暂停 |
+| `InsufficientAuthority` | 权限不足 |
+| `InvalidVoteType` | 无效的投票类型（必须为 0=Aye, 1=Nay, 2=Abstain） |
+| `InvalidConvictionType` | 无效的信念投票类型（必须为 0-6） |
+
+### 🆕 年费价格治理错误
+
+| 错误 | 描述 |
+|------|------|
+| `PriceOutOfRange` | 年费价格超出范围 (10-1000 USDT) |
+| `PriceMustBeAscending` | 年费价格必须递增 |
+| `PriceGapTooLarge` | 相邻等级价格差距过大 |
+| `MembershipPriceProposalNotFound` | 年费价格提案不存在 |
+| `MembershipPriceVotingNotActive` | 年费价格投票期未开始或已结束 |
+| `MembershipPriceAlreadyVoted` | 已经对此年费价格提案投过票 |
+
 ## 配置参数
 
 ### Runtime配置示例
@@ -754,17 +1043,28 @@ impl pallet_affiliate::Config for Runtime {
     type WithdrawOrigin = EnsureRoot<AccountId>;
     type AdminOrigin = EnsureRoot<AccountId>;
 
-    // 会员信息提供者
-    type MembershipProvider = Membership;
-
-    // 推荐码配置
-    type MaxCodeLen = ConstU32<32>;
-    type MaxSearchHops = ConstU32<15>;
+    // 🆕 2025-12-30：推荐关系通过继承 pallet_affiliate_referral::Config 获取
+    // type MembershipProvider = Membership;  // 已移动到 referral pallet
 
     // 系统账户
     type BurnAccount = BurnAccount;
     type TreasuryAccount = TreasuryAccount;
-    type StorageAccount = StorageAccount;
+
+    // 🆕 2025-12-30：用户存储资金账户提供者（替代 StorageAccount）
+    type UserFundingProvider = CosmosIpfs;
+
+    // 🆕 存储膨胀防护配置
+    type MaxActiveProposals = ConstU32<10>;
+    type MaxReadyProposals = ConstU32<5>;
+    type HistoryRetentionWeeks = ConstU32<52>;
+    type ProposalExpiry = ConstU32<604800>;  // 约30天
+
+    // 🆕 提案押金配置
+    type ProposalDeposit = ConstU128<1_000_000_000_000_000_000_000>;  // 1000 COS 兜底
+    type ProposalDepositUsd = ConstU64<50_000_000>;  // 50 USDT
+    type DepositCalculator = TradingCommon;
+
+    type WeightInfo = pallet_affiliate::weights::SubstrateWeight<Runtime>;
 }
 ```
 
@@ -776,12 +1076,14 @@ parameter_types! {
 }
 ```
 
-### 常量配置
+### 🆕 存储膨胀防护常量配置
 
 ```rust
 parameter_types! {
-    pub const MaxCodeLen: u32 = 32;       // 推荐码最大长度
-    pub const MaxSearchHops: u32 = 15;    // 推荐链最大搜索深度
+    pub const MaxActiveProposals: u32 = 10;      // 最大活跃提案数
+    pub const MaxReadyProposals: u32 = 5;        // 最大待执行提案数
+    pub const HistoryRetentionWeeks: u32 = 52;   // 历史保留52周
+    pub const ProposalExpiry: u32 = 604800;      // 提案30天过期
 }
 ```
 
@@ -811,8 +1113,8 @@ api.tx.affiliate
 ### 场景2：会员购买（自动分配奖励）
 
 ```rust
-// 会员购买会员资格（100 DUST）
-let amount = 100_000_000_000_000u128; // 100 DUST
+// 会员购买会员资格（100 COS）
+let amount = 100_000_000_000_000u128; // 100 COS
 
 // 系统自动调用分配接口（在会员购买逻辑中）
 pallet_affiliate::Pallet::<Runtime>::do_distribute_membership_rewards(
@@ -829,8 +1131,8 @@ pallet_affiliate::Pallet::<Runtime>::do_distribute_membership_rewards(
 ### 场景3：供奉业务（90%进入联盟奖励池）
 
 ```rust
-// 用户供奉（1000 DUST）
-let gross_amount = 1000_000_000_000_000u128; // 1000 DUST
+// 用户供奉（1000 COS）
+let gross_amount = 1000_000_000_000_000u128; // 1000 COS
 
 // 系统调用分配接口（在供奉逻辑中）
 pallet_affiliate::Pallet::<Runtime>::do_distribute_rewards(
@@ -840,12 +1142,12 @@ pallet_affiliate::Pallet::<Runtime>::do_distribute_rewards(
 )?;
 
 // 扣费：
-// - 销毁：5% = 50 DUST
-// - 国库：2% = 20 DUST
-// - 存储：3% = 30 DUST
-// - 可分配：90% = 900 DUST
+// - 销毁：5% = 50 COS
+// - 国库：2% = 20 COS
+// - 存储：3% = 30 COS
+// - 可分配：90% = 900 COS
 
-// 分配900 DUST给推荐链（按配置比例）
+// 分配900 COS给推荐链（按配置比例）
 ```
 
 ### 场景4：周结算
@@ -1175,9 +1477,9 @@ const AffiliateRewards = () => {
 
   return (
     <div className="rewards-stats">
-      <div>即时奖励：{stats.instantRewards} DUST</div>
-      <div>周结算奖励：{stats.weeklyRewards} DUST</div>
-      <div>累计奖励：{stats.totalRewards} DUST</div>
+      <div>即时奖励：{stats.instantRewards} COS</div>
+      <div>周结算奖励：{stats.weeklyRewards} COS</div>
+      <div>累计奖励：{stats.totalRewards} COS</div>
     </div>
   );
 };
@@ -1250,9 +1552,9 @@ fn get_eligible_levels(referrer: &T::AccountId) -> u8 {
 fn get_eligible_levels_by_balance(referrer: &T::AccountId) -> u8 {
     let balance = T::Currency::free_balance(referrer);
 
-    if balance >= 10000.into() { 15 }      // 10000 DUST → 15层
-    else if balance >= 5000.into() { 10 }  // 5000 DUST → 10层
-    else if balance >= 1000.into() { 5 }   // 1000 DUST → 5层
+    if balance >= 10000.into() { 15 }      // 10000 COS → 15层
+    else if balance >= 5000.into() { 10 }  // 5000 COS → 10层
+    else if balance >= 1000.into() { 5 }   // 1000 COS → 5层
     else { 3 }                             // 其他 → 3层
 }
 ```
@@ -1286,7 +1588,7 @@ fn apply_boost(amount: Balance, config: &BoostConfig) -> Balance {
 
 **实现思路**：
 - 推荐100人：铸造"推广大使"NFT
-- 团队累计消费10万DUST：铸造"金牌团队"NFT
+- 团队累计消费10万COS：铸造"金牌团队"NFT
 - 连续52周活跃：铸造"年度之星"NFT
 
 ### 5. 联盟排行榜
@@ -1427,7 +1729,7 @@ A: 检查账户是否已绑定推荐人，检查推荐人账户是否存在，�
 
 **启用详细日志**：
 ```bash
-RUST_LOG=pallet_affiliate=debug ./target/release/solochain-template-node --dev
+RUST_LOG=pallet_affiliate=debug ./target/release/cosmos-node --dev
 ```
 
 **查询存储状态**：
@@ -1487,6 +1789,19 @@ api.query.system.events((events) => {
 
 ---
 
-**维护者**: Stardust Team
-**最后更新**: 2025-11-11
-**版本**: v1.0.0
+**维护者**: Cosmos Team
+**最后更新**: 2025-12-30
+**版本**: v1.1.0
+
+### 更新日志
+
+#### v1.1.0 (2025-12-30)
+- 🆕 推荐关系抽离到独立 `pallet-affiliate-referral` 模块
+- 🆕 年费价格治理系统（MembershipPriceProposal）
+- 🆕 存储膨胀防护机制（cleanup_expired_proposals, cleanup_old_weekly_data）
+- 🆕 信念投票锁定（VoteLocks）
+- 🆕 用户存储资金账户（UserFundingProvider 替代 StorageAccount）
+- 🔧 第3层分成比例可以为0（全民投票决定）
+
+#### v1.0.0 (2025-10-28)
+- 初始版本，整合5个联盟计酬相关pallet

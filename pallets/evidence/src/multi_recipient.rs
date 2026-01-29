@@ -8,7 +8,7 @@
 // - 记录访问日志
 // - 提供查询接口
 //
-// @author Stardust Team
+// @author Cosmos Team
 // @date 2025-10-23
 
 use codec::{Decode, Encode, MaxEncodedLen};

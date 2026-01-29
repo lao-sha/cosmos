@@ -2,14 +2,14 @@
 
 ## 📋 模块概述
 
-`pallet-evidence` 是 Stardust 区块链的**统一证据管理系统**，提供链上证据提交、IPFS 内容固定、私密内容加密、访问控制、密钥轮换、CID 去重、限频控制等完整的证据管理功能。支持 Plain（明文）和 Commit（承诺哈希）两种模式，满足不同业务场景的隐私保护需求。
+`pallet-evidence` 是 Cosmos 区块链的**统一证据管理系统**，提供链上证据提交、IPFS 内容固定、私密内容加密、访问控制、密钥轮换、CID 去重、限频控制等完整的证据管理功能。支持 Plain（明文）和 Commit（承诺哈希）两种模式，满足不同业务场景的隐私保护需求。
 
 ### 设计理念
 
 - **CID 化设计（Phase 1.5）**：链上仅存储单一 `content_cid` 引用，实际内容存 IPFS，降低 74.5% 存储成本
 - **双模式支持**：Plain 模式适用于公开证据，Commit 模式适用于隐私保护场景（KYC、OTC 等）
 - **低耦合架构**：通过 trait 适配器（`EvidenceAuthorizer`）实现模块间解耦
-- **自动化集成**：与 `pallet-stardust-ipfs` 集成，自动 pin 证据 CID 到 IPFS
+- **自动化集成**：与 `pallet-cosmos-ipfs` 集成，自动 pin 证据 CID 到 IPFS
 
 ### 核心特性
 
@@ -375,7 +375,137 @@ pub fn rotate_content_keys(
 
 ---
 
-### 5. 限频控制
+### 5. 🆕 证据追加链功能
+
+#### `append_evidence`（追加补充证据）- call_index(11)
+
+**调用方**：授权账户
+
+**功能**：为已存在的证据追加补充证据，建立父子关系链。
+
+**使用场景**：
+- 订单纠纷中需要补充新的截图证据
+- 仲裁过程中追加新的证明材料
+- 原证据不完整需要补充说明
+
+**处理流程**：
+
+1. 验证父证据存在
+2. 验证父证据未被归档
+3. 验证权限（同命名空间）
+4. 验证补充数量限制（每个父证据最多100个子证据）
+5. 限频检查
+6. 校验 CID 格式
+7. 生成新证据ID
+8. 构建补充证据（继承父证据的 domain 和 target_id）
+9. 存储证据
+10. 建立父子关系（EvidenceParent、EvidenceChildren）
+11. 自动 Pin 证据 CID 到 IPFS
+12. 触发 `EvidenceAppended` 事件
+
+**函数签名**：
+
+```rust
+#[pallet::call_index(11)]
+#[pallet::weight(T::WeightInfo::commit(imgs.len() as u32, vids.len() as u32, docs.len() as u32))]
+pub fn append_evidence(
+    origin: OriginFor<T>,
+    parent_id: u64,                                // 父证据 ID
+    imgs: Vec<BoundedVec<u8, T::MaxCidLen>>,       // 补充图片 CID 列表
+    vids: Vec<BoundedVec<u8, T::MaxCidLen>>,       // 补充视频 CID 列表
+    docs: Vec<BoundedVec<u8, T::MaxCidLen>>,       // 补充文档 CID 列表
+    memo: Option<BoundedVec<u8, T::MaxMemoLen>>,   // 补充说明（可选）
+) -> DispatchResult
+```
+
+**证据链结构**：
+
+```
+父证据 (id=100)
+├── 子证据 (id=101, parent=100)
+├── 子证据 (id=102, parent=100)
+└── 子证据 (id=103, parent=100)
+    └── 孙证据 (id=104, parent=103)  // 支持多级嵌套
+```
+
+---
+
+### 6. 🆕 待处理清单系统（2天修改窗口）
+
+#### `update_evidence_manifest`（修改待处理证据清单）- call_index(12)
+
+**调用方**：证据所有者
+
+**功能**：在 `EvidenceEditWindow` 内修改已提交的证据清单内容。
+
+**使用场景**：
+- 提交证据后发现遗漏，需要补充
+- 上传了错误的文件，需要更正
+- 需要添加额外的说明信息
+
+**修改窗口**：
+- 默认 2 天（28800 区块，按 6 秒/块计算）
+- 窗口内可任意修改清单内容
+- 窗口过期后清单自动确认，不可再修改
+
+**处理流程**：
+
+1. 获取待处理清单
+2. 验证修改窗口（当前区块 ≤ 创建时间 + EvidenceEditWindow）
+3. 验证权限（仅所有者可修改）
+4. 校验 CID 格式
+5. 转换媒体列表
+6. 更新清单（保持原创建时间，不重置窗口）
+7. 触发 `EvidenceManifestUpdated` 事件
+
+**函数签名**：
+
+```rust
+#[pallet::call_index(12)]
+#[pallet::weight(T::WeightInfo::commit(imgs.len() as u32, vids.len() as u32, docs.len() as u32))]
+pub fn update_evidence_manifest(
+    origin: OriginFor<T>,
+    evidence_id: u64,                              // 证据 ID
+    imgs: Vec<BoundedVec<u8, T::MaxCidLen>>,       // 新的图片 CID 列表
+    vids: Vec<BoundedVec<u8, T::MaxCidLen>>,       // 新的视频 CID 列表
+    docs: Vec<BoundedVec<u8, T::MaxCidLen>>,       // 新的文档 CID 列表
+    memo: Option<BoundedVec<u8, T::MaxMemoLen>>,   // 新的说明（可选）
+) -> DispatchResult
+```
+
+**PendingManifest 结构**：
+
+```rust
+pub struct PendingManifest<T: Config> {
+    /// 证据ID
+    pub evidence_id: u64,
+    /// 图片CID列表
+    pub imgs: BoundedVec<BoundedVec<u8, T::MaxCidLen>, T::MaxImg>,
+    /// 视频CID列表
+    pub vids: BoundedVec<BoundedVec<u8, T::MaxCidLen>, T::MaxImg>,
+    /// 文档CID列表
+    pub docs: BoundedVec<BoundedVec<u8, T::MaxCidLen>, T::MaxImg>,
+    /// 备注
+    pub memo: Option<BoundedVec<u8, T::MaxMemoLen>>,
+    /// 所有者
+    pub owner: T::AccountId,
+    /// 创建时间
+    pub created_at: BlockNumberFor<T>,
+    /// 状态
+    pub status: ManifestStatus,
+}
+
+pub enum ManifestStatus {
+    /// 待处理（可修改）
+    Pending,
+    /// 已确认（不可修改）
+    Confirmed,
+}
+```
+
+---
+
+### 7. 限频控制
 
 #### 账户级限频
 
@@ -707,6 +837,20 @@ pub struct ArchiveStatistics {
 | `CommitIndex` | `StorageMap<H256, u64>` | 承诺哈希到 EvidenceId 的唯一索引 |
 | `CidHashIndex` | `StorageMap<H256, u64>` | Plain 模式全局 CID 去重索引（blake2_256(cid) → evidence_id） |
 
+### 🆕 证据追加链存储
+
+| 存储项 | 类型 | 说明 |
+|-------|------|-----|
+| `EvidenceParent` | `StorageMap<u64, u64>` | 证据父项（子证据ID → 父证据ID） |
+| `EvidenceChildren` | `StorageMap<u64, BoundedVec<u64, 100>>` | 证据子项列表（父证据ID → 子证据ID列表） |
+
+### 🆕 待处理清单存储
+
+| 存储项 | 类型 | 说明 |
+|-------|------|-----|
+| `PendingManifests` | `StorageMap<u64, PendingManifest>` | 待处理清单（证据ID → 清单内容） |
+| `PendingManifestQueue` | `StorageValue<BoundedVec<u64>>` | 待处理清单队列（用于批量确认） |
+
 ### 配额与限频
 
 | 存储项 | 类型 | 说明 |
@@ -857,6 +1001,34 @@ EvidenceArchived {
 }
 ```
 
+### 🆕 证据追加链事件
+
+```rust
+/// 证据已追加
+EvidenceAppended {
+    id: u64,
+    parent_id: u64,
+    domain: u8,
+    target_id: u64,
+    owner: T::AccountId,
+}
+```
+
+### 🆕 待处理清单事件
+
+```rust
+/// 证据清单已更新
+EvidenceManifestUpdated {
+    evidence_id: u64,
+    owner: T::AccountId,
+}
+
+/// 证据清单已确认
+EvidenceManifestConfirmed {
+    evidence_id: u64,
+}
+```
+
 ---
 
 ## ❌ 错误定义
@@ -919,6 +1091,23 @@ pub enum Error<T> {
 
     /// 全局 CID 去重命中（Plain 模式）
     DuplicateCidGlobal,
+
+    // 🆕 证据追加链错误
+    /// 父证据不存在
+    ParentEvidenceNotFound,
+
+    /// 不能追加到已归档的证据
+    CannotAppendToArchived,
+
+    /// 补充证据数量超过限制（每个父证据最多100个）
+    TooManySupplements,
+
+    // 🆕 待处理清单错误
+    /// 待处理清单不存在
+    PendingManifestNotFound,
+
+    /// 修改窗口已过期
+    EditWindowExpired,
 }
 ```
 
@@ -979,7 +1168,7 @@ pub trait Config: frame_system::Config + TypeInfo + core::fmt::Debug {
     
     // IPFS自动Pin相关配置
     /// IPFS自动pin提供者
-    type IpfsPinner: pallet_stardust_ipfs::IpfsPinner<Self::AccountId, Self::Balance>;
+    type IpfsPinner: pallet_cosmos_ipfs::IpfsPinner<Self::AccountId, Self::Balance>;
     /// 余额类型（用于IPFS存储费用支付）
     type Balance: Parameter + Member + AtLeast32BitUnsigned + Default + Copy + MaxEncodedLen;
     /// 默认IPFS存储单价（每副本每月）
@@ -1038,9 +1227,9 @@ impl pallet_evidence::Config for Runtime {
     type MaxKeyLen = ConstU32<4096>;
 
     // IPFS 自动 Pin
-    type IpfsPinner = StardustIpfs;
+    type IpfsPinner = CosmosIpfs;
     type Balance = Balance;
-    type DefaultStoragePrice = ConstU128<1_000_000_000_000>;  // 1 DUST/副本/月
+    type DefaultStoragePrice = ConstU128<1_000_000_000_000>;  // 1 COS/副本/月
 }
 ```
 
@@ -1063,7 +1252,8 @@ impl pallet_evidence::Config for Runtime {
 | `MaxListLen` | 512 | 查询列表最大长度 |
 | `MaxAuthorizedUsers` | 64 | 私密内容最多授权用户数 |
 | `MaxKeyLen` | 4096 | 加密密钥最大长度（支持 RSA-2048） |
-| `DefaultStoragePrice` | 1 DUST | 默认 IPFS 存储单价（每副本每月） |
+| `DefaultStoragePrice` | 1 COS | 默认 IPFS 存储单价（每副本每月） |
+| `EvidenceEditWindow` | 28800 | 🆕 证据修改窗口（块数，约2天） |
 
 ---
 
@@ -1557,7 +1747,7 @@ await storePrivateTx.signAndSend(creatorAccount);
 
 ## 🔗 集成说明
 
-### 与 pallet-stardust-ipfs 集成
+### 与 pallet-cosmos-ipfs 集成
 
 **自动 Pin 机制**：
 
@@ -1566,7 +1756,7 @@ await storePrivateTx.signAndSend(creatorAccount);
 let cid_vec: Vec<u8> = ev.content_cid.clone().into_inner();
 if let Err(e) = T::IpfsPinner::pin_cid_for_subject(
     who.clone(),
-    pallet_stardust_ipfs::SubjectType::Evidence,
+    pallet_cosmos_ipfs::SubjectType::Evidence,
     id,  // 使用 evidence_id
     cid_vec,
     None,  // 使用默认层级
@@ -1831,8 +2021,8 @@ describe('Evidence Pallet', () => {
 
 - [Polkadot SDK 文档](https://docs.substrate.io/)
 - [IPFS 文档](https://docs.ipfs.tech/)
-- [pallet-stardust-ipfs README](../stardust-ipfs/README.md)
-- [Stardust 项目总览](../../README.md)
+- [pallet-cosmos-ipfs README](../cosmos-ipfs/README.md)
+- [Cosmos 项目总览](../../README.md)
 
 ---
 
@@ -1861,6 +2051,23 @@ Unlicense
 
 ---
 
-**最后更新**：2025-01-15
-**版本**：v0.2.0
-**维护者**：Stardust Team
+**最后更新**：2025-01-28
+**版本**：v0.3.0
+**维护者**：Cosmos Team
+
+### 更新日志
+
+#### v0.3.0 (2025-01-28)
+- 🆕 证据追加链功能（append_evidence, EvidenceParent, EvidenceChildren）
+- 🆕 待处理清单系统（PendingManifests, update_evidence_manifest）
+- 🆕 2天修改窗口（EvidenceEditWindow）
+- 🆕 新事件：EvidenceAppended, EvidenceManifestUpdated, EvidenceManifestConfirmed
+- 🆕 新错误：ParentEvidenceNotFound, CannotAppendToArchived, TooManySupplements, PendingManifestNotFound, EditWindowExpired
+
+#### v0.2.0 (2025-01-15)
+- Phase 1.5 CID 化设计
+- 存储膨胀防护：证据归档机制
+- 私密内容管理功能
+
+#### v0.1.0 (2024-12-01)
+- 初始版本

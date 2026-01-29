@@ -10,7 +10,7 @@
 
 ### 1.1 功能定位
 `pallet-pricing` 负责：
-1. **DUST/USDT 市场价格聚合** - 聚合 OTC 和 Swap 两个市场的交易数据
+1. **COS/USDT 市场价格聚合** - 聚合 OTC 和 Swap 两个市场的交易数据
 2. **CNY/USDT 汇率获取** - 通过 Offchain Worker 从外部 API 获取
 3. **价格偏离检查** - 防止极端价格订单
 4. **冷启动保护** - 在交易量不足时使用默认价格
@@ -36,7 +36,7 @@
 │         ▼                                               │
 │  ┌──────────────────────────────────────┐               │
 │  │      PriceAggregateData              │               │
-│  │  - total_dust (累计 1M DUST 上限)    │               │
+│  │  - total_cos (累计 1M COS 上限)     │               │
 │  │  - total_usdt                        │               │
 │  │  - order_count                       │               │
 │  └──────────────────────────────────────┘               │
@@ -46,7 +46,7 @@
 │  │         价格计算                      │               │
 │  │  - get_otc_average_price()           │               │
 │  │  - get_bridge_average_price()        │               │
-│  │  - get_dust_market_price_weighted()  │               │
+│  │  - get_cos_market_price_weighted()   │               │
 │  └──────────────────────────────────────┘               │
 ├─────────────────────────────────────────────────────────┤
 │  Offchain Worker (CNY/USDT)                             │
@@ -65,7 +65,7 @@
 |------|--------|------|----------|
 | USDT 精度丢失 | P0 | ✅ 已修复 | 改为先乘后除 |
 | 输入验证缺失 | P1 | ✅ 已修复 | 添加 price > 0, qty > 0 检查 |
-| 冷启动阈值调整 | P1 | ✅ 已修复 | 调整为 10 亿 DUST |
+| 冷启动阈值调整 | P1 | ✅ 已修复 | 调整为 10 亿 COS |
 
 ---
 
@@ -225,7 +225,7 @@ if let Some(p) = default_price {
 SwapOrderAdded {  // 原 BridgeSwapAdded
     timestamp: u64,
     price_usdt: u64,
-    dust_qty: u128,
+    cos_qty: u128,
     new_avg_price: u64,
 },
 ```
@@ -239,7 +239,7 @@ SwapOrderAdded {  // 原 BridgeSwapAdded
 **问题位置**:
 ```rust
 // lib.rs:286
-let limit: u128 = 1_000_000u128 * 1_000_000_000_000u128; // 1,000,000 DUST
+let limit: u128 = 1_000_000u128 * 1_000_000_000_000u128; // 1,000,000 COS
 
 // lib.rs:302
 agg.oldest_index = (agg.oldest_index + 1) % 10000;
@@ -324,12 +324,12 @@ pub trait PricingRpc<BlockHash> {
 2. **时间窗口攻击**: 在交易量低时提交极端价格订单
 
 **缓解措施（已有）**:
-- 1M DUST 滑动窗口限制
+- 1M COS 滑动窗口限制
 - 价格偏离检查 (±20%)
 - 冷启动保护
 
 **建议增强**:
-- 添加单笔订单最大 DUST 限制
+- 添加单笔订单最大 COS 限制
 - 实现时间加权平均价格 (TWAP)
 - 添加价格变化速率限制
 

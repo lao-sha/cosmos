@@ -1,12 +1,12 @@
 [package]
 name = "pallet-trading-swap"
 version = "0.1.0"
-description = "DUST → USDT 做市商兑换模块 - Swap Pallet (原 pallet-trading-bridge)"
-authors = ["StarDust Team"]
+description = "COS → USDT 做市商兑换模块 - Swap Pallet (原 pallet-trading-bridge)"
+authors = ["Cosmos Team"]
 edition = "2021"
 license = "Unlicense"
 publish = false
-repository = "https://github.com/memoio/stardust"
+repository = "https://github.com/memoio/cosmos"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]

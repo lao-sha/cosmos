@@ -145,7 +145,7 @@ pub struct MemberProfile<BlockNumber, MaxDisplayName: Get<u32>, MaxEncrypted: Ge
     pub updated_at: BlockNumber,
 }
 
-/// DUST reward balance and statistics.
+/// COS reward balance and statistics.
 #[derive(Clone, Encode, Decode, DecodeWithMemTracking, Eq, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen, Default)]
 pub struct RewardBalance<BlockNumber, Balance: Default> {
     /// Total rewards earned (lifetime).

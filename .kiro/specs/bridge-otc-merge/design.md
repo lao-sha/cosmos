@@ -2,7 +2,7 @@
 
 ## Overview
 
-本设计文档描述将 `pallet-bridge` 和 `pallet-otc-order` 合并为统一的 `pallet-exchange` 模块的技术方案。合并后的模块将处理所有 DUST ↔ USDT 交易，包括官方桥接、做市商桥接、OTC 订单和首购订单。
+本设计文档描述将 `pallet-bridge` 和 `pallet-otc-order` 合并为统一的 `pallet-exchange` 模块的技术方案。合并后的模块将处理所有 COS ↔ USDT 交易，包括官方桥接、做市商桥接、OTC 订单和首购订单。
 
 ### 设计目标
 
@@ -59,7 +59,7 @@
 │  create_order()       - 创建OTC订单      │
 │  create_first_purchase() - 首购订单     │
 │  mark_paid()          - 标记已付款       │
-│  release_dust()       - 释放DUST        │
+│  release_dust()       - 释放COS        │
 │  cancel_exchange()    - 取消交易         │
 │  dispute_exchange()   - 发起争议         │
 │  report_exchange()    - 举报交易         │
@@ -178,11 +178,11 @@ pub trait Config: frame_system::Config<RuntimeEvent: From<Event<Self>>> {
     #[pallet::constant]
     type FirstPurchaseUsdAmount: Get<u64>;
     
-    /// 首购最小DUST数量
+    /// 首购最小COS数量
     #[pallet::constant]
     type MinFirstPurchaseDustAmount: Get<BalanceOf<Self>>;
     
-    /// 首购最大DUST数量
+    /// 首购最大COS数量
     #[pallet::constant]
     type MaxFirstPurchaseDustAmount: Get<BalanceOf<Self>>;
     
@@ -236,13 +236,13 @@ pub trait IdentityVerificationProvider<AccountId> {
 /// 交易类型枚举
 #[derive(Encode, Decode, Clone, Eq, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub enum ExchangeType {
-    /// 官方桥接 (DUST → USDT, 治理管理)
+    /// 官方桥接 (COS → USDT, 治理管理)
     OfficialBridge,
-    /// 做市商桥接 (DUST → USDT, 做市商服务)
+    /// 做市商桥接 (COS → USDT, 做市商服务)
     MakerBridge,
-    /// OTC订单 (USDT → DUST, 普通购买)
+    /// OTC订单 (USDT → COS, 普通购买)
     OtcOrder,
-    /// 首购订单 (USDT → DUST, 固定10USD)
+    /// 首购订单 (USDT → COS, 固定10USD)
     FirstPurchase,
 }
 ```
@@ -268,7 +268,7 @@ pub enum ExchangeStatus {
     // === OTC/首购特有状态 ===
     /// 买家已标记付款
     PaidOrCommitted,
-    /// DUST已释放
+    /// COS已释放
     Released,
     
     // === 争议相关状态 ===
@@ -308,11 +308,11 @@ pub struct ExchangeRecord<T: Config> {
     pub maker: Option<T::AccountId>,
     
     // === 金额信息 ===
-    /// DUST数量
+    /// COS数量
     pub dust_amount: BalanceOf<T>,
     /// USDT金额 (精度10^6)
     pub usdt_amount: u64,
-    /// 成交价格 (DUST/USD, 精度10^6)
+    /// 成交价格 (COS/USD, 精度10^6)
     pub price_usdt: u64,
     
     // === 地址信息 ===
@@ -508,9 +508,9 @@ pub type KycExemptAccounts<T: Config> = StorageMap<
 
 *For any* maker bridge swap:
 - Creation with inactive maker SHALL fail
-- Creation with active maker SHALL lock user's DUST
+- Creation with active maker SHALL lock user's COS
 - mark_swap_complete with duplicate tx_hash SHALL fail
-- mark_swap_complete with unique tx_hash SHALL release DUST to maker
+- mark_swap_complete with unique tx_hash SHALL release COS to maker
 - Completed swaps SHALL trigger maker credit recording
 
 **Validates: Requirements 4.1, 4.2, 4.3, 4.4, 4.5**
@@ -524,10 +524,10 @@ pub type KycExemptAccounts<T: Config> = StorageMap<
 ### Property 6: OTC Order Lifecycle Invariants
 
 *For any* OTC order:
-- Creation SHALL occupy buyer quota and lock maker's DUST
+- Creation SHALL occupy buyer quota and lock maker's COS
 - mark_paid SHALL transition status to PaidOrCommitted
-- release_dust SHALL transfer DUST to buyer and update credit
-- cancel_order SHALL refund DUST to maker and release quota
+- release_dust SHALL transfer COS to buyer and update credit
+- cancel_order SHALL refund COS to maker and release quota
 - dispute_order SHALL transition status to Disputed
 
 **Validates: Requirements 5.1, 5.2, 5.3, 5.4, 5.5**
@@ -544,9 +544,9 @@ pub type KycExemptAccounts<T: Config> = StorageMap<
 
 **Validates: Requirements 6.1, 6.4**
 
-### Property 9: First Purchase DUST Calculation
+### Property 9: First Purchase COS Calculation
 
-*For any* first purchase at price P (DUST/USD), the calculated DUST amount SHALL equal FirstPurchaseUsdAmount / P, within the bounds [MinFirstPurchaseDustAmount, MaxFirstPurchaseDustAmount].
+*For any* first purchase at price P (COS/USD), the calculated COS amount SHALL equal FirstPurchaseUsdAmount / P, within the bounds [MinFirstPurchaseDustAmount, MaxFirstPurchaseDustAmount].
 
 **Validates: Requirements 6.2**
 

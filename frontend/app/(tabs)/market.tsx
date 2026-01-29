@@ -1,423 +1,287 @@
-/**
- * 星尘玄鉴 - 占卜市场页面
- * 主题色：金棕色 #B2955D
- */
-
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { CATEGORIES, DivinationCategory, DivinationType, Provider, useProviders } from '@/src/hooks/useMarket';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
+import {
+    FlatList,
+    Pressable,
+    StyleSheet,
+    Text,
+    View
+} from 'react-native';
 
-const THEME_COLOR = '#B2955D';
-const THEME_BG = '#F5F5F7';
-
-// 模拟服务商数据
-const MOCK_PROVIDERS = [
-  {
-    id: '1',
-    name: '玄机子',
-    avatar: '🧙',
-    specialty: ['八字', '紫微'],
-    rating: 4.9,
-    orders: 1280,
-    price: '50 DUST',
-    online: true,
-  },
-  {
-    id: '2',
-    name: '易道人',
-    avatar: '👴',
-    specialty: ['六爻', '梅花'],
-    rating: 4.8,
-    orders: 856,
-    price: '30 DUST',
-    online: true,
-  },
-  {
-    id: '3',
-    name: '星月师',
-    avatar: '🌙',
-    specialty: ['塔罗', '占星'],
-    rating: 4.7,
-    orders: 623,
-    price: '40 DUST',
-    online: false,
-  },
-  {
-    id: '4',
-    name: '天机阁',
-    avatar: '🏛️',
-    specialty: ['奇门', '大六壬'],
-    rating: 4.9,
-    orders: 2100,
-    price: '80 DUST',
-    online: true,
-  },
-];
-
-// 分类
-const CATEGORIES = [
-  { id: 'all', name: '全部', icon: 'apps' },
-  { id: 'bazi', name: '八字', icon: 'calendar' },
-  { id: 'liuyao', name: '六爻', icon: 'dice' },
-  { id: 'tarot', name: '塔罗', icon: 'card' },
-  { id: 'qimen', name: '奇门', icon: 'compass' },
-];
-
-export default function MarketPage() {
+export default function MarketScreen() {
   const router = useRouter();
-  const [activeCategory, setActiveCategory] = useState('all');
-  const [loading, setLoading] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<DivinationType | null>(null);
+  const { providers, loading, error, categories } = useProviders(selectedCategory);
+
+  const handleCategoryPress = (category: DivinationCategory) => {
+    setSelectedCategory(selectedCategory === category.id ? null : category.id);
+  };
+
+  const handleProviderPress = (provider: Provider) => {
+    router.push(`/market/provider/${provider.id}`);
+  };
+
+  const filteredProviders = providers;
+
+  const renderCategory = ({ item }: { item: DivinationCategory }) => (
+    <Pressable
+      style={({ pressed }) => [
+        styles.categoryCard,
+        selectedCategory === item.id && styles.categoryCardSelected,
+        pressed && styles.categoryCardPressed,
+      ]}
+      onPress={() => handleCategoryPress(item)}
+    >
+      <Text style={styles.categoryIcon}>{item.icon}</Text>
+      <Text style={[
+        styles.categoryName,
+        selectedCategory === item.id && styles.categoryNameSelected
+      ]}>{item.name}</Text>
+    </Pressable>
+  );
+
+  const renderProvider = ({ item }: { item: Provider }) => (
+    <Pressable
+      style={({ pressed }) => [styles.providerCard, pressed && styles.providerCardPressed]}
+      onPress={() => handleProviderPress(item)}
+    >
+      <View style={styles.providerHeader}>
+        <View style={styles.providerAvatar}>
+          <Text style={styles.providerAvatarText}>{item.name[0]}</Text>
+        </View>
+        <View style={styles.providerInfo}>
+          <View style={styles.providerNameRow}>
+            <Text style={styles.providerName}>{item.name}</Text>
+            {item.isOnline && <View style={styles.onlineDot} />}
+          </View>
+          <View style={styles.providerStats}>
+            <Text style={styles.providerRating}>⭐ {item.rating}</Text>
+            <Text style={styles.providerOrders}>{item.orderCount}单</Text>
+          </View>
+        </View>
+        <View style={styles.providerPrice}>
+          <Text style={styles.priceValue}>¥{item.price}</Text>
+          <Text style={styles.priceUnit}>起</Text>
+        </View>
+      </View>
+      <View style={styles.providerSpecialties}>
+        {item.specialties.map(s => {
+          const cat = CATEGORIES.find(c => c.id === s);
+          return cat ? (
+            <View key={s} style={styles.specialtyTag}>
+              <Text style={styles.specialtyText}>{cat.icon} {cat.name}</Text>
+            </View>
+          ) : null;
+        })}
+      </View>
+    </Pressable>
+  );
 
   return (
-    <View style={styles.wrapper}>
     <View style={styles.container}>
-      {/* 顶部标题 */}
       <View style={styles.header}>
-        <Text style={styles.title}>占卜市场</Text>
-        <Text style={styles.subtitle}>找到适合你的占卜师</Text>
+        <Text style={styles.headerTitle}>占卜市场</Text>
+        <Text style={styles.headerSubtitle}>寻找适合你的占卜师</Text>
       </View>
 
-      {/* 搜索栏 */}
-      <View style={styles.searchSection}>
-        <View style={styles.searchBar}>
-          <Ionicons name="search" size={20} color="#999" />
-          <Text style={styles.searchPlaceholder}>搜索占卜师或服务</Text>
-        </View>
-        <Pressable style={styles.filterButton}>
-          <Ionicons name="options-outline" size={20} color={THEME_COLOR} />
-        </Pressable>
+      <View style={styles.categoriesSection}>
+        <FlatList
+          data={CATEGORIES}
+          renderItem={renderCategory}
+          keyExtractor={(item) => item.id}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.categoriesList}
+        />
       </View>
 
-      {/* 分类标签 */}
-      <ScrollView 
-        horizontal 
-        showsHorizontalScrollIndicator={false} 
-        style={styles.categoryScroll}
-        contentContainerStyle={styles.categoryContent}
-      >
-        {CATEGORIES.map((cat) => (
-          <Pressable
-            key={cat.id}
-            style={[
-              styles.categoryTag,
-              activeCategory === cat.id && styles.categoryTagActive
-            ]}
-            onPress={() => setActiveCategory(cat.id)}
-          >
-            <Text style={[
-              styles.categoryText,
-              activeCategory === cat.id && styles.categoryTextActive
-            ]}>
-              {cat.name}
-            </Text>
-          </Pressable>
-        ))}
-      </ScrollView>
-
-      {/* 服务商列表 */}
-      <ScrollView 
-        style={styles.content} 
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* 推荐区 */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>推荐占卜师</Text>
-            <Pressable>
-              <Text style={styles.seeAll}>查看全部</Text>
-            </Pressable>
-          </View>
-
-          {loading ? (
-            <ActivityIndicator size="large" color={THEME_COLOR} style={styles.loading} />
-          ) : (
-            <View style={styles.providerList}>
-              {MOCK_PROVIDERS.map((provider) => (
-                <Pressable 
-                  key={provider.id} 
-                  style={styles.providerCard}
-                  onPress={() => {
-                    // TODO: 跳转到服务商详情
-                    console.log('Provider:', provider.id);
-                  }}
-                >
-                  <View style={styles.providerHeader}>
-                    <View style={styles.avatarContainer}>
-                      <Text style={styles.avatar}>{provider.avatar}</Text>
-                      {provider.online && <View style={styles.onlineDot} />}
-                    </View>
-                    <View style={styles.providerInfo}>
-                      <Text style={styles.providerName}>{provider.name}</Text>
-                      <View style={styles.specialtyRow}>
-                        {provider.specialty.map((s, i) => (
-                          <View key={i} style={styles.specialtyTag}>
-                            <Text style={styles.specialtyText}>{s}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    </View>
-                    <View style={styles.priceContainer}>
-                      <Text style={styles.price}>{provider.price}</Text>
-                      <Text style={styles.priceLabel}>起</Text>
-                    </View>
-                  </View>
-                  <View style={styles.providerFooter}>
-                    <View style={styles.ratingRow}>
-                      <Ionicons name="star" size={14} color="#F5A623" />
-                      <Text style={styles.rating}>{provider.rating}</Text>
-                      <Text style={styles.orders}>· {provider.orders}单</Text>
-                    </View>
-                    <Pressable style={styles.consultButton}>
-                      <Text style={styles.consultText}>咨询</Text>
-                    </Pressable>
-                  </View>
-                </Pressable>
-              ))}
+      <View style={styles.providersSection}>
+        <Text style={styles.sectionTitle}>
+          {selectedCategory 
+            ? `${CATEGORIES.find(c => c.id === selectedCategory)?.name}大师`
+            : '推荐大师'}
+        </Text>
+        <FlatList
+          data={filteredProviders}
+          renderItem={renderProvider}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.providersList}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>暂无该类型的占卜师</Text>
             </View>
-          )}
-        </View>
-
-        {/* 底部提示 */}
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>所有交易通过智能合约保障</Text>
-          <Text style={styles.footerText}>服务完成后自动结算</Text>
-        </View>
-      </ScrollView>
-    </View>
+          }
+        />
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrapper: {
-    flex: 1,
-    backgroundColor: THEME_BG,
-  },
   container: {
     flex: 1,
-    backgroundColor: THEME_BG,
+    backgroundColor: '#f5f5f5',
   },
   header: {
-    paddingTop: 60,
+    backgroundColor: '#6D28D9',
+    paddingTop: 50,
+    paddingBottom: 20,
     paddingHorizontal: 20,
-    paddingBottom: 16,
-    backgroundColor: '#FFF',
   },
-  title: {
+  headerTitle: {
     fontSize: 28,
-    fontWeight: '600',
-    color: '#333',
+    fontWeight: 'bold',
+    color: '#fff',
   },
-  subtitle: {
+  headerSubtitle: {
     fontSize: 14,
-    color: '#999',
+    color: 'rgba(255,255,255,0.8)',
     marginTop: 4,
   },
-  searchSection: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-    gap: 12,
+  categoriesSection: {
+    backgroundColor: '#fff',
+    paddingVertical: 16,
   },
-  searchBar: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F5F5F7',
-    borderRadius: 8,
+  categoriesList: {
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
   },
-  searchPlaceholder: {
-    color: '#999',
-    fontSize: 15,
-  },
-  filterButton: {
-    width: 44,
-    height: 44,
-    backgroundColor: '#F5F5F7',
-    borderRadius: 8,
+  categoryCard: {
     alignItems: 'center',
-    justifyContent: 'center',
-  },
-  categoryScroll: {
-    backgroundColor: '#FFF',
-    maxHeight: 56,
-  },
-  categoryContent: {
-    paddingHorizontal: 16,
+    backgroundColor: '#f3f4f6',
     paddingVertical: 12,
-    gap: 8,
-  },
-  categoryTag: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#F5F5F7',
-    borderRadius: 20,
-    marginRight: 8,
+    borderRadius: 12,
+    marginHorizontal: 4,
+    minWidth: 80,
   },
-  categoryTagActive: {
-    backgroundColor: THEME_COLOR,
+  categoryCardSelected: {
+    backgroundColor: '#6D28D9',
   },
-  categoryText: {
-    fontSize: 14,
-    color: '#666',
+  categoryCardPressed: {
+    opacity: 0.8,
   },
-  categoryTextActive: {
-    color: '#FFF',
+  categoryIcon: {
+    fontSize: 24,
+    marginBottom: 4,
   },
-  content: {
+  categoryName: {
+    fontSize: 12,
+    color: '#374151',
+    fontWeight: '500',
+  },
+  categoryNameSelected: {
+    color: '#fff',
+  },
+  providersSection: {
     flex: 1,
-  },
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 100,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
+    paddingTop: 16,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
+    color: '#1f2937',
+    paddingHorizontal: 16,
+    marginBottom: 12,
   },
-  seeAll: {
-    fontSize: 14,
-    color: THEME_COLOR,
-  },
-  loading: {
-    paddingVertical: 40,
-  },
-  providerList: {
-    gap: 12,
+  providersList: {
+    paddingHorizontal: 12,
+    paddingBottom: 20,
   },
   providerCard: {
-    backgroundColor: '#FFF',
+    backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 2,
+    marginBottom: 12,
+  },
+  providerCardPressed: {
+    backgroundColor: '#f9fafb',
   },
   providerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
   },
-  avatarContainer: {
-    position: 'relative',
+  providerAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#6D28D9',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  avatar: {
-    fontSize: 40,
-    width: 56,
-    height: 56,
-    textAlign: 'center',
-    lineHeight: 56,
-    backgroundColor: '#F5F5F7',
-    borderRadius: 28,
-    overflow: 'hidden',
-  },
-  onlineDot: {
-    position: 'absolute',
-    bottom: 2,
-    right: 2,
-    width: 12,
-    height: 12,
-    backgroundColor: '#4CD964',
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#FFF',
+  providerAvatarText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
   },
   providerInfo: {
     flex: 1,
     marginLeft: 12,
   },
-  providerName: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 6,
-  },
-  specialtyRow: {
+  providerNameRow: {
     flexDirection: 'row',
-    gap: 6,
+    alignItems: 'center',
+  },
+  providerName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  onlineDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#22c55e',
+    marginLeft: 6,
+  },
+  providerStats: {
+    flexDirection: 'row',
+    marginTop: 4,
+  },
+  providerRating: {
+    fontSize: 13,
+    color: '#f59e0b',
+    marginRight: 12,
+  },
+  providerOrders: {
+    fontSize: 13,
+    color: '#6b7280',
+  },
+  providerPrice: {
+    alignItems: 'flex-end',
+  },
+  priceValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#ef4444',
+  },
+  priceUnit: {
+    fontSize: 12,
+    color: '#9ca3af',
+  },
+  providerSpecialties: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 12,
   },
   specialtyTag: {
-    backgroundColor: THEME_COLOR + '15',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
+    backgroundColor: '#f3f4f6',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginRight: 8,
+    marginBottom: 4,
   },
   specialtyText: {
     fontSize: 12,
-    color: THEME_COLOR,
+    color: '#6b7280',
   },
-  priceContainer: {
-    alignItems: 'flex-end',
-  },
-  price: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: THEME_COLOR,
-  },
-  priceLabel: {
-    fontSize: 12,
-    color: '#999',
-  },
-  providerFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  emptyContainer: {
     alignItems: 'center',
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#F5F5F7',
+    paddingVertical: 40,
   },
-  ratingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  rating: {
+  emptyText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-  },
-  orders: {
-    fontSize: 13,
-    color: '#999',
-  },
-  consultButton: {
-    backgroundColor: THEME_COLOR,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  consultText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#FFF',
-  },
-  footer: {
-    alignItems: 'center',
-    paddingVertical: 20,
-  },
-  footerText: {
-    fontSize: 12,
-    color: '#BBB',
-    marginBottom: 4,
+    color: '#9ca3af',
   },
 });

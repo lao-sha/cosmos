@@ -138,11 +138,11 @@ impl pallet_referral::Config for Test {
 /// 初始化测试环境，并为测试账户分配初始余额。
 ///
 /// **测试账户**：
-/// - Alice (1): 10,000 DUST
-/// - Bob (2): 10,000 DUST
-/// - Charlie (3): 10,000 DUST
-/// - Dave (4): 10,000 DUST
-/// - Eve (5): 10,000 DUST
+/// - Alice (1): 10,000 COS
+/// - Bob (2): 10,000 COS
+/// - Charlie (3): 10,000 COS
+/// - Dave (4): 10,000 COS
+/// - Eve (5): 10,000 COS
 /// - NonMember (901): 无效会员
 pub fn new_test_ext() -> sp_io::TestExternalities {
     let mut t = frame_system::GenesisConfig::<Test>::default()
@@ -151,11 +151,11 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 
     pallet_balances::GenesisConfig::<Test> {
         balances: vec![
-            (1, 10_000_000_000_000_000),   // Alice: 10,000 DUST
-            (2, 10_000_000_000_000_000),   // Bob: 10,000 DUST
-            (3, 10_000_000_000_000_000),   // Charlie: 10,000 DUST
-            (4, 10_000_000_000_000_000),   // Dave: 10,000 DUST
-            (5, 10_000_000_000_000_000),   // Eve: 10,000 DUST
+            (1, 10_000_000_000_000_000),   // Alice: 10,000 COS
+            (2, 10_000_000_000_000_000),   // Bob: 10,000 COS
+            (3, 10_000_000_000_000_000),   // Charlie: 10,000 COS
+            (4, 10_000_000_000_000_000),   // Dave: 10,000 COS
+            (5, 10_000_000_000_000_000),   // Eve: 10,000 COS
             (901, 10_000_000_000_000_000), // NonMember: 非会员
         ],
         dev_accounts: None,

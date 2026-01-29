@@ -1015,9 +1015,9 @@ MIT-0 License
 
 ## 联系方式
 
-- **项目主页**: [Stardust GitHub](https://github.com/stardust/stardust)
-- **问题反馈**: [GitHub Issues](https://github.com/stardust/stardust/issues)
-- **技术讨论**: [GitHub Discussions](https://github.com/stardust/stardust/discussions)
+- **项目主页**: [Cosmos GitHub](https://github.com/cosmos/cosmos)
+- **问题反馈**: [GitHub Issues](https://github.com/cosmos/cosmos/issues)
+- **技术讨论**: [GitHub Discussions](https://github.com/cosmos/cosmos/discussions)
 
 ---
 
@@ -1092,5 +1092,5 @@ MIT-0 License
 
 **创建日期**: 2025-11-25
 **当前版本**: v1.0.0
-**维护团队**: Stardust 开发团队
+**维护团队**: Cosmos 开发团队
 **最后更新**: 2025-12-21

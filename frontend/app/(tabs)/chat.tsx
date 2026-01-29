@@ -1,129 +1,99 @@
-/**
- * 星尘玄鉴 - 消息页（会话列表）
- * 主题色：金棕色 #B2955D
- */
-
-import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
+import { ChatSession, useChatSessions } from '@/src/hooks/useChat';
+import { useAuthStore } from '@/src/stores/auth';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import {
+    Alert,
+    FlatList,
+    Image,
+    Platform,
+    Pressable,
+    StyleSheet,
+    Text,
+    View
+} from 'react-native';
 
-const THEME_COLOR = '#B2955D';
-const THEME_BG = '#F5F5F7';
-
-// 模拟会话数据
-const MOCK_SESSIONS = [
-  {
-    id: '1',
-    name: '玄机子',
-    avatar: '🧙',
-    lastMessage: '您的八字排盘已完成，请查看结果',
-    time: '刚刚',
-    unread: 2,
-    online: true,
-  },
-  {
-    id: '2',
-    name: '易道人',
-    avatar: '👴',
-    lastMessage: '好的，我会尽快为您解答',
-    time: '10分钟前',
-    unread: 0,
-    online: true,
-  },
-  {
-    id: '3',
-    name: '星月师',
-    avatar: '🌙',
-    lastMessage: '塔罗牌显示您近期会有好运',
-    time: '1小时前',
-    unread: 0,
-    online: false,
-  },
-  {
-    id: '4',
-    name: '天机阁',
-    avatar: '🏛️',
-    lastMessage: '奇门遁甲排盘需要您提供具体时间',
-    time: '昨天',
-    unread: 1,
-    online: false,
-  },
-];
-
-export default function ChatPage() {
+export default function ChatScreen() {
   const router = useRouter();
+  const { isLoggedIn } = useAuthStore();
+  const { sessions, loading, error } = useChatSessions();
 
-  const handleSessionPress = (sessionId: string) => {
-    // TODO: 跳转到聊天详情页
-    console.log('Open chat:', sessionId);
+  const handleSessionPress = (session: ChatSession) => {
+    if (!isLoggedIn) {
+      if (Platform.OS === 'web') {
+        window.alert('请先登录钱包');
+      } else {
+        Alert.alert('提示', '请先登录钱包');
+      }
+      return;
+    }
+    router.push(`/chat/${session.id}`);
   };
+
+  const renderSession = ({ item }: { item: ChatSession }) => (
+    <Pressable
+      style={({ pressed }) => [styles.sessionItem, pressed && styles.sessionPressed]}
+      onPress={() => handleSessionPress(item)}
+    >
+      <View style={styles.avatarContainer}>
+        {item.participantAvatar ? (
+          <Image source={{ uri: item.participantAvatar }} style={styles.avatar} />
+        ) : (
+          <View style={styles.avatarPlaceholder}>
+            <Text style={styles.avatarText}>{item.participantName[0]}</Text>
+          </View>
+        )}
+        {item.isOnline && <View style={styles.onlineIndicator} />}
+      </View>
+      
+      <View style={styles.sessionContent}>
+        <View style={styles.sessionHeader}>
+          <Text style={styles.participantName}>{item.participantName}</Text>
+          <Text style={styles.timeText}>{item.lastMessageTime}</Text>
+        </View>
+        <View style={styles.sessionFooter}>
+          <Text style={styles.lastMessage} numberOfLines={1}>
+            {item.lastMessage}
+          </Text>
+          {item.unreadCount > 0 && (
+            <View style={styles.unreadBadge}>
+              <Text style={styles.unreadText}>{item.unreadCount}</Text>
+            </View>
+          )}
+        </View>
+      </View>
+    </Pressable>
+  );
+
+  if (!isLoggedIn) {
+    return (
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyIcon}>💬</Text>
+        <Text style={styles.emptyTitle}>登录后查看消息</Text>
+        <Text style={styles.emptySubtitle}>请先在"我的"页面创建或导入钱包</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
-      {/* 顶部标题 */}
       <View style={styles.header}>
-        <Text style={styles.title}>消息</Text>
-        <View style={styles.headerRight}>
-          <Pressable 
-            style={styles.headerButton}
-            onPress={() => router.push('/contacts' as any)}
-          >
-            <Ionicons name="people-outline" size={24} color={THEME_COLOR} />
-          </Pressable>
-          <Pressable style={styles.headerButton}>
-            <Ionicons name="create-outline" size={24} color={THEME_COLOR} />
-          </Pressable>
-        </View>
+        <Text style={styles.headerTitle}>消息</Text>
       </View>
-
-      {/* 搜索栏 */}
-      <View style={styles.searchSection}>
-        <View style={styles.searchBar}>
-          <Ionicons name="search" size={18} color="#999" />
-          <Text style={styles.searchPlaceholder}>搜索聊天记录</Text>
+      
+      {sessions.length > 0 ? (
+        <FlatList
+          data={sessions}
+          renderItem={renderSession}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContainer}
+        />
+      ) : (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyIcon}>💬</Text>
+          <Text style={styles.emptyTitle}>暂无消息</Text>
+          <Text style={styles.emptySubtitle}>开始与他人交流吧</Text>
         </View>
-      </View>
-
-      {/* 会话列表 */}
-      <ScrollView 
-        style={styles.sessionList}
-        contentContainerStyle={styles.sessionListContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {MOCK_SESSIONS.map((session) => (
-          <Pressable
-            key={session.id}
-            style={styles.sessionItem}
-            onPress={() => handleSessionPress(session.id)}
-          >
-            <View style={styles.avatarContainer}>
-              <Text style={styles.avatar}>{session.avatar}</Text>
-              {session.online && <View style={styles.onlineDot} />}
-            </View>
-            
-            <View style={styles.sessionContent}>
-              <View style={styles.sessionHeader}>
-                <Text style={styles.sessionName} numberOfLines={1}>
-                  {session.name}
-                </Text>
-                <Text style={styles.sessionTime}>{session.time}</Text>
-              </View>
-              <View style={styles.sessionFooter}>
-                <Text style={styles.lastMessage} numberOfLines={1}>
-                  {session.lastMessage}
-                </Text>
-                {session.unread > 0 && (
-                  <View style={styles.unreadBadge}>
-                    <Text style={styles.unreadText}>
-                      {session.unread > 99 ? '99+' : session.unread}
-                    </Text>
-                  </View>
-                )}
-              </View>
-            </View>
-          </Pressable>
-        ))}
-      </ScrollView>
+      )}
     </View>
   );
 }
@@ -131,98 +101,69 @@ export default function ChatPage() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: THEME_BG,
+    backgroundColor: '#f5f5f5',
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 60,
-    paddingHorizontal: 20,
+    backgroundColor: '#fff',
+    paddingTop: 50,
     paddingBottom: 16,
-    backgroundColor: '#FFF',
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '600',
-    color: '#333',
-  },
-  addButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  headerButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  searchSection: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FFF',
+    paddingHorizontal: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    borderBottomColor: '#e5e7eb',
   },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F5F5F7',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#1f2937',
   },
-  searchPlaceholder: {
-    color: '#999',
-    fontSize: 15,
-  },
-  sessionList: {
-    flex: 1,
-  },
-  sessionListContent: {
-    paddingBottom: 100,
+  listContainer: {
+    paddingVertical: 8,
   },
   sessionItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#fff',
     paddingHorizontal: 16,
-    paddingVertical: 14,
-    backgroundColor: '#FFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F5F5F7',
+    paddingVertical: 12,
+    marginHorizontal: 12,
+    marginVertical: 4,
+    borderRadius: 12,
+  },
+  sessionPressed: {
+    backgroundColor: '#f3f4f6',
   },
   avatarContainer: {
     position: 'relative',
     marginRight: 12,
   },
   avatar: {
-    fontSize: 36,
-    width: 52,
-    height: 52,
-    textAlign: 'center',
-    lineHeight: 52,
-    backgroundColor: '#F5F5F7',
-    borderRadius: 26,
-    overflow: 'hidden',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
   },
-  onlineDot: {
+  avatarPlaceholder: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#6D28D9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  onlineIndicator: {
     position: 'absolute',
     bottom: 2,
     right: 2,
     width: 12,
     height: 12,
-    backgroundColor: '#4CD964',
     borderRadius: 6,
+    backgroundColor: '#22c55e',
     borderWidth: 2,
-    borderColor: '#FFF',
+    borderColor: '#fff',
   },
   sessionContent: {
     flex: 1,
@@ -233,16 +174,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 4,
   },
-  sessionName: {
+  participantName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
-    flex: 1,
-    marginRight: 8,
+    color: '#1f2937',
   },
-  sessionTime: {
+  timeText: {
     fontSize: 12,
-    color: '#999',
+    color: '#9ca3af',
   },
   sessionFooter: {
     flexDirection: 'row',
@@ -250,13 +189,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   lastMessage: {
-    fontSize: 14,
-    color: '#999',
     flex: 1,
+    fontSize: 14,
+    color: '#6b7280',
     marginRight: 8,
   },
   unreadBadge: {
-    backgroundColor: '#FF3B30',
+    backgroundColor: '#ef4444',
     borderRadius: 10,
     minWidth: 20,
     height: 20,
@@ -265,8 +204,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   unreadText: {
+    color: '#fff',
     fontSize: 12,
-    fontWeight: '600',
-    color: '#FFF',
+    fontWeight: 'bold',
+  },
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  emptyIcon: {
+    fontSize: 64,
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1f2937',
+    marginBottom: 8,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: '#9ca3af',
+    textAlign: 'center',
   },
 });

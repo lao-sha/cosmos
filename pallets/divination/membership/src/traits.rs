@@ -33,10 +33,10 @@ pub trait MembershipProvider<AccountId, Balance, BlockNumber> {
     /// Use one free AI credit (returns error if none available).
     fn use_free_ai(who: &AccountId) -> DispatchResult;
 
-    /// Get DUST reward multiplier (basis points, 10000 = 1.0x).
+    /// Get COS reward multiplier (basis points, 10000 = 1.0x).
     fn get_reward_multiplier(who: &AccountId) -> u32;
 
-    /// Grant DUST reward to an account.
+    /// Grant COS reward to an account.
     /// Automatically applies tier multiplier and pool adjustment.
     /// Returns the actual amount granted.
     fn grant_reward(

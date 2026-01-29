@@ -1,6 +1,6 @@
 # pallet-livestream
 
-去中心化直播间模块，为 Stardust 平台提供直播功能。
+去中心化直播间模块，为 Cosmos 平台提供直播功能。
 
 ## 功能特性
 

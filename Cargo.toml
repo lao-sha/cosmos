@@ -1,8 +1,8 @@
 [workspace.package]
 license = "MIT-0"
-authors = ["Parity Technologies <admin@parity.io>"]
-homepage = "https://paritytech.github.io/polkadot-sdk/"
-repository = "https://github.com/paritytech/polkadot-sdk-solochain-template.git"
+authors = ["Cosmos Team"]
+homepage = "https://cosmos.app/"
+repository = "https://github.com/memoio/cosmos.git"
 edition = "2021"
 
 [workspace]
@@ -56,7 +56,7 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-solochain-template-runtime = { path = "./runtime", default-features = false }
+cosmos-runtime = { path = "./runtime", default-features = false }
 # Divination pallets
 pallet-divination-common = { path = "./pallets/divination/common", default-features = false }
 pallet-divination-privacy = { path = "./pallets/divination/privacy", default-features = false }
@@ -94,7 +94,7 @@ pallet-trading-otc = { path = "./pallets/trading/otc", default-features = false 
 pallet-escrow = { path = "./pallets/escrow", default-features = false }
 pallet-referral = { path = "./pallets/referral", default-features = false }
 pallet-storage-service = { path = "./pallets/storage-service", default-features = false }
-# Stardust common libraries
+# Cosmos common libraries
 media-utils = { path = "./media-utils", default-features = false }
 # Evidence pallet
 pallet-evidence = { path = "./pallets/evidence", default-features = false }

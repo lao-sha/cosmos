@@ -11,7 +11,7 @@
 //! - 信用恢复和额度提升
 //!
 //! ### 设计理念
-//! 完全替代押金机制，通过信用额度控制买家行为，解决DUST押金的逻辑矛盾。
+//! 完全替代押金机制，通过信用额度控制买家行为，解决COS押金的逻辑矛盾。
 
 use codec::{Encode, Decode, MaxEncodedLen};
 use scale_info::TypeInfo;

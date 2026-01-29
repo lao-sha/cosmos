@@ -1,13 +1,13 @@
 //! # Membership Pallet
 //!
-//! A pallet for managing membership subscriptions, DUST rewards, and member profiles
-//! for the Stardust divination platform.
+//! A pallet for managing membership subscriptions, COS rewards, and member profiles
+//! for the Cosmos divination platform.
 //!
 //! ## Overview
 //!
 //! This pallet provides:
 //! - **Subscription Management**: 6-tier membership system (Free, Bronze, Silver, Gold, Platinum, Diamond)
-//! - **DUST Rewards**: Token rewards for user activities with anti-abuse mechanisms
+//! - **COS Rewards**: Token rewards for user activities with anti-abuse mechanisms
 //! - **Member Profiles**: Partially encrypted profile storage for divination auto-fill
 //! - **Check-in System**: Daily check-in with streak bonuses
 //!
@@ -15,14 +15,14 @@
 //!
 //! - Subscribe to membership tiers with monthly/yearly billing
 //! - Upgrade/downgrade membership tiers
-//! - Receive DUST rewards for activities (AI interpretation, reviews, etc.)
+//! - Receive COS rewards for activities (AI interpretation, reviews, etc.)
 //! - Daily check-in with consecutive day bonuses
 //! - Store member profiles with partial encryption (birth info in plaintext for divination)
 //!
 //! ## Anti-Abuse Mechanisms
 //!
 //! - 7-day cooldown period for new accounts
-//! - Minimum balance requirement (≥1 DUST) for rewards
+//! - Minimum balance requirement (≥1 COS) for rewards
 //! - Daily reward limits per category
 //! - Dynamic reward adjustment based on reward pool balance
 
@@ -117,7 +117,7 @@ pub mod pallet {
         #[pallet::constant]
         type NewAccountCooldown: Get<BlockNumberFor<Self>>;
 
-        /// Minimum balance required to receive rewards (1 DUST).
+        /// Minimum balance required to receive rewards (1 COS).
         #[pallet::constant]
         type MinBalanceForRewards: Get<BalanceOf<Self>>;
 
@@ -141,7 +141,7 @@ pub mod pallet {
         #[pallet::constant]
         type MaxRewardHistorySize: Get<u32>;
 
-        /// 定价接口（用于 USDT 到 DUST 换算）
+        /// 定价接口（用于 USDT 到 COS 换算）
         type Pricing: pallet_trading_common::PricingProvider<BalanceOf<Self>>;
     }
 
@@ -169,7 +169,7 @@ pub mod pallet {
         OptionQuery,
     >;
 
-    /// DUST reward balances and statistics.
+    /// COS reward balances and statistics.
     #[pallet::storage]
     #[pallet::getter(fn reward_balances)]
     pub type RewardBalances<T: Config> = StorageMap<
@@ -290,7 +290,7 @@ pub mod pallet {
             streak: u32,
             reward: BalanceOf<T>,
         },
-        /// DUST reward granted.
+        /// COS reward granted.
         RewardGranted {
             who: T::AccountId,
             amount: BalanceOf<T>,
@@ -557,7 +557,7 @@ pub mod pallet {
             Ok(())
         }
 
-        /// Daily check-in to earn DUST rewards.
+        /// Daily check-in to earn COS rewards.
         #[pallet::call_index(3)]
         #[pallet::weight(T::WeightInfo::check_in())]
         pub fn check_in(origin: OriginFor<T>) -> DispatchResult {
@@ -831,37 +831,37 @@ pub mod pallet {
             }
         }
 
-        /// Get monthly fee for a tier (in DUST, converted from USDT via pricing).
+        /// Get monthly fee for a tier (in COS, converted from USDT via pricing).
         pub fn get_tier_monthly_fee(tier: MemberTier) -> BalanceOf<T> {
             let usdt_amount = Self::get_tier_monthly_fee_usdt(tier);
-            Self::usdt_to_dust(usdt_amount)
+            Self::usdt_to_cos(usdt_amount)
         }
 
-        /// Convert USDT to DUST using pricing module.
+        /// Convert USDT to COS using pricing module.
         /// 
         /// USDT amount has precision 10^6 (e.g., 25_000_000 = 25 USDT)
-        /// Returns equivalent DUST amount with precision 10^12
-        fn usdt_to_dust(usdt_amount: u64) -> BalanceOf<T> {
+        /// Returns equivalent COS amount with precision 10^12
+        fn usdt_to_cos(usdt_amount: u64) -> BalanceOf<T> {
             if usdt_amount == 0 {
                 return Zero::zero();
             }
             
-            // Try to get DUST/USD rate from pricing module
-            if let Some(rate) = T::Pricing::get_dust_to_usd_rate() {
-                // rate is DUST/USD rate (precision 10^6), meaning 1 DUST = rate/10^6 USD
-                // dust_amount = usdt_amount * 10^12 / rate
+            // Try to get COS/USD rate from pricing module
+            if let Some(rate) = T::Pricing::get_cos_to_usd_rate() {
+                // rate is COS/USD rate (precision 10^6), meaning 1 COS = rate/10^6 USD
+                // cos_amount = usdt_amount * 10^12 / rate
                 let rate_u128: u128 = TryInto::<u128>::try_into(rate).unwrap_or(1_000_000);
                 if rate_u128 > 0 {
-                    let dust_amount = (usdt_amount as u128)
-                        .saturating_mul(1_000_000_000_000u128) // 10^12 (DUST precision)
+                    let cos_amount = (usdt_amount as u128)
+                        .saturating_mul(1_000_000_000_000u128) // 10^12 (COS precision)
                         / rate_u128;
-                    return TryInto::<BalanceOf<T>>::try_into(dust_amount).ok().unwrap_or_else(Zero::zero);
+                    return TryInto::<BalanceOf<T>>::try_into(cos_amount).ok().unwrap_or_else(Zero::zero);
                 }
             }
             
-            // Fallback: assume 1 DUST = 1 USDT
-            let dust = 1_000_000_000_000u128; // 1 DUST
-            let fallback = (usdt_amount as u128).saturating_mul(dust) / 1_000_000u128;
+            // Fallback: assume 1 COS = 1 USDT
+            let cos_unit = 1_000_000_000_000u128; // 1 COS
+            let fallback = (usdt_amount as u128).saturating_mul(cos_unit) / 1_000_000u128;
             TryInto::<BalanceOf<T>>::try_into(fallback).ok().unwrap_or_else(Zero::zero)
         }
 
@@ -878,7 +878,7 @@ pub mod pallet {
                     monthly_usdt.saturating_mul(10)
                 }
             };
-            Self::usdt_to_dust(total_usdt)
+            Self::usdt_to_cos(total_usdt)
         }
 
         /// Get storage deposit discount rate (basis points, 3000 = 30%).
@@ -929,7 +929,7 @@ pub mod pallet {
             }
         }
 
-        /// Get DUST reward multiplier (basis points, 10000 = 1.0x).
+        /// Get COS reward multiplier (basis points, 10000 = 1.0x).
         pub fn get_reward_multiplier_base(tier: MemberTier) -> u32 {
             match tier {
                 MemberTier::Free => 10000,     // 1.0x
@@ -941,25 +941,25 @@ pub mod pallet {
             }
         }
 
-        /// Get base check-in reward (0.001 DUST).
+        /// Get base check-in reward (0.001 COS).
         pub fn get_check_in_base_reward() -> BalanceOf<T> {
-            let reward = 1_000_000_000u128; // 0.001 DUST
+            let reward = 1_000_000_000u128; // 0.001 COS
             reward.try_into().ok().unwrap_or_else(Zero::zero)
         }
 
         /// Get daily reward limit for a category.
         pub fn get_daily_reward_limit(tx_type: RewardTxType) -> BalanceOf<T> {
-            let dust = 1_000_000_000_000u128;
+            let cos_unit = 1_000_000_000_000u128;
             let limit = match tx_type {
-                RewardTxType::CheckIn => dust / 1000,     // 0.001 DUST
-                RewardTxType::Divination => dust / 10,    // 0.1 DUST
-                RewardTxType::AiCashback => dust * 1000,  // No practical limit
-                RewardTxType::Delete => dust / 20,        // 0.05 DUST
-                RewardTxType::MarketCashback => dust * 1000,
-                RewardTxType::Review => dust / 20,        // 0.05 DUST
-                RewardTxType::Referral => dust / 2,       // 0.5 DUST
-                RewardTxType::NftMint => dust * 1000,
-                RewardTxType::NftTrade => dust * 1000,
+                RewardTxType::CheckIn => cos_unit / 1000,     // 0.001 COS
+                RewardTxType::Divination => cos_unit / 10,    // 0.1 COS
+                RewardTxType::AiCashback => cos_unit * 1000,  // No practical limit
+                RewardTxType::Delete => cos_unit / 20,        // 0.05 COS
+                RewardTxType::MarketCashback => cos_unit * 1000,
+                RewardTxType::Review => cos_unit / 20,        // 0.05 COS
+                RewardTxType::Referral => cos_unit / 2,       // 0.5 COS
+                RewardTxType::NftMint => cos_unit * 1000,
+                RewardTxType::NftTrade => cos_unit * 1000,
             };
             limit.try_into().ok().unwrap_or_else(Zero::zero)
         }
@@ -978,7 +978,7 @@ pub mod pallet {
             let last_month_burn = MonthlyRewardsDistributed::<T>::get(current_month.saturating_sub(1));
 
             let monthly_burn = if last_month_burn.is_zero() {
-                // Default: assume 2000 DUST/month
+                // Default: assume 2000 COS/month
                 let default_burn: BalanceOf<T> = (2_000_000_000_000_000u128)
                     .try_into()
                     .ok()
@@ -1008,7 +1008,7 @@ pub mod pallet {
             }
         }
 
-        /// Internal function to grant DUST reward.
+        /// Internal function to grant COS reward.
         pub fn do_grant_reward(
             who: &T::AccountId,
             base_amount: BalanceOf<T>,

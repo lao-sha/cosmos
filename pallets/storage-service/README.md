@@ -1,8 +1,8 @@
-# Pallet Stardust IPFS
+# Pallet Cosmos IPFS
 
 ## 模块概述
 
-IPFS存储服务管理模块，提供去中心化内容固定（Pin）服务，是Stardust平台的核心基础设施模块。该模块实现了完整的IPFS存储服务系统，包括内容固定、运营者管理、三层分层策略、自动扣费、OCW健康巡检等核心功能，为整个平台的内容存储提供稳定可靠的去中心化基础设施。
+IPFS存储服务管理模块，提供去中心化内容固定（Pin）服务，是Cosmos平台的核心基础设施模块。该模块实现了完整的IPFS存储服务系统，包括内容固定、运营者管理、三层分层策略、自动扣费、OCW健康巡检等核心功能，为整个平台的内容存储提供稳定可靠的去中心化基础设施。
 
 本模块支持多种业务场景：
 - **纪念平台**：逝者档案、墓位信息、供奉品等内容存储
@@ -42,7 +42,7 @@ IPFS存储服务管理模块，提供去中心化内容固定（Pin）服务，�
 - **三层扣费策略**：IpfsPoolAccount → SubjectFunding → 宽限期
 - **周期性扣费**：每7天自动扣除存储费用
 - **宽限期保护**：资金不足时进入宽限期，保护现有服务
-- **配额管理**：每个subject每月100 DUST免费配额
+- **配额管理**：每个subject每月100 COS免费配额
 
 ### 5. OCW健康巡检机制
 - **自动状态检查**：定期检查所有Pin的健康状态
@@ -957,7 +957,7 @@ let result = IpfsService::fund_subject_account(
     RuntimeOrigin::signed(funder),
     SubjectType::General,
     subject_id,
-    100 * DUST,                        // 充值100 DUST
+    100 * COS,                        // 充值100 COS
 );
 
 assert_ok!(result);
@@ -1495,7 +1495,7 @@ fn update_minimum_bond(new_bond: T::Balance) {
 
 ## 与 Divination（占卜）模块集成
 
-`stardust-ipfs` 模块为 `divination` 占卜模块体系提供去中心化存储服务。占卜模块使用 `SubjectType::Custom` 来注册自定义内容域。
+`cosmos-ipfs` 模块为 `divination` 占卜模块体系提供去中心化存储服务。占卜模块使用 `SubjectType::Custom` 来注册自定义内容域。
 
 ### 占卜模块IPFS存储需求概览
 
@@ -1714,7 +1714,7 @@ IpfsService::fund_subject_account(
     RuntimeOrigin::signed(provider),
     SubjectType::Custom(b"divination-market".to_vec().try_into().unwrap()),
     provider_id,  // 服务提供者ID作为subject_id
-    100 * DUST,   // 充值100 DUST
+    100 * COS,   // 充值100 COS
 )?;
 
 // 为NFT系列的媒体存储充值
@@ -1722,7 +1722,7 @@ IpfsService::fund_subject_account(
     RuntimeOrigin::signed(creator),
     SubjectType::Custom(b"divination-nft".to_vec().try_into().unwrap()),
     collection_id,
-    500 * DUST,   // 充值500 DUST（NFT媒体较大）
+    500 * COS,   // 充值500 COS（NFT媒体较大）
 )?;
 ```
 
@@ -1775,7 +1775,7 @@ fn burn_nft(nft_id: u64) -> DispatchResult {
 
 parameter_types! {
     /// 占卜内容每 KB 存储基础费率
-    pub const DivinationStorageFeePerKb: Balance = 1_000_000_000; // 0.001 DUST
+    pub const DivinationStorageFeePerKb: Balance = 1_000_000_000; // 0.001 COS
     
     /// 占卜AI解读月免费配额
     pub const AiInterpretationMonthlyQuota: Balance = 50_000_000_000; // 50 KB等值

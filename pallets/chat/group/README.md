@@ -59,4 +59,4 @@ Chat::send_group_message(
 
 - `pallet-chat-common`: 共享类型（MessageType, EncryptionMode等）
 - `pallet-chat-permission`: 权限检查
-- `stardust-media-common`: 媒体验证
+- `cosmos-media-common`: 媒体验证

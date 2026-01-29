@@ -263,8 +263,8 @@ fn request_withdrawal(
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `MinDeposit` | `Balance` | 100 DUST | 最小保证金 |
-| `MinServicePrice` | `Balance` | 1 DUST | 最小服务价格 |
+| `MinDeposit` | `Balance` | 100 COS | 最小保证金 |
+| `MinServicePrice` | `Balance` | 1 COS | 最小服务价格 |
 | `OrderTimeout` | `BlockNumber` | 28800 (48h) | 订单超时 |
 | `AcceptTimeout` | `BlockNumber` | 1200 (2h) | 接单超时 |
 | `ReviewPeriod` | `BlockNumber` | 100800 (7d) | 评价期限 |
@@ -415,7 +415,7 @@ DivinationMarket::create_package(
     ServiceType::TextReading,    // 文字解卦
     b"详细文字解卦".to_vec(),
     b"根据卦象进行详细分析...".to_vec(),
-    10 * UNIT,                   // 10 DUST
+    10 * UNIT,                   // 10 COS
     0,                           // 无时长限制
     3,                           // 3次追问
     true,                        // 支持加急

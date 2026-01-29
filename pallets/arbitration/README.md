@@ -2,7 +2,7 @@
 
 ## 📋 模块概述
 
-`pallet-arbitration` 是 Stardust 区块链的**仲裁争议处理系统**，提供去中心化的争议登记、证据管理、仲裁裁决、资金分账、双向押金管理以及**统一投诉系统**等完整的纠纷解决功能。本模块通过域路由架构（`ArbitrationRouter`）实现与业务 pallet 的低耦合集成，支持 OTC 交易、直播、占卜服务、聊天、NFT 交易等 12 个业务域的争议处理。
+`pallet-arbitration` 是 Cosmos 区块链的**仲裁争议处理系统**，提供去中心化的争议登记、证据管理、仲裁裁决、资金分账、双向押金管理以及**统一投诉系统**等完整的纠纷解决功能。本模块通过域路由架构（`ArbitrationRouter`）实现与业务 pallet 的低耦合集成，支持 OTC 交易、直播、占卜服务、聊天、NFT 交易等 12 个业务域的争议处理。
 
 ### 核心特性
 
@@ -265,7 +265,7 @@ pub fn file_complaint(
 ```
 
 **押金计算**：
-- 使用 Pricing 接口换算 1 USDT 价值的 DUST
+- 使用 Pricing 接口换算 1 USDT 价值的 COS
 - 如 Pricing 不可用，使用 `ComplaintDeposit` 兜底值
 
 #### `respond_to_complaint` (call_index: 11)
@@ -547,7 +547,7 @@ parameter_types! {
     pub const ArbitrationResponseDeadline: BlockNumber = 100800;  // 7 天
     pub const ArbitrationRejectedSlashBps: u16 = 3000;     // 30%
     pub const ArbitrationPartialSlashBps: u16 = 5000;      // 50%
-    pub const ComplaintDeposit: Balance = 10_000_000_000;  // 10 DUST
+    pub const ComplaintDeposit: Balance = 10_000_000_000;  // 10 COS
     pub const ComplaintDepositUsd: u64 = 1_000_000;        // 1 USDT
     pub const ComplaintSlashBps: u16 = 5000;               // 50%
 }
@@ -571,7 +571,7 @@ impl pallet_arbitration::Config for Runtime {
     type Pricing = TradingPricing;
     type ComplaintSlashBps = ComplaintSlashBps;
     type TreasuryAccount = TreasuryAccountId;
-    type CidLockManager = StardustIpfs;
+    type CidLockManager = CosmosIpfs;
     type CreditUpdater = TradingCreditUpdater;
 }
 ```
@@ -806,7 +806,7 @@ console.log('已解决数:', stats.resolvedCount.toString());
 - 通过 `evidence_id` 引用证据
 - 支持多轮举证（`append_evidence_id`）
 
-### 与 pallet-stardust-ipfs 集成
+### 与 pallet-cosmos-ipfs 集成
 
 - 仲裁期间自动锁定证据 CID
 - 仲裁完成后自动解锁
@@ -835,4 +835,4 @@ MIT-0
 
 **最后更新**：2025-01-20  
 **版本**：v0.3.0  
-**维护者**：Stardust Team
+**维护者**：Cosmos Team

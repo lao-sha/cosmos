@@ -62,8 +62,8 @@ impl_opaque_keys! {
 // https://docs.substrate.io/main-docs/build/upgrade#runtime-versioning
 #[sp_version::runtime_version]
 pub const VERSION: RuntimeVersion = RuntimeVersion {
-	spec_name: alloc::borrow::Cow::Borrowed("stardust"),
-	impl_name: alloc::borrow::Cow::Borrowed("stardust"),
+	spec_name: alloc::borrow::Cow::Borrowed("cosmos"),
+	impl_name: alloc::borrow::Cow::Borrowed("cosmos"),
 	authoring_version: 1,
 	// The version of the runtime specification. A full node will not attempt to use its native
 	//   runtime in substitute for the on-chain Wasm runtime unless all of `spec_name`,

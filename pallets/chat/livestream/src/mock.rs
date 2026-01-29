@@ -62,8 +62,8 @@ impl pallet_livestream::Config for Test {
     type MaxGiftNameLen = ConstU32<32>;
     type MaxCoHostsPerRoom = ConstU32<4>;
     type PlatformFeePercent = ConstU8<20>;
-    type MinWithdrawAmount = ConstU128<1_000_000_000_000>; // 1 DUST
-    type RoomBond = ConstU128<10_000_000_000_000>; // 10 DUST 兜底
+    type MinWithdrawAmount = ConstU128<1_000_000_000_000>; // 1 COS
+    type RoomBond = ConstU128<10_000_000_000_000>; // 10 COS 兜底
     type RoomBondUsd = ConstU64<5_000_000>; // 5 USDT
     type DepositCalculator = (); // 使用空实现，返回兜底值
     type PalletId = LivestreamPalletId;
@@ -79,10 +79,10 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 
     pallet_balances::GenesisConfig::<Test> {
         balances: vec![
-            (1, 1_000_000_000_000_000), // 1000 DUST
+            (1, 1_000_000_000_000_000), // 1000 COS
             (2, 1_000_000_000_000_000),
             (3, 1_000_000_000_000_000),
-            (4, 100_000_000_000_000),   // 100 DUST
+            (4, 100_000_000_000_000),   // 100 COS
             (5, 100_000_000_000_000),
         ],
         ..Default::default()
