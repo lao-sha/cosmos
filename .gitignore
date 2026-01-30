@@ -118,6 +118,50 @@ yarn-debug.log*
 yarn-error.log*
 
 # =========================
+# AI Companion (Python)
+# =========================
+ai-companion/__pycache__/
+ai-companion/.pytest_cache/
+ai-companion/.ruff_cache/
+ai-companion/.mypy_cache/
+ai-companion/*.egg-info/
+ai-companion/.env
+ai-companion/venv/
+ai-companion/.venv/
+
+# Docker volumes (local)
+ai-companion/ollama_data/
+ai-companion/qdrant_data/
+ai-companion/redis_data/
+
+# Model cache
+ai-companion/models/
+.cache/huggingface/
+
+# =========================
+# Python General
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+.eggs/
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.hypothesis/
+
+# =========================
 # Misc
 # =========================
 *.bak
