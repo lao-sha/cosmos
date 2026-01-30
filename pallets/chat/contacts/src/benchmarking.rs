@@ -1,4 +1,4 @@
-//! Benchmarking setup for pallet-contacts
+//! Benchmarking setup for pallet-chat-contacts
 
 #![cfg(feature = "runtime-benchmarks")]
 

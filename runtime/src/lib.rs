@@ -268,6 +268,9 @@ mod runtime {
 	#[runtime::pallet_index(15)]
 	pub type TeePrivacy = pallet_tee_privacy;
 
+	#[runtime::pallet_index(16)]
+	pub type DivinationOcwTee = pallet_divination_ocw_tee;
+
 	// 服务模块
 	#[runtime::pallet_index(12)]
 	pub type DivinationAi = pallet_divination_ai;
@@ -374,4 +377,30 @@ mod runtime {
 
 	#[runtime::pallet_index(81)]
 	pub type MatchmakingProfile = pallet_matchmaking_profile;
+
+	// ============================================================================
+	// Smart Contracts
+	// ============================================================================
+
+	#[runtime::pallet_index(90)]
+	pub type Contracts = pallet_contracts;
+
+	// ============================================================================
+	// Meowstar Universe Pallets
+	// ============================================================================
+
+	#[runtime::pallet_index(100)]
+	pub type MeowstarPet = pallet_meowstar_pet;
+
+	#[runtime::pallet_index(101)]
+	pub type MeowstarBattle = pallet_meowstar_battle;
+
+	#[runtime::pallet_index(102)]
+	pub type MeowstarStaking = pallet_meowstar_staking;
+
+	#[runtime::pallet_index(103)]
+	pub type MeowstarGovernance = pallet_meowstar_governance;
+
+	#[runtime::pallet_index(104)]
+	pub type MeowstarMarketplace = pallet_meowstar_marketplace;
 }

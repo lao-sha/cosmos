@@ -32,6 +32,8 @@ pallet-collective-membership = { workspace = true }
 pallet-timestamp = { version = "44.0.0", workspace = true }
 pallet-transaction-payment-rpc-runtime-api = { version = "45.0.0", workspace = true }
 pallet-transaction-payment = { version = "45.0.0", workspace = true }
+# Contracts pallet
+pallet-contracts = { version = "45.0.1", workspace = true }
 # Divination pallets
 pallet-divination-common = { workspace = true }
 pallet-divination-privacy = { workspace = true }
@@ -51,6 +53,8 @@ pallet-tarot = { workspace = true }
 pallet-divination-membership = { workspace = true }
 # TEE Privacy pallet
 pallet-tee-privacy = { workspace = true }
+# OCW-TEE pallet
+pallet-divination-ocw-tee = { workspace = true }
 # Chat pallets
 pallet-chat-common = { workspace = true }
 pallet-chat-permission = { workspace = true }
@@ -79,6 +83,12 @@ pallet-storage-lifecycle = { workspace = true }
 pallet-matchmaking-membership = { workspace = true }
 pallet-matchmaking-profile = { workspace = true }
 pallet-matchmaking-common = { workspace = true }
+# Meowstar Universe pallets
+pallet-meowstar-pet = { workspace = true }
+pallet-meowstar-battle = { workspace = true }
+pallet-meowstar-staking = { workspace = true }
+pallet-meowstar-governance = { workspace = true }
+pallet-meowstar-marketplace = { workspace = true }
 scale-info = { features = ["derive", "serde"], workspace = true }
 serde_json = { workspace = true, default-features = false, features = ["alloc"] }
 sp-api = { version = "40.0.0", workspace = true }
@@ -121,6 +131,8 @@ std = [
 	"pallet-timestamp/std",
 	"pallet-transaction-payment-rpc-runtime-api/std",
 	"pallet-transaction-payment/std",
+	# Contracts pallet std
+	"pallet-contracts/std",
 	# Divination pallets std
 	"pallet-divination-common/std",
 	"pallet-divination-privacy/std",
@@ -140,6 +152,8 @@ std = [
 	"pallet-divination-membership/std",
 	# TEE Privacy pallet std
 	"pallet-tee-privacy/std",
+	# OCW-TEE pallet std
+	"pallet-divination-ocw-tee/std",
 	# Chat pallets std
 	"pallet-chat-common/std",
 	"pallet-chat-permission/std",
@@ -165,6 +179,12 @@ std = [
 	# Storage lifecycle pallet std
 	"pallet-storage-lifecycle/std",
 	"pallet-matchmaking-membership/std",
+	# Meowstar Universe pallets std
+	"pallet-meowstar-pet/std",
+	"pallet-meowstar-battle/std",
+	"pallet-meowstar-staking/std",
+	"pallet-meowstar-governance/std",
+	"pallet-meowstar-marketplace/std",
 	"scale-info/std",
 	"serde_json/std",
 	"sp-api/std",
@@ -196,6 +216,8 @@ runtime-benchmarks = [
 	"pallet-collective-membership/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
 	"pallet-transaction-payment/runtime-benchmarks",
+	# Contracts pallet benchmarks
+	"pallet-contracts/runtime-benchmarks",
 	# Divination pallets benchmarks
 	"pallet-divination-privacy/runtime-benchmarks",
 	"pallet-almanac/runtime-benchmarks",
@@ -213,6 +235,8 @@ runtime-benchmarks = [
 	"pallet-divination-membership/runtime-benchmarks",
 	# TEE Privacy pallet benchmarks
 	"pallet-tee-privacy/runtime-benchmarks",
+	# OCW-TEE pallet benchmarks
+	"pallet-divination-ocw-tee/runtime-benchmarks",
 	# Chat pallets benchmarks
 	"pallet-chat-permission/runtime-benchmarks",
 	"pallet-chat-core/runtime-benchmarks",
@@ -249,6 +273,8 @@ try-runtime = [
 	"pallet-collective-membership/try-runtime",
 	"pallet-timestamp/try-runtime",
 	"pallet-transaction-payment/try-runtime",
+	# Contracts pallet try-runtime
+	"pallet-contracts/try-runtime",
 	# Divination pallets try-runtime
 	"pallet-divination-privacy/try-runtime",
 	"pallet-almanac/try-runtime",
@@ -266,6 +292,8 @@ try-runtime = [
 	"pallet-divination-membership/try-runtime",
 	# TEE Privacy pallet try-runtime
 	"pallet-tee-privacy/try-runtime",
+	# OCW-TEE pallet try-runtime
+	"pallet-divination-ocw-tee/try-runtime",
 	# Chat pallets try-runtime
 	"pallet-chat-permission/try-runtime",
 	"pallet-chat-core/try-runtime",

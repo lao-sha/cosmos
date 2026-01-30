@@ -46,7 +46,7 @@ export default function ReceiveScreen() {
         <View style={styles.infoCard}>
           <Text style={styles.infoTitle}>💡 收款须知</Text>
           <Text style={styles.infoText}>
-            • 仅支持接收 STAR 代币{'\n'}
+            • 仅支持接收 COS 代币{'\n'}
             • 请确保发送方使用正确的网络{'\n'}
             • 转账通常在几秒内到账
           </Text>
@@ -59,7 +59,7 @@ export default function ReceiveScreen() {
               <Text style={styles.tokenEmoji}>⭐</Text>
             </View>
             <View style={styles.tokenDetails}>
-              <Text style={styles.tokenSymbol}>STAR</Text>
+              <Text style={styles.tokenSymbol}>COS</Text>
               <Text style={styles.tokenName}>Cosmos Token</Text>
             </View>
           </View>

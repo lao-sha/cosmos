@@ -15,7 +15,7 @@ export default function MarketScreen() {
   const { providers, loading, error, categories } = useProviders(selectedCategory);
 
   const handleCategoryPress = (category: DivinationCategory) => {
-    setSelectedCategory(selectedCategory === category.id ? null : category.id);
+    router.push(`/divination/${category.id}` as any);
   };
 
   const handleProviderPress = (provider: Provider) => {

@@ -41,7 +41,7 @@ export function BalanceDisplay({ compact = false, showRefresh = true }: BalanceD
         {loading ? (
           <ActivityIndicator size="small" color="#6D28D9" />
         ) : (
-          <Text style={styles.compactValue}>{balance} STAR</Text>
+          <Text style={styles.compactValue}>{balance} COS</Text>
         )}
       </View>
     );
@@ -64,7 +64,7 @@ export function BalanceDisplay({ compact = false, showRefresh = true }: BalanceD
         ) : (
           <>
             <Text style={styles.value}>{balance}</Text>
-            <Text style={styles.unit}>STAR</Text>
+            <Text style={styles.unit}>COS</Text>
           </>
         )}
       </View>

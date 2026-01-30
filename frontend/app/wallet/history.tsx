@@ -125,7 +125,7 @@ export default function HistoryScreen() {
                 { color: isIncoming ? '#22c55e' : '#1f2937' },
               ]}
             >
-              {isIncoming ? '+' : '-'}{item.amount} STAR
+              {isIncoming ? '+' : '-'}{item.amount} COS
             </Text>
           </View>
 

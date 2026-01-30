@@ -50,6 +50,11 @@ members = [
     "pallets/matchmaking/recommendation",
     "pallets/matchmaking/interaction",
     "pallets/matchmaking/membership",
+    "pallets/meowstar/pet",
+    "pallets/meowstar/battle",
+    "pallets/meowstar/staking",
+    "pallets/meowstar/governance",
+    "pallets/meowstar/marketplace",
     "media-utils",
     "runtime",
 ]
@@ -81,7 +86,7 @@ pallet-chat-common = { path = "./pallets/chat/common", default-features = false 
 pallet-chat-permission = { path = "./pallets/chat/permission", default-features = false }
 pallet-chat-core = { path = "./pallets/chat/core", default-features = false }
 pallet-chat-group = { path = "./pallets/chat/group", default-features = false }
-pallet-contacts = { path = "./pallets/chat/contacts", default-features = false }
+pallet-chat-contacts = { path = "./pallets/chat/contacts", default-features = false }
 pallet-livestream = { path = "./pallets/chat/livestream", default-features = false }
 # Trading pallets
 pallet-trading-common = { path = "./pallets/trading/common", default-features = false }
@@ -109,6 +114,12 @@ pallet-matchmaking-matching = { path = "./pallets/matchmaking/matching", default
 pallet-matchmaking-recommendation = { path = "./pallets/matchmaking/recommendation", default-features = false }
 pallet-matchmaking-interaction = { path = "./pallets/matchmaking/interaction", default-features = false }
 pallet-matchmaking-membership = { path = "./pallets/matchmaking/membership", default-features = false }
+# Meowstar Universe pallets
+pallet-meowstar-pet = { path = "./pallets/meowstar/pet", default-features = false }
+pallet-meowstar-battle = { path = "./pallets/meowstar/battle", default-features = false }
+pallet-meowstar-staking = { path = "./pallets/meowstar/staking", default-features = false }
+pallet-meowstar-governance = { path = "./pallets/meowstar/governance", default-features = false }
+pallet-meowstar-marketplace = { path = "./pallets/meowstar/marketplace", default-features = false }
 # Additional dependencies
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 sp-application-crypto = { version = "44.0.0", default-features = false }
@@ -119,6 +130,7 @@ frame-system = { version = "45.0.0", default-features = false }
 futures = { version = "0.3.31" }
 jsonrpsee = { version = "0.24.3" }
 pallet-transaction-payment = { version = "45.0.0", default-features = false }
+pallet-insecure-randomness-collective-flip = { version = "25.0.0", default-features = false }
 pallet-transaction-payment-rpc = { version = "48.0.0", default-features = false }
 sc-basic-authorship = { version = "0.53.0", default-features = false }
 sc-cli = { version = "0.57.0", default-features = false }
@@ -161,6 +173,7 @@ pallet-sudo = { version = "45.0.0", default-features = false }
 pallet-collective = { version = "45.0.0", default-features = false }
 pallet-collective-membership = { package = "pallet-membership", version = "45.0.0", default-features = false }
 pallet-timestamp = { version = "44.0.0", default-features = false }
+pallet-contracts = { version = "45.0.1", default-features = false }
 pallet-transaction-payment-rpc-runtime-api = { version = "45.0.0", default-features = false }
 scale-info = { version = "2.11.6", default-features = false }
 serde_json = { version = "1.0.132", default-features = false }

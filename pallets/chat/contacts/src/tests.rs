@@ -1,4 +1,4 @@
-//! Tests for pallet-contacts
+//! Tests for pallet-chat-contacts
 
 use crate::{mock::*, Error, Event, FriendStatus};
 use frame_support::{assert_noop, assert_ok, BoundedVec};

@@ -2,7 +2,7 @@
 
 ## 概述
 
-`pallet-contacts` 是 Cosmos 区块链的去中心化通讯录管理模块，提供联系人管理、分组管理、黑名单机制和好友申请等功能。
+`pallet-chat-contacts` 是 Cosmos 区块链的去中心化通讯录管理模块，提供联系人管理、分组管理、黑名单机制和好友申请等功能。
 
 ## 功能特性
 
@@ -263,7 +263,7 @@ if group.privacy == GroupPrivacy::FriendsOnly {
 运行单元测试：
 
 ```bash
-cargo test -p pallet-contacts
+cargo test -p pallet-chat-contacts
 ```
 
 ## License

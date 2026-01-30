@@ -1,4 +1,4 @@
-//! Mock runtime for pallet-contacts tests
+//! Mock runtime for pallet-chat-contacts tests
 
 use crate as pallet_contacts;
 use frame_support::{

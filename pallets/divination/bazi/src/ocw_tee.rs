@@ -293,7 +293,7 @@ impl<T: crate::pallet::Config> DivinationModule<T> for BaziModuleHandler<T> {
     /// 从计算结果提取索引
     fn extract_index(result: &Self::Result, privacy_mode: PrivacyMode) -> Option<Self::Index> {
         match privacy_mode {
-            PrivacyMode::Public | PrivacyMode::Encrypted => Some(result.sizhu_index),
+            PrivacyMode::Public | PrivacyMode::PublicEncrypted | PrivacyMode::Encrypted => Some(result.sizhu_index),
             PrivacyMode::Private => None, // Private 模式不存储索引
         }
     }
@@ -305,8 +305,8 @@ impl<T: crate::pallet::Config> DivinationModule<T> for BaziModuleHandler<T> {
         privacy_mode: PrivacyMode,
     ) -> Result<Vec<u8>, ModuleError> {
         let manifest = match privacy_mode {
-            PrivacyMode::Public => {
-                // 公开模式：所有数据明文
+            PrivacyMode::Public | PrivacyMode::PublicEncrypted => {
+                // 公开/公开加密模式：所有数据明文（PublicEncrypted 会在 OCW 层加密整个清单）
                 let birth_time = match input.input_type {
                     BaziInputType::Solar { year, month, day, hour, minute } => {
                         Some(BirthTimeJson { year, month, day, hour, minute })

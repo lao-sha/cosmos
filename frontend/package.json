@@ -12,6 +12,9 @@
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
+    "@noble/ciphers": "^1.2.1",
+    "@noble/curves": "^1.8.1",
+    "@noble/hashes": "^1.7.1",
     "@polkadot/api": "^16.5.4",
     "@polkadot/keyring": "^14.0.1",
     "@polkadot/util": "^14.0.1",

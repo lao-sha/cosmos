@@ -260,6 +260,648 @@ class TransactionService {
       };
     }
   }
+
+  async createBaziChart(
+    mnemonic: string,
+    params: {
+      name?: string;
+      input: 
+        | { Solar: { year: number; month: number; day: number; hour: number; minute: number } }
+        | { Lunar: { year: number; month: number; day: number; hour: number; minute: number; is_leap_month: boolean } }
+        | { SiZhu: { year_gan: number; year_zhi: number; month_gan: number; month_zhi: number; day_gan: number; day_zhi: number; hour_gan: number; hour_zhi: number } };
+      gender: 'Male' | 'Female';
+      zishi_mode: 'Modern' | 'Traditional';
+      longitude?: number;
+    },
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).divinationBazi.createBaziChart(
+        params.name || null,
+        params.input,
+        { [params.gender]: null },
+        { [params.zishi_mode]: null },
+        params.longitude ?? null
+      );
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async createQimenChart(
+    mnemonic: string,
+    params: {
+      solar_year: number;
+      solar_month: number;
+      solar_day: number;
+      hour: number;
+      question_hash: number[];
+      is_public: boolean;
+      name?: string;
+      gender?: number;
+      birth_year?: number;
+      question?: string;
+      question_type?: number;
+      pan_method: number;
+    },
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).divinationQimen.divineBySolarTime(
+        params.solar_year,
+        params.solar_month,
+        params.solar_day,
+        params.hour,
+        params.question_hash,
+        params.is_public,
+        params.name || null,
+        params.gender ?? null,
+        params.birth_year ?? null,
+        params.question || null,
+        params.question_type ?? null,
+        params.pan_method
+      );
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  // ==================== 群聊相关 ====================
+
+  async createGroup(
+    mnemonic: string,
+    params: {
+      name: string;
+      description?: string;
+      encryption_mode: number;
+      is_public: boolean;
+    },
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).chatGroup.createGroup(
+        params.name,
+        params.description || null,
+        params.encryption_mode,
+        params.is_public
+      );
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async sendGroupMessage(
+    mnemonic: string,
+    groupId: number,
+    content: string,
+    messageType: number = 0,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).chatGroup.sendGroupMessage(
+        groupId,
+        content,
+        messageType
+      );
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async joinGroup(
+    mnemonic: string,
+    groupId: number,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).chatGroup.joinGroup(groupId);
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async leaveGroup(
+    mnemonic: string,
+    groupId: number,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).chatGroup.leaveGroup(groupId);
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async disbandGroup(
+    mnemonic: string,
+    groupId: number,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).chatGroup.disbandGroup(groupId);
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  // ========================================
+  // 做市商相关交易
+  // ========================================
+
+  async lockMakerDeposit(
+    mnemonic: string,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingMaker.lockDeposit();
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async submitMakerInfo(
+    mnemonic: string,
+    realName: string,
+    idCardNumber: string,
+    birthday: string,
+    tronAddress: string,
+    wechatId: string,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingMaker.submitInfo(
+        realName,
+        idCardNumber,
+        birthday,
+        tronAddress,
+        wechatId
+      );
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async cancelMaker(
+    mnemonic: string,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingMaker.cancelMaker();
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async requestMakerWithdrawal(
+    mnemonic: string,
+    amount: string,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingMaker.requestWithdrawal(amount);
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async executeMakerWithdrawal(
+    mnemonic: string,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingMaker.executeWithdrawal();
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async cancelMakerWithdrawal(
+    mnemonic: string,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingMaker.cancelWithdrawal();
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async replenishMakerDeposit(
+    mnemonic: string,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingMaker.replenishDeposit();
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async appealMakerPenalty(
+    mnemonic: string,
+    penaltyId: number,
+    evidenceCid: string,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingMaker.appealPenalty(penaltyId, evidenceCid);
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  // ========================================
+  // OTC 订单相关交易
+  // ========================================
+
+  async createOtcOrderNew(
+    mnemonic: string,
+    makerId: number,
+    cosAmount: string,
+    paymentCommit: string,
+    contactCommit: string,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingOtc.createOrder(
+        makerId,
+        cosAmount,
+        paymentCommit,
+        contactCommit
+      );
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async createFirstPurchase(
+    mnemonic: string,
+    makerId: number,
+    paymentCommit: string,
+    contactCommit: string,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingOtc.createFirstPurchase(
+        makerId,
+        paymentCommit,
+        contactCommit
+      );
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async markOtcPaid(
+    mnemonic: string,
+    orderId: number,
+    tronTxHash?: string,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const hashParam = tronTxHash ? tronTxHash : null;
+      const tx = (api.tx as any).tradingOtc.markPaid(orderId, hashParam);
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async releaseOtcCos(
+    mnemonic: string,
+    orderId: number,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingOtc.releaseCos(orderId);
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async cancelOtcOrder(
+    mnemonic: string,
+    orderId: number,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingOtc.cancelOrder(orderId);
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async disputeOtcOrder(
+    mnemonic: string,
+    orderId: number,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingOtc.disputeOrder(orderId);
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async initiateOtcDispute(
+    mnemonic: string,
+    orderId: number,
+    evidenceCid: string,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingOtc.initiateDispute(orderId, evidenceCid);
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async respondOtcDispute(
+    mnemonic: string,
+    orderId: number,
+    evidenceCid: string,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingOtc.respondDispute(orderId, evidenceCid);
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  // ========================================
+  // Swap 兑换相关交易
+  // ========================================
+
+  async createSwap(
+    mnemonic: string,
+    makerId: number,
+    cosAmount: string,
+    usdtAddress: string,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingSwap.makerSwap(
+        makerId,
+        cosAmount,
+        usdtAddress
+      );
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async markSwapComplete(
+    mnemonic: string,
+    swapId: number,
+    trc20TxHash: string,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingSwap.markSwapComplete(swapId, trc20TxHash);
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async reportSwap(
+    mnemonic: string,
+    swapId: number,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingSwap.reportSwap(swapId);
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
+  async handleSwapVerificationTimeout(
+    mnemonic: string,
+    swapId: number,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).tradingSwap.handleVerificationTimeout(swapId);
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
 }
 
 export const transactionService = new TransactionService();

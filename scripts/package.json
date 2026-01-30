@@ -1,0 +1,25 @@
+{
+  "name": "cosmos-test-scripts",
+  "version": "1.0.0",
+  "description": "Cosmos chain test scripts",
+  "type": "module",
+  "scripts": {
+    "test:maker": "tsx test-maker.ts",
+    "test:otc": "tsx test-otc.ts",
+    "test:swap": "tsx test-swap.ts",
+    "test:pricing": "tsx test-pricing.ts",
+    "test:referral": "tsx test-referral.ts",
+    "test:all": "tsx run-all-tests.ts"
+  },
+  "dependencies": {
+    "@polkadot/api": "^12.0.0",
+    "@polkadot/keyring": "^12.0.0",
+    "@polkadot/util": "^12.0.0",
+    "@polkadot/util-crypto": "^12.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0",
+    "@types/node": "^20.0.0"
+  }
+}

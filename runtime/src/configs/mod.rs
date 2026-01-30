@@ -43,7 +43,7 @@ use sp_version::RuntimeVersion;
 use super::{
 	AccountId, Aura, Balance, Balances, Block, BlockNumber, Hash, Nonce, PalletInfo, Runtime,
 	RuntimeCall, RuntimeEvent, RuntimeFreezeReason, RuntimeHoldReason, RuntimeOrigin, RuntimeTask,
-	System, EXISTENTIAL_DEPOSIT, SLOT_DURATION, VERSION, UNIT, MINUTES, HOURS, DAYS,
+	System, Timestamp, EXISTENTIAL_DEPOSIT, SLOT_DURATION, VERSION, UNIT, MINUTES, HOURS, DAYS,
 	TechnicalCommittee, ArbitrationCommittee, TreasuryCouncil, ContentCommittee,
 };
 
@@ -958,6 +958,7 @@ impl pallet_referral::Config for Runtime {
 	type MembershipProvider = BalanceBasedMembership;
 	type MaxCodeLen = ConstU32<32>;
 	type MaxSearchHops = ConstU32<20>;
+	type MaxDownlines = ConstU32<1000>;
 	type WeightInfo = pallet_referral::weights::SubstrateWeight<Runtime>;
 }
 
@@ -1568,3 +1569,346 @@ impl pallet_storage_lifecycle::Config for Runtime {
 	type EnablePurge = ConstBool<false>;             // 默认不启用清除
 	type MaxBatchSize = ConstU32<100>;               // 每次最多处理100条
 }
+
+// ============================================================================
+// Divination OCW-TEE Pallet Configuration
+// ============================================================================
+
+impl pallet_divination_ocw_tee::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type OcwInterval = ConstU32<5>;              // 每5个区块处理一次
+	type MaxRetryCount = ConstU8<3>;             // 最大重试3次
+	type MaxRequestsPerBlock = ConstU32<10>;     // 每区块最多处理10个请求
+	type MaxInputDataLen = ConstU32<1024>;       // 最大输入数据1KB
+	type TeeClient = pallet_divination_ocw_tee::NullTeeClient;
+	type IpfsClient = pallet_divination_ocw_tee::NullIpfsClient;
+	type TeeNodeManager = pallet_divination_ocw_tee::NullTeeNodeManager<AccountId>;
+	type TeePrivacy = TeePrivacyIntegrationImpl;
+	type IpfsPinner = pallet_storage_service::Pallet<Runtime>;
+	type ModuleRegistry = pallet_divination_ocw_tee::DefaultModuleRegistry;
+}
+
+/// TEE Privacy 集成实现
+/// 
+/// 通过 pallet-tee-privacy 的存储 getter 实现集成接口
+pub struct TeePrivacyIntegrationImpl;
+
+impl pallet_divination_ocw_tee::TeePrivacyIntegration<AccountId, BlockNumber> for TeePrivacyIntegrationImpl {
+	fn submit_request(
+		_requester: AccountId,
+		_compute_type_id: u8,
+		_input_hash: [u8; 32],
+		_timeout_blocks: u32,
+	) -> Result<u64, sp_runtime::DispatchError> {
+		// 请求提交通过 extrinsic 完成，此处返回下一个 ID
+		Ok(pallet_tee_privacy::Pallet::<Runtime>::next_request_id())
+	}
+
+	fn get_request_status(request_id: u64) -> Option<pallet_divination_ocw_tee::RequestStatus> {
+		pallet_tee_privacy::Pallet::<Runtime>::compute_requests(request_id)
+			.map(|req| match req.status {
+				pallet_tee_privacy::types::RequestStatus::Pending => pallet_divination_ocw_tee::RequestStatus::Pending,
+				pallet_tee_privacy::types::RequestStatus::Processing => pallet_divination_ocw_tee::RequestStatus::Processing,
+				pallet_tee_privacy::types::RequestStatus::Completed => pallet_divination_ocw_tee::RequestStatus::Completed,
+				pallet_tee_privacy::types::RequestStatus::Failed => pallet_divination_ocw_tee::RequestStatus::Failed,
+				pallet_tee_privacy::types::RequestStatus::Timeout => pallet_divination_ocw_tee::RequestStatus::Timeout,
+			})
+	}
+
+	fn get_request(request_id: u64) -> Option<(AccountId, u8, [u8; 32], Option<AccountId>)> {
+		pallet_tee_privacy::Pallet::<Runtime>::compute_requests(request_id)
+			.map(|req| (req.requester, req.compute_type_id, req.input_hash, req.assigned_node))
+	}
+
+	fn get_pending_requests() -> alloc::vec::Vec<u64> {
+		pallet_tee_privacy::Pallet::<Runtime>::pending_requests().into_inner()
+	}
+
+	fn get_available_node() -> Option<AccountId> {
+		// 从已注册的 TEE 节点中选择一个可用的
+		// 简化实现：返回第一个在线节点
+		None // TODO: 实现节点选择逻辑
+	}
+
+	fn get_node_enclave_pubkey(node: &AccountId) -> Option<[u8; 32]> {
+		pallet_tee_privacy::Pallet::<Runtime>::tee_nodes(node)
+			.map(|info| info.enclave_pubkey)
+	}
+
+	fn get_node_endpoint(node: &AccountId) -> Option<alloc::vec::Vec<u8>> {
+		// TeeNode 没有 endpoint 字段，返回空
+		pallet_tee_privacy::Pallet::<Runtime>::tee_nodes(node)
+			.map(|_| alloc::vec::Vec::new())
+	}
+
+	fn assign_node(_request_id: u64, _node: AccountId) -> Result<(), sp_runtime::DispatchError> {
+		// 节点分配在 submit_compute_request 中完成
+		Ok(())
+	}
+
+	fn submit_result(
+		_request_id: u64,
+		_executor: AccountId,
+		_output_hash: [u8; 32],
+		_signature: [u8; 64],
+	) -> Result<(), sp_runtime::DispatchError> {
+		// 结果提交通过 extrinsic 完成
+		Ok(())
+	}
+
+	fn mark_request_failed(
+		_request_id: u64,
+		_reason: pallet_divination_ocw_tee::FailureReason,
+	) -> Result<(), sp_runtime::DispatchError> {
+		// 失败标记通过 extrinsic 完成
+		Ok(())
+	}
+
+	fn verify_enclave_signature(
+		_node: &AccountId,
+		_data: &[u8],
+		_signature: &[u8; 64],
+	) -> bool {
+		// TODO: 实现 SGX 签名验证
+		true
+	}
+
+	fn get_node_stats(node: &AccountId) -> Option<pallet_divination_ocw_tee::NodeStatistics> {
+		// NodeStatistics 是从 pallet-tee-privacy 重新导出的，直接返回
+		pallet_tee_privacy::Pallet::<Runtime>::node_stats(node)
+	}
+
+	fn is_node_active(node: &AccountId) -> bool {
+		pallet_tee_privacy::Pallet::<Runtime>::tee_nodes(node)
+			.map(|info| info.status == pallet_tee_privacy::types::TeeNodeStatus::Active)
+			.unwrap_or(false)
+	}
+}
+
+// ============================================================================
+// Contracts Pallet Configuration
+// ============================================================================
+
+parameter_types! {
+	pub ContractsSchedule: pallet_contracts::Schedule<Runtime> = Default::default();
+	pub const CodeHashLockupDepositPercent: Perbill = Perbill::from_percent(30);
+}
+
+/// 随机数源（使用确定性随机）
+pub struct DummyRandomness;
+impl frame_support::traits::Randomness<Hash, BlockNumber> for DummyRandomness {
+	fn random(subject: &[u8]) -> (Hash, BlockNumber) {
+		use sp_runtime::traits::Hash as HashT;
+		let block_number = System::block_number();
+		let hash = <Runtime as frame_system::Config>::Hashing::hash(subject);
+		(hash, block_number)
+	}
+}
+
+impl pallet_contracts::Config for Runtime {
+	type Time = Timestamp;
+	type Randomness = DummyRandomness;
+	type Currency = Balances;
+	type RuntimeEvent = RuntimeEvent;
+	type RuntimeCall = RuntimeCall;
+
+	/// 合约调用栈深度限制
+	type CallStack = [pallet_contracts::Frame<Self>; 23];
+
+	/// 合约存储押金（每字节）
+	type DepositPerByte = ConstU128<{ UNIT / 1000 }>;
+	/// 合约存储押金（每个存储项）
+	type DepositPerItem = ConstU128<{ UNIT / 100 }>;
+	/// 默认存款限制
+	type DefaultDepositLimit = ConstU128<{ 100 * UNIT }>;
+
+	/// 代码哈希锁定押金百分比
+	type CodeHashLockupDepositPercent = CodeHashLockupDepositPercent;
+
+	/// 权重信息
+	type WeightPrice = pallet_transaction_payment::Pallet<Self>;
+	type WeightInfo = pallet_contracts::weights::SubstrateWeight<Self>;
+
+	/// 链扩展（无）
+	type ChainExtension = ();
+
+	/// 调度表
+	type Schedule = ContractsSchedule;
+
+	/// 地址生成器
+	type AddressGenerator = pallet_contracts::DefaultAddressGenerator;
+
+	/// 最大代码长度
+	type MaxCodeLen = ConstU32<{ 256 * 1024 }>;
+	/// 最大存储键长度
+	type MaxStorageKeyLen = ConstU32<128>;
+
+	/// 不安全的不稳定接口（生产环境应禁用）
+	type UnsafeUnstableInterface = ConstBool<false>;
+
+	/// 上传来源
+	type UploadOrigin = frame_system::EnsureSigned<AccountId>;
+	/// 实例化来源
+	type InstantiateOrigin = frame_system::EnsureSigned<AccountId>;
+
+	/// 最大调试缓冲区长度
+	type MaxDebugBufferLen = ConstU32<{ 2 * 1024 * 1024 }>;
+
+	/// 最大委托依赖数
+	type MaxDelegateDependencies = ConstU32<32>;
+
+	/// 运行时 Hold 原因
+	type RuntimeHoldReason = RuntimeHoldReason;
+
+	/// 环境类型
+	type Environment = ();
+
+	/// API 版本
+	type ApiVersion = ();
+
+	/// Xcm 相关（不使用）
+	type Xcm = ();
+
+	/// 迁移
+	type Migrations = ();
+
+	/// 调试
+	type Debug = ();
+
+	/// 调用过滤器（允许所有调用）
+	type CallFilter = frame_support::traits::Everything;
+
+	/// 最大瞬态存储大小
+	type MaxTransientStorageSize = ConstU32<{ 1024 * 1024 }>;
+}
+
+// ============================================================================
+// Meowstar Universe Pallets Configuration
+// ============================================================================
+
+parameter_types! {
+	/// 孵化费用: 10 COS
+	pub const MeowstarHatchingFee: Balance = 10 * UNIT;
+	/// 升级基础费用: 0.1 COS
+	pub const MeowstarLevelUpBaseFee: Balance = UNIT / 10;
+	/// 进化费用倍数
+	pub const MeowstarEvolutionFeeMultiplier: u32 = 50;
+	/// 每个账户最大宠物数量
+	pub const MeowstarMaxPetsPerAccount: u32 = 100;
+	/// 战斗入场费: 0.5 COS
+	pub const MeowstarBattleEntryFee: Balance = UNIT / 2;
+	/// 最大回合数
+	pub const MeowstarMaxTurns: u32 = 50;
+	/// 战斗超时区块数
+	pub const MeowstarBattleTimeout: BlockNumber = 100;
+}
+
+impl pallet_meowstar_pet::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type Randomness = CollectiveFlipRandomness;
+	type MaxPetsPerAccount = MeowstarMaxPetsPerAccount;
+	type HatchingFee = MeowstarHatchingFee;
+	type LevelUpBaseFee = MeowstarLevelUpBaseFee;
+	type EvolutionFeeMultiplier = MeowstarEvolutionFeeMultiplier;
+	type WeightInfo = pallet_meowstar_pet::weights::SubstrateWeight<Runtime>;
+}
+
+impl pallet_meowstar_battle::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type BattleRandomness = CollectiveFlipRandomness;
+	type BattleEntryFee = MeowstarBattleEntryFee;
+	type MaxTurns = MeowstarMaxTurns;
+	type BattleTimeout = MeowstarBattleTimeout;
+	type BattleWeightInfo = pallet_meowstar_battle::weights::SubstrateWeight<Runtime>;
+}
+
+// ============================================================================
+// Meowstar Staking Configuration
+// ============================================================================
+
+parameter_types! {
+	/// 最小质押金额: 100 COS
+	pub const MeowstarMinStakeAmount: Balance = 100 * UNIT;
+	/// 每个账户最大质押数量
+	pub const MeowstarMaxStakesPerAccount: u32 = 10;
+	/// 奖励发放间隔 (约 1 天)
+	pub const MeowstarRewardInterval: BlockNumber = 14400;
+}
+
+impl pallet_meowstar_staking::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type MinStakeAmount = MeowstarMinStakeAmount;
+	type MaxStakesPerAccount = MeowstarMaxStakesPerAccount;
+	type RewardInterval = MeowstarRewardInterval;
+	type WeightInfo = pallet_meowstar_staking::weights::SubstrateWeight<Runtime>;
+}
+
+// ============================================================================
+// Meowstar Governance Configuration
+// ============================================================================
+
+parameter_types! {
+	/// 创建提案所需最小质押权重
+	pub const MeowstarMinProposalWeight: u128 = 10000;
+	/// 提案押金: 100 COS
+	pub const MeowstarProposalDeposit: Balance = 100 * UNIT;
+	/// 投票期: 约 7 天
+	pub const MeowstarVotingPeriod: BlockNumber = 100800;
+	/// 执行延迟: 约 2 天
+	pub const MeowstarExecutionDelay: BlockNumber = 28800;
+	/// 通过阈值: 60%
+	pub const MeowstarPassThreshold: u32 = 6000;
+	/// 最低参与率: 10%
+	pub const MeowstarQuorumThreshold: u32 = 1000;
+}
+
+impl pallet_meowstar_governance::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type MinProposalWeight = MeowstarMinProposalWeight;
+	type ProposalDeposit = MeowstarProposalDeposit;
+	type VotingPeriod = MeowstarVotingPeriod;
+	type ExecutionDelay = MeowstarExecutionDelay;
+	type PassThreshold = MeowstarPassThreshold;
+	type QuorumThreshold = MeowstarQuorumThreshold;
+	type GovWeightInfo = pallet_meowstar_governance::weights::SubstrateWeight<Runtime>;
+}
+
+// ============================================================================
+// Meowstar Marketplace Configuration
+// ============================================================================
+
+parameter_types! {
+	/// 交易手续费率: 2.5%
+	pub const MeowstarTradeFeeRate: u32 = 250;
+	/// 最小挂单价格: 1 COS
+	pub const MeowstarMinListingPrice: Balance = UNIT;
+	/// 默认挂单有效期: 约 7 天
+	pub const MeowstarDefaultListingDuration: BlockNumber = 100800;
+	/// 拍卖最小加价比例: 5%
+	pub const MeowstarMinBidIncrement: u32 = 500;
+}
+
+pub struct MeowstarFeeReceiver;
+impl frame_support::traits::Get<AccountId> for MeowstarFeeReceiver {
+	fn get() -> AccountId {
+		// 使用国库账户作为手续费接收者
+		// 实际部署时应配置为专门的账户
+		sp_runtime::AccountId32::new([0u8; 32])
+	}
+}
+
+impl pallet_meowstar_marketplace::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type TradeFeeRate = MeowstarTradeFeeRate;
+	type MinListingPrice = MeowstarMinListingPrice;
+	type DefaultListingDuration = MeowstarDefaultListingDuration;
+	type MinBidIncrement = MeowstarMinBidIncrement;
+	type FeeReceiver = MeowstarFeeReceiver;
+	type MarketWeightInfo = pallet_meowstar_marketplace::weights::SubstrateWeight<Runtime>;
+}
+

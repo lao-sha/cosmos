@@ -190,7 +190,7 @@ export default function WalletScreen() {
           <View style={styles.assetCard}>
             <View style={styles.assetRow}>
               <View style={styles.assetInfo}>
-                <Text style={styles.assetSymbol}>STAR</Text>
+                <Text style={styles.assetSymbol}>COS</Text>
                 <Text style={styles.assetName}>Cosmos Token</Text>
               </View>
               <View style={styles.assetAmount}>

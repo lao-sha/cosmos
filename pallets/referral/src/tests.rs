@@ -426,3 +426,86 @@ fn test_referral_provider_get_referral_chain() {
         assert_eq!(chain, vec![2, 3]);
     });
 }
+
+// ========================================
+// 🆕 下线功能测试
+// ========================================
+
+#[test]
+fn test_downlines_updated_on_bind() {
+    new_test_ext().execute_with(|| {
+        // 准备：Bob (2) 设置推荐码
+        setup_code_for_account(2, b"BOBCODE1");
+
+        // 执行：Alice (1) 绑定 Bob 为推荐人
+        assert_ok!(Referral::bind_sponsor(
+            RuntimeOrigin::signed(1),
+            b"BOBCODE1".to_vec()
+        ));
+
+        // 验证：Bob 的下线列表包含 Alice
+        let downlines = Referral::downlines_of(2);
+        assert_eq!(downlines.len(), 1);
+        assert_eq!(downlines[0], 1);
+    });
+}
+
+#[test]
+fn test_downlines_multiple() {
+    new_test_ext().execute_with(|| {
+        // 准备：Bob (2) 设置推荐码
+        setup_code_for_account(2, b"BOBCODE1");
+
+        // 执行：多个用户绑定 Bob 为推荐人
+        assert_ok!(Referral::bind_sponsor(RuntimeOrigin::signed(1), b"BOBCODE1".to_vec()));
+        assert_ok!(Referral::bind_sponsor(RuntimeOrigin::signed(3), b"BOBCODE1".to_vec()));
+        assert_ok!(Referral::bind_sponsor(RuntimeOrigin::signed(4), b"BOBCODE1".to_vec()));
+
+        // 验证：Bob 的下线列表包含所有人
+        let downlines = Referral::downlines_of(2);
+        assert_eq!(downlines.len(), 3);
+        assert!(downlines.contains(&1));
+        assert!(downlines.contains(&3));
+        assert!(downlines.contains(&4));
+    });
+}
+
+#[test]
+fn test_referral_provider_get_downlines() {
+    new_test_ext().execute_with(|| {
+        use crate::ReferralProvider;
+
+        // 准备：Bob (2) 设置推荐码，Alice (1) 和 Charlie (3) 绑定
+        setup_code_for_account(2, b"BOBCODE1");
+        assert_ok!(Referral::bind_sponsor(RuntimeOrigin::signed(1), b"BOBCODE1".to_vec()));
+        assert_ok!(Referral::bind_sponsor(RuntimeOrigin::signed(3), b"BOBCODE1".to_vec()));
+
+        // 执行：通过 trait 查询下线
+        let downlines = <Referral as ReferralProvider<u64>>::get_downlines(&2);
+
+        // 验证
+        assert_eq!(downlines.len(), 2);
+        assert!(downlines.contains(&1));
+        assert!(downlines.contains(&3));
+    });
+}
+
+#[test]
+fn test_referral_provider_get_downline_count() {
+    new_test_ext().execute_with(|| {
+        use crate::ReferralProvider;
+
+        // 准备：Bob (2) 设置推荐码
+        setup_code_for_account(2, b"BOBCODE1");
+
+        // 验证：初始下线数为 0
+        assert_eq!(<Referral as ReferralProvider<u64>>::get_downline_count(&2), 0);
+
+        // 执行：绑定多个下线
+        assert_ok!(Referral::bind_sponsor(RuntimeOrigin::signed(1), b"BOBCODE1".to_vec()));
+        assert_ok!(Referral::bind_sponsor(RuntimeOrigin::signed(3), b"BOBCODE1".to_vec()));
+
+        // 验证：下线数为 2
+        assert_eq!(<Referral as ReferralProvider<u64>>::get_downline_count(&2), 2);
+    });
+}

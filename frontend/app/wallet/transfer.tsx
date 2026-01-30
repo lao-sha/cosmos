@@ -165,9 +165,9 @@ export default function TransferScreen() {
                 onChangeText={setAmount}
                 keyboardType="decimal-pad"
               />
-              <Text style={styles.amountUnit}>STAR</Text>
+              <Text style={styles.amountUnit}>COS</Text>
             </View>
-            <Text style={styles.balanceHint}>可用余额: 0.00 STAR</Text>
+            <Text style={styles.balanceHint}>可用余额: 0.00 COS</Text>
           </View>
         </View>
 
@@ -175,17 +175,17 @@ export default function TransferScreen() {
           <Text style={styles.feeTitle}>交易详情</Text>
           <View style={styles.feeRow}>
             <Text style={styles.feeLabel}>转账金额</Text>
-            <Text style={styles.feeValue}>{amount || '0'} STAR</Text>
+            <Text style={styles.feeValue}>{amount || '0'} COS</Text>
           </View>
           <View style={styles.feeRow}>
             <Text style={styles.feeLabel}>网络手续费</Text>
-            <Text style={styles.feeValue}>~0.001 STAR</Text>
+            <Text style={styles.feeValue}>~0.001 COS</Text>
           </View>
           <View style={styles.divider} />
           <View style={styles.feeRow}>
             <Text style={styles.totalLabel}>总计</Text>
             <Text style={styles.totalValue}>
-              {(parseFloat(amount || '0') + 0.001).toFixed(3)} STAR
+              {(parseFloat(amount || '0') + 0.001).toFixed(3)} COS
             </Text>
           </View>
         </View>
@@ -216,8 +216,8 @@ export default function TransferScreen() {
         status={status}
         isLoading={isLoading}
         title="确认转账"
-        description={`向 ${recipient.slice(0, 8)}...${recipient.slice(-6)} 转账 ${amount} STAR`}
-        amount={`${amount} STAR`}
+        description={`向 ${recipient.slice(0, 8)}...${recipient.slice(-6)} 转账 ${amount} COS`}
+        amount={`${amount} COS`}
         onConfirm={handleConfirm}
         onClose={handleClose}
       />

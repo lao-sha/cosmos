@@ -99,6 +99,9 @@ parameter_types! {
     
     /// 推荐链最大搜索深度
     pub const MaxSearchHops: u32 = 20;
+
+    /// 🆕 单个账户最大下线数量
+    pub const MaxDownlines: u32 = 1000;
 }
 
 // ========================================
@@ -126,6 +129,7 @@ impl pallet_referral::Config for Test {
     type MembershipProvider = MockMembershipProvider;
     type MaxCodeLen = MaxCodeLen;
     type MaxSearchHops = MaxSearchHops;
+    type MaxDownlines = MaxDownlines;
     type WeightInfo = ();
 }
 

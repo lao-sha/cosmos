@@ -33,8 +33,15 @@ export default function TabLayout() {
       <Tabs.Screen
         name="market"
         options={{
-          title: '市场',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="cart.fill" color={color} />,
+          title: '占卜',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="sparkles" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="matchmaking"
+        options={{
+          title: '合婚',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="heart.fill" color={color} />,
         }}
       />
       <Tabs.Screen
@@ -44,13 +51,6 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="person.fill" color={color} />,
         }}
       />
-      <Tabs.Screen
-        name="test"
-        options={{
-          title: '测试',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="star.fill" color={color} />,
-        }}
-      />
-    </Tabs>
+          </Tabs>
   );
 }

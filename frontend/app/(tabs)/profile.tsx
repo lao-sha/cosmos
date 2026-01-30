@@ -157,10 +157,10 @@ export default function ProfileScreen() {
           </Pressable>
           <Pressable 
             style={styles.quickAction}
-            onPress={() => router.push('/notifications')}
+            onPress={() => router.push('/referral')}
           >
-            <Text style={styles.quickActionIcon}>🔔</Text>
-            <Text style={styles.quickActionText}>通知</Text>
+            <Text style={styles.quickActionIcon}>�</Text>
+            <Text style={styles.quickActionText}>推荐</Text>
           </Pressable>
           <Pressable 
             style={styles.quickAction}
@@ -169,6 +169,54 @@ export default function ProfileScreen() {
             <Text style={styles.quickActionIcon}>👥</Text>
             <Text style={styles.quickActionText}>好友</Text>
           </Pressable>
+        </View>
+      )}
+
+      {/* 交易服务入口 */}
+      {isLoggedIn && (
+        <View style={styles.tradingSection}>
+          <Text style={styles.tradingSectionTitle}>交易服务</Text>
+          <View style={styles.tradingCard}>
+            <Pressable 
+              style={({ pressed }) => [styles.tradingItem, pressed && styles.tradingItemPressed]}
+              onPress={() => router.push('/otc')}
+            >
+              <Text style={styles.tradingIcon}>💱</Text>
+              <View style={styles.tradingContent}>
+                <Text style={styles.tradingTitle}>OTC 交易</Text>
+                <Text style={styles.tradingDesc}>场外购买 COS，安全便捷</Text>
+              </View>
+              <Text style={styles.tradingArrow}>›</Text>
+            </Pressable>
+            
+            <View style={styles.tradingDivider} />
+            
+            <Pressable 
+              style={({ pressed }) => [styles.tradingItem, pressed && styles.tradingItemPressed]}
+              onPress={() => router.push('/swap')}
+            >
+              <Text style={styles.tradingIcon}>🔄</Text>
+              <View style={styles.tradingContent}>
+                <Text style={styles.tradingTitle}>COS 兑换</Text>
+                <Text style={styles.tradingDesc}>将 COS 兑换为 USDT</Text>
+              </View>
+              <Text style={styles.tradingArrow}>›</Text>
+            </Pressable>
+            
+            <View style={styles.tradingDivider} />
+            
+            <Pressable 
+              style={({ pressed }) => [styles.tradingItem, pressed && styles.tradingItemPressed]}
+              onPress={() => router.push('/maker')}
+            >
+              <Text style={styles.tradingIcon}>🏦</Text>
+              <View style={styles.tradingContent}>
+                <Text style={styles.tradingTitle}>做市商中心</Text>
+                <Text style={styles.tradingDesc}>提供 OTC/Bridge 服务，赚取收益</Text>
+              </View>
+              <Text style={styles.tradingArrow}>›</Text>
+            </Pressable>
+          </View>
         </View>
       )}
 
@@ -349,6 +397,54 @@ const styles = StyleSheet.create({
   quickActionText: {
     fontSize: 12,
     color: '#6b7280',
+  },
+  tradingSection: {
+    marginBottom: 20,
+  },
+  tradingSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 12,
+  },
+  tradingCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  tradingItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+  tradingItemPressed: {
+    backgroundColor: '#f9fafb',
+  },
+  tradingIcon: {
+    fontSize: 28,
+    marginRight: 12,
+  },
+  tradingContent: {
+    flex: 1,
+  },
+  tradingTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  tradingDesc: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 2,
+  },
+  tradingArrow: {
+    fontSize: 18,
+    color: '#9ca3af',
+  },
+  tradingDivider: {
+    height: 1,
+    backgroundColor: '#f3f4f6',
+    marginLeft: 56,
   },
   settingsList: {
     marginTop: 10,

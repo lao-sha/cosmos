@@ -149,7 +149,7 @@ impl<T: crate::pallet::Config> DivinationModule<T> for XiaoliurenModuleHandler<T
 
     fn extract_index(result: &Self::Result, privacy_mode: PrivacyMode) -> Option<Self::Index> {
         match privacy_mode {
-            PrivacyMode::Public | PrivacyMode::Encrypted => Some(result.index),
+            PrivacyMode::Public | PrivacyMode::PublicEncrypted | PrivacyMode::Encrypted => Some(result.index),
             PrivacyMode::Private => None,
         }
     }

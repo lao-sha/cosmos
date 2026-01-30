@@ -228,6 +228,229 @@ export function useTransaction() {
     return txResult;
   }, [mnemonic, checkReady, showMessage]);
 
+  const createBaziChart = useCallback(async (params: {
+    name?: string;
+    input: 
+      | { Solar: { year: number; month: number; day: number; hour: number; minute: number } }
+      | { Lunar: { year: number; month: number; day: number; hour: number; minute: number; is_leap_month: boolean } };
+    gender: 'Male' | 'Female';
+    zishi_mode: 'Modern' | 'Traditional';
+    longitude?: number;
+  }) => {
+    if (!checkReady() || !mnemonic) return null;
+
+    setIsLoading(true);
+    setError(null);
+    setStatus('pending');
+
+    const txResult = await transactionService.createBaziChart(
+      mnemonic,
+      params,
+      {
+        onStatusChange: setStatus,
+        onSuccess: () => {
+          showMessage('成功', '八字命盘已保存到链上');
+        },
+        onError: (err) => {
+          showMessage('保存失败', err);
+        },
+      }
+    );
+
+    setResult(txResult);
+    setIsLoading(false);
+    if (!txResult.success) {
+      setError(txResult.error || 'Unknown error');
+    }
+    return txResult;
+  }, [mnemonic, checkReady, showMessage]);
+
+  const createQimenChart = useCallback(async (params: {
+    solar_year: number;
+    solar_month: number;
+    solar_day: number;
+    hour: number;
+    question_hash: number[];
+    is_public: boolean;
+    name?: string;
+    gender?: number;
+    birth_year?: number;
+    question?: string;
+    question_type?: number;
+    pan_method: number;
+  }) => {
+    if (!checkReady() || !mnemonic) return null;
+
+    setIsLoading(true);
+    setError(null);
+    setStatus('pending');
+
+    const txResult = await transactionService.createQimenChart(
+      mnemonic,
+      params,
+      {
+        onStatusChange: setStatus,
+        onSuccess: () => {
+          showMessage('成功', '奇门排盘已保存到链上');
+        },
+        onError: (err) => {
+          showMessage('起局失败', err);
+        },
+      }
+    );
+
+    setResult(txResult);
+    setIsLoading(false);
+    if (!txResult.success) {
+      setError(txResult.error || 'Unknown error');
+    }
+    return txResult;
+  }, [mnemonic, checkReady, showMessage]);
+
+  // ==================== 群聊相关 ====================
+
+  const createGroup = useCallback(async (params: {
+    name: string;
+    description?: string;
+    encryption_mode: number;
+    is_public: boolean;
+  }) => {
+    if (!checkReady() || !mnemonic) return null;
+
+    setIsLoading(true);
+    setError(null);
+    setStatus('pending');
+
+    const txResult = await transactionService.createGroup(
+      mnemonic,
+      params,
+      {
+        onStatusChange: setStatus,
+        onSuccess: () => {
+          showMessage('成功', '群聊创建成功');
+        },
+        onError: (err) => {
+          showMessage('创建失败', err);
+        },
+      }
+    );
+
+    setResult(txResult);
+    setIsLoading(false);
+    if (!txResult.success) {
+      setError(txResult.error || 'Unknown error');
+    }
+    return txResult;
+  }, [mnemonic, checkReady, showMessage]);
+
+  const sendGroupMessage = useCallback(async (
+    groupId: number,
+    content: string,
+    messageType: number = 0
+  ) => {
+    if (!checkReady() || !mnemonic) return null;
+
+    setIsLoading(true);
+    setError(null);
+    setStatus('pending');
+
+    const txResult = await transactionService.sendGroupMessage(
+      mnemonic,
+      groupId,
+      content,
+      messageType,
+      {
+        onStatusChange: setStatus,
+        onSuccess: () => {},
+        onError: (err) => {
+          showMessage('发送失败', err);
+        },
+      }
+    );
+
+    setResult(txResult);
+    setIsLoading(false);
+    if (!txResult.success) {
+      setError(txResult.error || 'Unknown error');
+    }
+    return txResult;
+  }, [mnemonic, checkReady, showMessage]);
+
+  const joinGroup = useCallback(async (groupId: number) => {
+    if (!checkReady() || !mnemonic) return null;
+
+    setIsLoading(true);
+    setError(null);
+    setStatus('pending');
+
+    const txResult = await transactionService.joinGroup(mnemonic, groupId, {
+      onStatusChange: setStatus,
+      onSuccess: () => {
+        showMessage('成功', '已加入群聊');
+      },
+      onError: (err) => {
+        showMessage('加入失败', err);
+      },
+    });
+
+    setResult(txResult);
+    setIsLoading(false);
+    if (!txResult.success) {
+      setError(txResult.error || 'Unknown error');
+    }
+    return txResult;
+  }, [mnemonic, checkReady, showMessage]);
+
+  const leaveGroup = useCallback(async (groupId: number) => {
+    if (!checkReady() || !mnemonic) return null;
+
+    setIsLoading(true);
+    setError(null);
+    setStatus('pending');
+
+    const txResult = await transactionService.leaveGroup(mnemonic, groupId, {
+      onStatusChange: setStatus,
+      onSuccess: () => {
+        showMessage('成功', '已退出群聊');
+      },
+      onError: (err) => {
+        showMessage('退出失败', err);
+      },
+    });
+
+    setResult(txResult);
+    setIsLoading(false);
+    if (!txResult.success) {
+      setError(txResult.error || 'Unknown error');
+    }
+    return txResult;
+  }, [mnemonic, checkReady, showMessage]);
+
+  const disbandGroup = useCallback(async (groupId: number) => {
+    if (!checkReady() || !mnemonic) return null;
+
+    setIsLoading(true);
+    setError(null);
+    setStatus('pending');
+
+    const txResult = await transactionService.disbandGroup(mnemonic, groupId, {
+      onStatusChange: setStatus,
+      onSuccess: () => {
+        showMessage('成功', '群聊已解散');
+      },
+      onError: (err) => {
+        showMessage('解散失败', err);
+      },
+    });
+
+    setResult(txResult);
+    setIsLoading(false);
+    if (!txResult.success) {
+      setError(txResult.error || 'Unknown error');
+    }
+    return txResult;
+  }, [mnemonic, checkReady, showMessage]);
+
   const reset = useCallback(() => {
     setStatus(null);
     setIsLoading(false);
@@ -235,9 +458,484 @@ export function useTransaction() {
     setResult(null);
   }, []);
 
+  const lockMakerDeposit = useCallback(
+    async (mnemonic: string, callbacks?: TxCallbacks) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.lockMakerDeposit(mnemonic, {
+        ...callbacks,
+        onStatusChange: (s) => {
+          setStatus(s);
+          callbacks?.onStatusChange?.(s);
+        },
+      });
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const submitMakerInfo = useCallback(
+    async (
+      mnemonic: string,
+      realName: string,
+      idCardNumber: string,
+      birthday: string,
+      tronAddress: string,
+      wechatId: string,
+      callbacks?: TxCallbacks
+    ) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.submitMakerInfo(
+        mnemonic,
+        realName,
+        idCardNumber,
+        birthday,
+        tronAddress,
+        wechatId,
+        {
+          ...callbacks,
+          onStatusChange: (s) => {
+            setStatus(s);
+            callbacks?.onStatusChange?.(s);
+          },
+        }
+      );
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const cancelMaker = useCallback(
+    async (mnemonic: string, callbacks?: TxCallbacks) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.cancelMaker(mnemonic, {
+        ...callbacks,
+        onStatusChange: (s) => {
+          setStatus(s);
+          callbacks?.onStatusChange?.(s);
+        },
+      });
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const requestMakerWithdrawal = useCallback(
+    async (mnemonic: string, amount: string, callbacks?: TxCallbacks) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.requestMakerWithdrawal(mnemonic, amount, {
+        ...callbacks,
+        onStatusChange: (s) => {
+          setStatus(s);
+          callbacks?.onStatusChange?.(s);
+        },
+      });
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const executeMakerWithdrawal = useCallback(
+    async (mnemonic: string, callbacks?: TxCallbacks) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.executeMakerWithdrawal(mnemonic, {
+        ...callbacks,
+        onStatusChange: (s) => {
+          setStatus(s);
+          callbacks?.onStatusChange?.(s);
+        },
+      });
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const cancelMakerWithdrawal = useCallback(
+    async (mnemonic: string, callbacks?: TxCallbacks) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.cancelMakerWithdrawal(mnemonic, {
+        ...callbacks,
+        onStatusChange: (s) => {
+          setStatus(s);
+          callbacks?.onStatusChange?.(s);
+        },
+      });
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const replenishMakerDeposit = useCallback(
+    async (mnemonic: string, callbacks?: TxCallbacks) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.replenishMakerDeposit(mnemonic, {
+        ...callbacks,
+        onStatusChange: (s) => {
+          setStatus(s);
+          callbacks?.onStatusChange?.(s);
+        },
+      });
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const appealMakerPenalty = useCallback(
+    async (mnemonic: string, penaltyId: number, evidenceCid: string, callbacks?: TxCallbacks) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.appealMakerPenalty(mnemonic, penaltyId, evidenceCid, {
+        ...callbacks,
+        onStatusChange: (s) => {
+          setStatus(s);
+          callbacks?.onStatusChange?.(s);
+        },
+      });
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const createOtcOrderNew = useCallback(
+    async (
+      mnemonic: string,
+      makerId: number,
+      cosAmount: string,
+      paymentCommit: string,
+      contactCommit: string,
+      callbacks?: TxCallbacks
+    ) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.createOtcOrderNew(
+        mnemonic,
+        makerId,
+        cosAmount,
+        paymentCommit,
+        contactCommit,
+        {
+          ...callbacks,
+          onStatusChange: (s) => {
+            setStatus(s);
+            callbacks?.onStatusChange?.(s);
+          },
+        }
+      );
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const createFirstPurchase = useCallback(
+    async (
+      mnemonic: string,
+      makerId: number,
+      paymentCommit: string,
+      contactCommit: string,
+      callbacks?: TxCallbacks
+    ) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.createFirstPurchase(
+        mnemonic,
+        makerId,
+        paymentCommit,
+        contactCommit,
+        {
+          ...callbacks,
+          onStatusChange: (s) => {
+            setStatus(s);
+            callbacks?.onStatusChange?.(s);
+          },
+        }
+      );
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const markOtcPaid = useCallback(
+    async (mnemonic: string, orderId: number, tronTxHash?: string, callbacks?: TxCallbacks) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.markOtcPaid(mnemonic, orderId, tronTxHash, {
+        ...callbacks,
+        onStatusChange: (s) => {
+          setStatus(s);
+          callbacks?.onStatusChange?.(s);
+        },
+      });
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const releaseOtcCos = useCallback(
+    async (mnemonic: string, orderId: number, callbacks?: TxCallbacks) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.releaseOtcCos(mnemonic, orderId, {
+        ...callbacks,
+        onStatusChange: (s) => {
+          setStatus(s);
+          callbacks?.onStatusChange?.(s);
+        },
+      });
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const cancelOtcOrder = useCallback(
+    async (mnemonic: string, orderId: number, callbacks?: TxCallbacks) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.cancelOtcOrder(mnemonic, orderId, {
+        ...callbacks,
+        onStatusChange: (s) => {
+          setStatus(s);
+          callbacks?.onStatusChange?.(s);
+        },
+      });
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const disputeOtcOrder = useCallback(
+    async (mnemonic: string, orderId: number, callbacks?: TxCallbacks) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.disputeOtcOrder(mnemonic, orderId, {
+        ...callbacks,
+        onStatusChange: (s) => {
+          setStatus(s);
+          callbacks?.onStatusChange?.(s);
+        },
+      });
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const initiateOtcDispute = useCallback(
+    async (mnemonic: string, orderId: number, evidenceCid: string, callbacks?: TxCallbacks) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.initiateOtcDispute(mnemonic, orderId, evidenceCid, {
+        ...callbacks,
+        onStatusChange: (s) => {
+          setStatus(s);
+          callbacks?.onStatusChange?.(s);
+        },
+      });
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const respondOtcDispute = useCallback(
+    async (mnemonic: string, orderId: number, evidenceCid: string, callbacks?: TxCallbacks) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.respondOtcDispute(mnemonic, orderId, evidenceCid, {
+        ...callbacks,
+        onStatusChange: (s) => {
+          setStatus(s);
+          callbacks?.onStatusChange?.(s);
+        },
+      });
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const createSwap = useCallback(
+    async (
+      mnemonic: string,
+      makerId: number,
+      cosAmount: string,
+      usdtAddress: string,
+      callbacks?: TxCallbacks
+    ) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.createSwap(
+        mnemonic,
+        makerId,
+        cosAmount,
+        usdtAddress,
+        {
+          ...callbacks,
+          onStatusChange: (s) => {
+            setStatus(s);
+            callbacks?.onStatusChange?.(s);
+          },
+        }
+      );
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const markSwapComplete = useCallback(
+    async (mnemonic: string, swapId: number, trc20TxHash: string, callbacks?: TxCallbacks) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.markSwapComplete(mnemonic, swapId, trc20TxHash, {
+        ...callbacks,
+        onStatusChange: (s) => {
+          setStatus(s);
+          callbacks?.onStatusChange?.(s);
+        },
+      });
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const reportSwap = useCallback(
+    async (mnemonic: string, swapId: number, callbacks?: TxCallbacks) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.reportSwap(mnemonic, swapId, {
+        ...callbacks,
+        onStatusChange: (s) => {
+          setStatus(s);
+          callbacks?.onStatusChange?.(s);
+        },
+      });
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
+  const handleSwapVerificationTimeout = useCallback(
+    async (mnemonic: string, swapId: number, callbacks?: TxCallbacks) => {
+      setIsLoading(true);
+      setError(null);
+      const result = await transactionService.handleSwapVerificationTimeout(mnemonic, swapId, {
+        ...callbacks,
+        onStatusChange: (s) => {
+          setStatus(s);
+          callbacks?.onStatusChange?.(s);
+        },
+      });
+      setResult(result);
+      setIsLoading(false);
+      if (!result.success && result.error) {
+        setError(result.error);
+      }
+      return result;
+    },
+    []
+  );
+
   return {
     status,
     isLoading,
+    isTxLoading: isLoading,
     error,
     result,
     transfer,
@@ -246,6 +944,33 @@ export function useTransaction() {
     lockOtcOrder,
     createMatchmakingProfile,
     createDivinationOrder,
+    createBaziChart,
+    createQimenChart,
+    createGroup,
+    sendGroupMessage,
+    joinGroup,
+    leaveGroup,
+    disbandGroup,
+    lockMakerDeposit,
+    submitMakerInfo,
+    cancelMaker,
+    requestMakerWithdrawal,
+    executeMakerWithdrawal,
+    cancelMakerWithdrawal,
+    replenishMakerDeposit,
+    appealMakerPenalty,
+    createOtcOrderNew,
+    createFirstPurchase,
+    markOtcPaid,
+    releaseOtcCos,
+    cancelOtcOrder,
+    disputeOtcOrder,
+    initiateOtcDispute,
+    respondOtcDispute,
+    createSwap,
+    markSwapComplete,
+    reportSwap,
+    handleSwapVerificationTimeout,
     reset,
   };
 }

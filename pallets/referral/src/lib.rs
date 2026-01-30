@@ -68,6 +68,10 @@ pub mod pallet {
         #[pallet::constant]
         type MaxSearchHops: Get<u32>;
 
+        /// 🆕 单个账户最大下线数量
+        #[pallet::constant]
+        type MaxDownlines: Get<u32>;
+
         /// 权重信息
         type WeightInfo: crate::weights::WeightInfo;
     }
@@ -105,6 +109,17 @@ pub mod pallet {
     #[pallet::storage]
     #[pallet::getter(fn referral_stats)]
     pub type ReferralStats<T: Config> = StorageValue<_, ReferralStatistics, ValueQuery>;
+
+    /// 🆕 下线列表：账户 → 直接下线列表
+    #[pallet::storage]
+    #[pallet::getter(fn downlines_of)]
+    pub type Downlines<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        T::AccountId,
+        BoundedVec<T::AccountId, T::MaxDownlines>,
+        ValueQuery,
+    >;
 
     /// 🆕 推荐关系统计结构
     #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, Debug, Default)]
@@ -160,6 +175,8 @@ pub mod pallet {
         AlreadyHasCode,
         /// 非有效会员
         NotMember,
+        /// 🆕 下线数量已达上限
+        DownlinesFull,
     }
 
     // ========================================
@@ -356,6 +373,12 @@ pub mod pallet {
             // 绑定推荐人
             Sponsors::<T>::insert(&who, &sponsor);
 
+            // 🆕 更新下线列表（将 who 添加到 sponsor 的下线列表）
+            Downlines::<T>::try_mutate(&sponsor, |downlines| -> Result<(), Error<T>> {
+                downlines.try_push(who.clone()).map_err(|_| Error::<T>::DownlinesFull)?;
+                Ok(())
+            })?;
+
             // 🆕 更新统计信息
             ReferralStats::<T>::mutate(|stats| {
                 stats.total_sponsors = stats.total_sponsors.saturating_add(1);
@@ -438,11 +461,17 @@ pub trait MembershipProvider<AccountId> {
 
 /// 推荐关系提供者 trait（供其他模块调用）
 pub trait ReferralProvider<AccountId> {
-    /// 获取推荐人
+    /// 获取推荐人（上线）
     fn get_sponsor(who: &AccountId) -> Option<AccountId>;
 
-    /// 获取推荐链（最多15层）
+    /// 获取推荐链（上线链，最多15层）
     fn get_referral_chain(who: &AccountId) -> sp_std::vec::Vec<AccountId>;
+
+    /// 🆕 获取直接下线列表
+    fn get_downlines(who: &AccountId) -> sp_std::vec::Vec<AccountId>;
+
+    /// 🆕 获取下线数量
+    fn get_downline_count(who: &AccountId) -> u32;
 }
 
 impl<T: Config> ReferralProvider<T::AccountId> for Pallet<T> {
@@ -452,5 +481,13 @@ impl<T: Config> ReferralProvider<T::AccountId> for Pallet<T> {
 
     fn get_referral_chain(who: &T::AccountId) -> sp_std::vec::Vec<T::AccountId> {
         Self::get_referral_chain(who)
+    }
+
+    fn get_downlines(who: &T::AccountId) -> sp_std::vec::Vec<T::AccountId> {
+        Downlines::<T>::get(who).into_inner()
+    }
+
+    fn get_downline_count(who: &T::AccountId) -> u32 {
+        Downlines::<T>::get(who).len() as u32
     }
 }

@@ -475,6 +475,54 @@ impl<AccountId, BlockNumber> TeePrivacyIntegration<AccountId, BlockNumber>
     }
 }
 
+// ==================== 模块注册表 Trait ====================
+
+/// 模块注册表 Trait
+///
+/// 用于在运行时注册和查找占卜模块处理器。
+/// 这是 Public 模式独立运行的核心接口。
+pub trait ModuleRegistry {
+    /// 处理公开模式请求
+    ///
+    /// # 参数
+    /// - `divination_type`: 占卜类型
+    /// - `input_data`: 明文输入数据（编码后）
+    ///
+    /// # 返回
+    /// 处理结果或错误
+    fn process_public(
+        divination_type: DivinationType,
+        input_data: &[u8],
+    ) -> Result<ProcessResult, ModuleError>;
+
+    /// 检查模块是否已注册
+    fn is_registered(divination_type: DivinationType) -> bool;
+
+    /// 获取模块版本
+    fn get_version(divination_type: DivinationType) -> Option<u32>;
+}
+
+/// 空模块注册表实现（用于测试）
+pub struct NullModuleRegistry;
+
+impl ModuleRegistry for NullModuleRegistry {
+    fn process_public(
+        divination_type: DivinationType,
+        _input_data: &[u8],
+    ) -> Result<ProcessResult, ModuleError> {
+        log::warn!("🔮 NullModuleRegistry: Module {:?} not implemented", divination_type);
+        Err(ModuleError::ModuleNotRegistered)
+    }
+
+    fn is_registered(_divination_type: DivinationType) -> bool {
+        false
+    }
+
+    fn get_version(_divination_type: DivinationType) -> Option<u32> {
+        None
+    }
+}
+
 // ==================== 空实现（用于测试）====================
 
 /// 空 TEE 节点管理实现

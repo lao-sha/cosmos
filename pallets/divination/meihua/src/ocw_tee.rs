@@ -373,7 +373,7 @@ impl<T: crate::pallet::Config> DivinationModule<T> for MeihuaModuleHandler<T> {
     /// 从计算结果提取索引
     fn extract_index(result: &Self::Result, privacy_mode: PrivacyMode) -> Option<Self::Index> {
         match privacy_mode {
-            PrivacyMode::Public | PrivacyMode::Encrypted => Some(result.index),
+            PrivacyMode::Public | PrivacyMode::PublicEncrypted | PrivacyMode::Encrypted => Some(result.index),
             PrivacyMode::Private => None,
         }
     }
@@ -385,8 +385,8 @@ impl<T: crate::pallet::Config> DivinationModule<T> for MeihuaModuleHandler<T> {
         privacy_mode: PrivacyMode,
     ) -> Result<Vec<u8>, ModuleError> {
         let manifest = match privacy_mode {
-            PrivacyMode::Public => {
-                // 公开模式：所有数据明文
+            PrivacyMode::Public | PrivacyMode::PublicEncrypted => {
+                // 公开/公开加密模式：所有数据明文（PublicEncrypted 会在 OCW 层加密整个清单）
                 let divination_time = if let (Some(year), Some(month), Some(day), Some(hour)) =
                     (input.year, input.month, input.day, input.hour)
                 {

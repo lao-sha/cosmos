@@ -34,6 +34,18 @@ pub enum PrivacyMode {
     /// - 链上不存储任何敏感索引
     /// - IPFS 存储加密 JSON
     Private = 2,
+
+    /// 公开计算加密存储模式：链上存储索引，IPFS 加密
+    /// - 前端明文提交（附带用户公钥）
+    /// - OCW 直接计算（无需 TEE）
+    /// - OCW 使用用户公钥加密结果
+    /// - IPFS 存储加密 JSON
+    /// 
+    /// 适用场景：
+    /// - 输入数据不敏感（如时间起卦）
+    /// - 但结果需要隐私保护
+    /// - 不想依赖 TEE 节点
+    PublicEncrypted = 3,
 }
 
 impl PrivacyMode {
@@ -43,17 +55,32 @@ impl PrivacyMode {
             Self::Public => "public",
             Self::Encrypted => "encrypted",
             Self::Private => "private",
+            Self::PublicEncrypted => "public_encrypted",
         }
     }
 
     /// 是否需要 TEE 处理
+    /// 
+    /// PublicEncrypted 模式不需要 TEE，因为：
+    /// - 输入是明文，OCW 可直接计算
+    /// - 加密使用用户公钥，OCW 可完成
     pub fn requires_tee(&self) -> bool {
-        !matches!(self, Self::Public)
+        matches!(self, Self::Encrypted | Self::Private)
     }
 
     /// 是否在链上存储索引
     pub fn stores_index_on_chain(&self) -> bool {
         !matches!(self, Self::Private)
+    }
+
+    /// 是否加密存储结果
+    pub fn encrypts_result(&self) -> bool {
+        !matches!(self, Self::Public)
+    }
+
+    /// 是否可以在 OCW 中处理（无需 TEE）
+    pub fn can_process_in_ocw(&self) -> bool {
+        matches!(self, Self::Public | Self::PublicEncrypted)
     }
 
     /// 从 u8 转换
@@ -62,6 +89,7 @@ impl PrivacyMode {
             0 => Some(Self::Public),
             1 => Some(Self::Encrypted),
             2 => Some(Self::Private),
+            3 => Some(Self::PublicEncrypted),
             _ => None,
         }
     }

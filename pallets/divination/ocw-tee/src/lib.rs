@@ -64,8 +64,13 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+
+pub mod crypto;
 pub mod traits;
 pub mod types;
+pub mod registry;
 
 #[cfg(test)]
 mod tests;
@@ -77,6 +82,7 @@ pub use weights::WeightInfo;
 
 pub use traits::*;
 pub use types::*;
+pub use registry::*;
 
 use frame_support::pallet_prelude::*;
 use frame_system::pallet_prelude::*;
@@ -149,6 +155,14 @@ pub mod pallet {
         /// - 自动 Pin 加密数据到 IPFS
         /// - 使用三级扣费机制（IpfsPool → SubjectFunding → Grace）
         type IpfsPinner: pallet_storage_service::IpfsPinner<Self::AccountId, u128>;
+
+        /// 模块注册表（Public 模式处理）
+        /// 
+        /// 通过此接口调用各占卜模块的计算逻辑：
+        /// - 解码输入数据
+        /// - 执行计算
+        /// - 生成 JSON 清单
+        type ModuleRegistry: ModuleRegistry;
     }
 
     // ========================================================================
@@ -374,6 +388,9 @@ pub mod pallet {
 
         /// 无效的版本 ID
         InvalidVersionId,
+
+        /// PublicEncrypted 模式需要使用专用接口
+        UsePublicEncryptedExtrinsic,
     }
 
     // ========================================================================
@@ -457,6 +474,59 @@ pub mod pallet {
             Ok(())
         }
 
+        /// 创建公开计算加密存储模式请求
+        ///
+        /// 用于 PublicEncrypted 隐私模式：
+        /// - 输入数据明文提交（适用于非敏感输入如时间）
+        /// - OCW 明文计算（无需 TEE）
+        /// - 结果使用用户公钥加密后存储到 IPFS
+        ///
+        /// # 参数
+        /// - `origin`: 交易发起者
+        /// - `divination_type`: 占卜类型
+        /// - `input_data`: 明文输入数据（编码后）
+        /// - `user_pubkey`: 用户 X25519 公钥（用于加密结果）
+        #[pallet::call_index(2)]
+        #[pallet::weight(Weight::from_parts(55_000_000, 0))]
+        pub fn create_public_encrypted_request(
+            origin: OriginFor<T>,
+            divination_type: DivinationType,
+            input_data: Vec<u8>,
+            user_pubkey: [u8; 32],
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            // 验证用户公钥
+            ensure!(
+                user_pubkey != [0u8; 32],
+                Error::<T>::UserPubkeyRequired
+            );
+
+            // 验证输入数据长度
+            let bounded_input: BoundedVec<u8, T::MaxInputDataLen> = input_data
+                .try_into()
+                .map_err(|_| Error::<T>::InputDataTooLong)?;
+
+            // 创建请求
+            let request_id = Self::do_create_request(
+                who.clone(),
+                divination_type,
+                InputData::Plaintext(bounded_input),
+                Some(user_pubkey),  // 提供用户公钥用于加密结果
+                PrivacyMode::PublicEncrypted,
+            )?;
+
+            // 触发事件
+            Self::deposit_event(Event::RequestCreated {
+                request_id,
+                requester: who,
+                divination_type,
+                privacy_mode: PrivacyMode::PublicEncrypted,
+            });
+
+            Ok(())
+        }
+
         /// 创建加密模式请求
         ///
         /// 用于 Encrypted/Private 隐私模式，输入数据加密提交。
@@ -480,10 +550,14 @@ pub mod pallet {
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            // 验证隐私模式
+            // 验证隐私模式（只允许 Encrypted 和 Private）
             ensure!(
                 privacy_mode != PrivacyMode::Public,
                 Error::<T>::UsePublicExtrinsic
+            );
+            ensure!(
+                privacy_mode != PrivacyMode::PublicEncrypted,
+                Error::<T>::UsePublicEncryptedExtrinsic
             );
 
             // 验证用户公钥
@@ -886,6 +960,7 @@ pub mod pallet {
             // 根据隐私模式选择 PinTier
             let pin_tier = match privacy_mode {
                 PrivacyMode::Public => pallet_storage_service::PinTier::Temporary,
+                PrivacyMode::PublicEncrypted => pallet_storage_service::PinTier::Standard, // 加密存储，使用标准级别
                 PrivacyMode::Encrypted => pallet_storage_service::PinTier::Standard,
                 PrivacyMode::Private => pallet_storage_service::PinTier::Critical,
             };
@@ -1002,10 +1077,16 @@ pub mod pallet {
             );
 
             // 根据隐私模式处理
-            let result = if privacy_mode == PrivacyMode::Public {
-                Self::process_public_request(request_id, divination_type)
-            } else {
-                Self::process_tee_request(request_id, divination_type, privacy_mode)
+            let result = match privacy_mode {
+                PrivacyMode::Public => {
+                    Self::process_public_request(request_id, divination_type)
+                }
+                PrivacyMode::PublicEncrypted => {
+                    Self::process_public_encrypted_request(request_id, divination_type)
+                }
+                PrivacyMode::Encrypted | PrivacyMode::Private => {
+                    Self::process_tee_request(request_id, divination_type, privacy_mode)
+                }
             };
 
             match result {
@@ -1021,31 +1102,228 @@ pub mod pallet {
         }
 
         /// 处理公开模式请求（OCW）
+        /// 
+        /// 完整实现 Public 模式的处理流程：
+        /// 1. 获取并验证输入数据
+        /// 2. 调用 ModuleRegistry 处理请求
+        /// 3. 上传结果到 IPFS
+        /// 4. 提交结果到链上
         fn process_public_request(
             request_id: u64,
             divination_type: DivinationType,
         ) -> Result<(), ModuleError> {
-            // 获取输入数据
+            log::info!(
+                "🔮 OCW: Processing public request {} (type: {:?})",
+                request_id,
+                divination_type
+            );
+
+            // 1. 获取输入数据
             let input_data = RequestInputData::<T>::get(request_id)
                 .ok_or(ModuleError::InvalidInput(b"Input data not found".to_vec().try_into().unwrap_or_default()))?;
 
-            // 确保是明文输入
-            let _plaintext = match input_data {
+            // 2. 确保是明文输入
+            let plaintext = match input_data {
                 InputData::Plaintext(data) => data,
                 InputData::Encrypted(_) => {
-                    return Err(ModuleError::InvalidInput(b"Expected plaintext".to_vec().try_into().unwrap_or_default()));
+                    return Err(ModuleError::InvalidInput(b"Expected plaintext for public mode".to_vec().try_into().unwrap_or_default()));
                 }
             };
 
-            // TODO: 实现公开模式处理
-            // 1. 解码输入数据（根据 divination_type）
-            // 2. 调用对应模块计算
-            // 3. 生成 JSON 清单
-            // 4. 上传到 IPFS
-            // 5. 提交结果
+            log::info!(
+                "🔮 OCW: Input data length: {} bytes",
+                plaintext.len()
+            );
 
-            log::info!("🔮 OCW: Public mode processing for {:?} - TODO", divination_type);
+            // 3. 检查模块是否已注册
+            if !T::ModuleRegistry::is_registered(divination_type) {
+                log::warn!(
+                    "🔮 OCW: Module {:?} not registered, skipping",
+                    divination_type
+                );
+                return Err(ModuleError::ModuleNotRegistered);
+            }
+
+            // 4. 调用 ModuleRegistry 处理请求
+            let process_result = T::ModuleRegistry::process_public(
+                divination_type,
+                plaintext.as_slice(),
+            )?;
+
+            log::info!(
+                "🔮 OCW: Computation completed, manifest_cid: {} bytes",
+                process_result.manifest_cid.len()
+            );
+
+            // 5. 如果有清单数据但没有 CID，上传到 IPFS
+            let manifest_cid = if process_result.manifest_cid.is_empty() {
+                if let Some(manifest_data) = &process_result.manifest_data {
+                    // 上传到 IPFS
+                    let cid = T::IpfsClient::upload(manifest_data)?;
+                    log::info!("🔮 OCW: Uploaded to IPFS, CID: {} bytes", cid.len());
+                    cid
+                } else {
+                    return Err(ModuleError::IpfsUploadFailed);
+                }
+            } else {
+                process_result.manifest_cid.clone()
+            };
+
+            // 6. 获取请求者信息
+            let (requester, _compute_type_id, _input_hash, _assigned_node) = 
+                T::TeePrivacy::get_request(request_id)
+                    .ok_or(ModuleError::other(b"Request not found in tee-privacy"))?;
+
+            // 7. 存储结果到链上
+            Self::do_store_result(
+                request_id,
+                requester,
+                divination_type,
+                PrivacyMode::Public,
+                None, // Public 模式无 TEE 节点
+                manifest_cid.clone(),
+                process_result.manifest_hash,
+                process_result.type_index,
+                None, // Public 模式无计算证明
+            ).map_err(|e| {
+                log::error!("🔮 OCW: Failed to store result: {:?}", e);
+                ModuleError::other(b"Failed to store result")
+            })?;
+
+            log::info!(
+                "🔮 OCW: Public request {} completed successfully",
+                request_id
+            );
+
             Ok(())
+        }
+
+        /// 处理公开计算加密存储模式请求（OCW）
+        /// 
+        /// PublicEncrypted 模式的处理流程：
+        /// 1. 获取明文输入数据和用户公钥
+        /// 2. 调用 ModuleRegistry 处理请求（明文计算）
+        /// 3. 使用用户公钥加密 JSON 清单
+        /// 4. 上传加密数据到 IPFS
+        /// 5. 提交结果到链上
+        /// 
+        /// 优势：
+        /// - 无需 TEE 节点
+        /// - 结果隐私保护（只有用户能解密）
+        /// - 链上存储索引便于查询
+        fn process_public_encrypted_request(
+            request_id: u64,
+            divination_type: DivinationType,
+        ) -> Result<(), ModuleError> {
+            log::info!(
+                "🔮 OCW: Processing public_encrypted request {} (type: {:?})",
+                request_id,
+                divination_type
+            );
+
+            // 1. 获取输入数据
+            let input_data = RequestInputData::<T>::get(request_id)
+                .ok_or(ModuleError::InvalidInput(b"Input data not found".to_vec().try_into().unwrap_or_default()))?;
+
+            // 2. 确保是明文输入
+            let plaintext = match input_data {
+                InputData::Plaintext(data) => data,
+                InputData::Encrypted(_) => {
+                    return Err(ModuleError::InvalidInput(b"Expected plaintext for public_encrypted mode".to_vec().try_into().unwrap_or_default()));
+                }
+            };
+
+            // 3. 获取用户公钥（必须提供）
+            let user_pubkey = RequestUserPubkey::<T>::get(request_id)
+                .ok_or(ModuleError::InvalidInput(b"User pubkey required for encryption".to_vec().try_into().unwrap_or_default()))?;
+
+            if user_pubkey == [0u8; 32] {
+                return Err(ModuleError::InvalidInput(b"Invalid user pubkey".to_vec().try_into().unwrap_or_default()));
+            }
+
+            log::info!(
+                "🔮 OCW: Input data length: {} bytes, user_pubkey: {:?}",
+                plaintext.len(),
+                &user_pubkey[..4]
+            );
+
+            // 4. 检查模块是否已注册
+            if !T::ModuleRegistry::is_registered(divination_type) {
+                log::warn!(
+                    "🔮 OCW: Module {:?} not registered, skipping",
+                    divination_type
+                );
+                return Err(ModuleError::ModuleNotRegistered);
+            }
+
+            // 5. 调用 ModuleRegistry 处理请求（明文计算）
+            let process_result = T::ModuleRegistry::process_public(
+                divination_type,
+                plaintext.as_slice(),
+            )?;
+
+            log::info!("🔮 OCW: Computation completed, encrypting result...");
+
+            // 6. 获取明文 JSON 清单
+            let manifest_data = process_result.manifest_data
+                .ok_or(ModuleError::other(b"No manifest data to encrypt"))?;
+
+            // 7. 加密 JSON 清单
+            let encrypted_manifest = Self::encrypt_for_user(&manifest_data, &user_pubkey)?;
+
+            log::info!(
+                "🔮 OCW: Encrypted manifest: {} bytes -> {} bytes",
+                manifest_data.len(),
+                encrypted_manifest.len()
+            );
+
+            // 8. 上传加密数据到 IPFS
+            let manifest_cid = T::IpfsClient::upload(&encrypted_manifest)?;
+            log::info!("🔮 OCW: Uploaded encrypted manifest to IPFS");
+
+            // 9. 获取请求者信息
+            let (requester, _compute_type_id, _input_hash, _assigned_node) = 
+                T::TeePrivacy::get_request(request_id)
+                    .ok_or(ModuleError::other(b"Request not found in tee-privacy"))?;
+
+            // 10. 存储结果到链上
+            Self::do_store_result(
+                request_id,
+                requester,
+                divination_type,
+                PrivacyMode::PublicEncrypted,
+                None, // PublicEncrypted 模式无 TEE 节点
+                manifest_cid.clone(),
+                process_result.manifest_hash, // 明文哈希，用于验证
+                process_result.type_index,    // 链上索引
+                None, // 无 TEE 计算证明
+            ).map_err(|e| {
+                log::error!("🔮 OCW: Failed to store result: {:?}", e);
+                ModuleError::other(b"Failed to store result")
+            })?;
+
+            log::info!(
+                "🔮 OCW: PublicEncrypted request {} completed successfully",
+                request_id
+            );
+
+            Ok(())
+        }
+
+        /// 使用用户公钥加密数据 (标准 ECIES)
+        /// 
+        /// 加密流程：
+        /// 1. 生成临时 X25519 密钥对
+        /// 2. 使用 ECDH 计算共享密钥
+        /// 3. 使用 ChaCha20-Poly1305 AEAD 加密
+        /// 4. 返回：ephemeral_pubkey(32) + nonce(12) + ciphertext + auth_tag(16)
+        /// 
+        /// 使用标准加密库：x25519-dalek + chacha20poly1305
+        fn encrypt_for_user(
+            plaintext: &[u8],
+            user_pubkey: &[u8; 32],
+        ) -> Result<Vec<u8>, ModuleError> {
+            crate::crypto::encrypt_ecies(plaintext, user_pubkey)
         }
 
         /// 处理 TEE 模式请求（OCW）
