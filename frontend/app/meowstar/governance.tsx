@@ -1,20 +1,49 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, TextInput, Alert } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, Platform, ActivityIndicator } from 'react-native';
 import { Vote, Clock, CheckCircle, XCircle, AlertCircle, Plus } from 'lucide-react-native';
+import { useMeowstar, Proposal } from '@/services/meowstar';
 
-interface Proposal {
-  id: number;
-  title: string;
-  type: 'general' | 'parameter' | 'treasury' | 'emergency';
-  proposer: string;
-  status: 'active' | 'passed' | 'rejected' | 'executed';
-  yesVotes: number;
-  noVotes: number;
-  totalVotes: number;
-  quorum: number;
-  endsIn: string;
-  description: string;
-}
+// 跨平台 Alert
+const showAlert = (title: string, message: string, onOk?: () => void) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n\n${message}`);
+    onOk?.();
+  } else {
+    Alert.alert(title, message, [{ text: '确定', onPress: onOk }]);
+  }
+};
+
+// 跨平台确认框
+const showConfirm = (title: string, message: string, onConfirm: () => void, onCancel?: () => void) => {
+  if (Platform.OS === 'web') {
+    if (window.confirm(`${title}\n\n${message}`)) {
+      onConfirm();
+    } else {
+      onCancel?.();
+    }
+  } else {
+    Alert.alert(title, message, [
+      { text: '取消', style: 'cancel', onPress: onCancel },
+      { text: '确认', onPress: onConfirm },
+    ]);
+  }
+};
+
+// 格式化剩余时间
+const formatTimeLeft = (endsAt: number): string => {
+  const now = Date.now();
+  const diff = endsAt - now;
+  if (diff <= 0) return '已结束';
+  
+  const hours = Math.floor(diff / 3600000);
+  const minutes = Math.floor((diff % 3600000) / 60000);
+  
+  if (hours >= 24) {
+    const days = Math.floor(hours / 24);
+    return `${days}天 ${hours % 24}小时`;
+  }
+  return `${hours}h ${minutes}m`;
+};
 
 const STATUS_CONFIG = {
   active: { color: '#4ECDC4', label: '投票中', icon: Clock },
@@ -35,76 +64,47 @@ export default function GovernanceScreen() {
   const [proposalTitle, setProposalTitle] = useState('');
   const [proposalDesc, setProposalDesc] = useState('');
 
-  const userVotePower = 3750;
+  // 使用全局状态
+  const { proposals, user, vote, createProposal, isLoading } = useMeowstar();
+
   const totalVotePower = 125000;
 
-  const proposals: Proposal[] = [
-    {
-      id: 1,
-      title: '增加战斗奖励池',
-      type: 'treasury',
-      proposer: '5Grw...aEF5',
-      status: 'active',
-      yesVotes: 45000,
-      noVotes: 12000,
-      totalVotes: 57000,
-      quorum: 12500,
-      endsIn: '2天 5小时',
-      description: '提议从国库拨款 50,000 COS 用于增加战斗奖励池...',
-    },
-    {
-      id: 2,
-      title: '降低交易手续费至 2%',
-      type: 'parameter',
-      proposer: '5FHn...eVkZ',
-      status: 'active',
-      yesVotes: 28000,
-      noVotes: 35000,
-      totalVotes: 63000,
-      quorum: 12500,
-      endsIn: '5天 12小时',
-      description: '建议将市场交易手续费从 2.5% 降低至 2%...',
-    },
-    {
-      id: 3,
-      title: '新增神话级宠物',
-      type: 'general',
-      proposer: '5DAn...kLmP',
-      status: 'passed',
-      yesVotes: 78000,
-      noVotes: 15000,
-      totalVotes: 93000,
-      quorum: 12500,
-      endsIn: '已结束',
-      description: '提议新增 3 种神话级宠物...',
-    },
-  ];
-
-  const handleVote = (proposalId: number, approve: boolean) => {
-    Alert.alert(
+  const handleVote = async (proposalId: number, approve: boolean) => {
+    showConfirm(
       '确认投票',
-      `确定要投 ${approve ? '赞成' : '反对'} 票吗？\n您的投票权重: ${userVotePower}`,
-      [
-        { text: '取消', style: 'cancel' },
-        { 
-          text: '确认', 
-          onPress: () => Alert.alert('成功', '投票已提交') 
-        },
-      ]
+      `确定要投 ${approve ? '赞成' : '反对'} 票吗？\n您的投票权重: ${user?.votePower || 0}`,
+      async () => {
+        const result = await vote(proposalId, approve);
+        showAlert(result.success ? '成功' : '失败', result.message);
+      }
     );
   };
 
-  const handleCreateProposal = () => {
+  const handleCreateProposal = async () => {
     if (!proposalTitle.trim()) {
-      Alert.alert('提示', '请输入提案标题');
+      showAlert('提示', '请输入提案标题');
       return;
     }
     
-    setShowCreateModal(false);
-    setProposalTitle('');
-    setProposalDesc('');
-    Alert.alert('成功', '提案已创建，需支付 100 COS 押金');
+    const result = await createProposal(proposalTitle, proposalDesc, 'general');
+    
+    if (result.success) {
+      setShowCreateModal(false);
+      setProposalTitle('');
+      setProposalDesc('');
+    }
+    
+    showAlert(result.success ? '成功' : '失败', result.message);
   };
+
+  if (isLoading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#4ECDC4" />
+        <Text style={{ color: '#888', marginTop: 16 }}>加载中...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -113,11 +113,11 @@ export default function GovernanceScreen() {
         <Vote size={24} color="#BB8FCE" />
         <View style={styles.powerInfo}>
           <Text style={styles.powerLabel}>我的投票权重</Text>
-          <Text style={styles.powerValue}>{userVotePower.toLocaleString()}</Text>
+          <Text style={styles.powerValue}>{(user?.votePower || 0).toLocaleString()}</Text>
         </View>
         <View style={styles.powerPercent}>
           <Text style={styles.percentText}>
-            {((userVotePower / totalVotePower) * 100).toFixed(2)}%
+            {(((user?.votePower || 0) / totalVotePower) * 100).toFixed(2)}%
           </Text>
           <Text style={styles.percentLabel}>占比</Text>
         </View>
@@ -179,7 +179,7 @@ export default function GovernanceScreen() {
               <View style={styles.proposalMeta}>
                 <Text style={styles.metaText}>提案者: {proposal.proposer}</Text>
                 <Text style={styles.metaText}>
-                  {proposal.status === 'active' ? `剩余: ${proposal.endsIn}` : proposal.endsIn}
+                  {proposal.status === 'active' ? `剩余: ${formatTimeLeft(proposal.endsAt)}` : formatTimeLeft(proposal.endsAt)}
                 </Text>
               </View>
 

@@ -127,7 +127,9 @@ class TransactionService {
     try {
       const api = this.getApi();
       const keyPair = await this.getKeyPair(mnemonic);
-      const tx = api.tx.balances.transferKeepAlive(to, amount);
+      // 转换为链上精度：1 COS = 1e12 最小单位（12位小数）
+      const amountInWei = BigInt(Math.floor(parseFloat(amount) * 1e12)).toString();
+      const tx = api.tx.balances.transferKeepAlive(to, amountInWei);
       return await this.signAndSend(tx, keyPair, callbacks);
     } catch (error: any) {
       return {
@@ -279,7 +281,7 @@ class TransactionService {
       const api = this.getApi();
       const keyPair = await this.getKeyPair(mnemonic);
       
-      const tx = (api.tx as any).divinationBazi.createBaziChart(
+      const tx = (api.tx as any).bazi.createBaziChart(
         params.name || null,
         params.input,
         { [params.gender]: null },
@@ -318,7 +320,7 @@ class TransactionService {
       const api = this.getApi();
       const keyPair = await this.getKeyPair(mnemonic);
       
-      const tx = (api.tx as any).divinationQimen.divineBySolarTime(
+      const tx = (api.tx as any).qimen.divineBySolarTime(
         params.solar_year,
         params.solar_month,
         params.solar_day,

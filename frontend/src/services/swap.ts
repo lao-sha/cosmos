@@ -298,7 +298,8 @@ class SwapService {
 
   calculateUsdt(cosAmount: string, priceUsdt: number): number {
     const cos = BigInt(cosAmount);
-    const usdt = (Number(cos) * priceUsdt) / 1e18;
+    // 链上精度：1 COS = 1e12 最小单位
+    const usdt = (Number(cos) * priceUsdt) / 1e12;
     return Math.floor(usdt);
   }
 }

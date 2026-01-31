@@ -1,20 +1,22 @@
 import { useAuthStore } from '@/src/stores/auth';
 import { useChainStore } from '@/src/stores/chain';
 import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View, Platform } from 'react-native';
+import { Cat, Sparkles, MessageCircle, Heart, Wallet, Star, Settings } from 'lucide-react-native';
 
 interface Feature {
-  icon: string;
+  icon: React.ReactNode;
   title: string;
   description: string;
   route: string;
+  color: string;
 }
 
 const FEATURES: Feature[] = [
-  { icon: '🔮', title: '玄学占卜', description: '梅花、八字、六爻等多种占卜', route: '/(tabs)/market' },
-  { icon: '💬', title: '即时聊天', description: '端到端加密的安全通讯', route: '/(tabs)/chat' },
-  { icon: '💎', title: 'OTC交易', description: '安全便捷的场外交易', route: '/trading/otc' },
-  { icon: '💕', title: '缘分匹配', description: '基于八字的智能配对', route: '/matchmaking' },
+  { icon: <Cat size={32} color="#FF6B6B" />, title: '喵星宇宙', description: 'AI宠物养成与GameFi', route: '/meowstar', color: '#FF6B6B' },
+  { icon: <Sparkles size={32} color="#9B59B6" />, title: '玄学占卜', description: '梅花、八字、六爻等多种占卜', route: '/(tabs)/market', color: '#9B59B6' },
+  { icon: <MessageCircle size={32} color="#3498DB" />, title: '即时聊天', description: '端到端加密的安全通讯', route: '/(tabs)/chat', color: '#3498DB' },
+  { icon: <Heart size={32} color="#E91E63" />, title: '缘分匹配', description: '基于八字的智能配对', route: '/matchmaking', color: '#E91E63' },
 ];
 
 export default function HomeScreen() {
@@ -57,7 +59,7 @@ export default function HomeScreen() {
               style={({ pressed }) => [styles.featureCard, pressed && styles.featureCardPressed]}
               onPress={() => handleFeaturePress(feature)}
             >
-              <Text style={styles.featureIcon}>{feature.icon}</Text>
+              <View style={styles.featureIconContainer}>{feature.icon}</View>
               <Text style={styles.featureTitle}>{feature.title}</Text>
               <Text style={styles.featureDesc}>{feature.description}</Text>
             </Pressable>
@@ -72,7 +74,7 @@ export default function HomeScreen() {
             style={({ pressed }) => [styles.actionCard, styles.actionPurple, pressed && styles.actionPressed]}
             onPress={() => router.push('/(tabs)/market')}
           >
-            <Text style={styles.actionIcon}>🔮</Text>
+            <Sparkles size={28} color="#6D28D9" />
             <Text style={styles.actionTitle}>开始占卜</Text>
           </Pressable>
           
@@ -80,16 +82,16 @@ export default function HomeScreen() {
             style={({ pressed }) => [styles.actionCard, styles.actionGold, pressed && styles.actionPressed]}
             onPress={() => router.push('/wallet')}
           >
-            <Text style={styles.actionIcon}>👛</Text>
+            <Wallet size={28} color="#D4AF37" />
             <Text style={styles.actionTitle}>我的钱包</Text>
           </Pressable>
         </View>
-        <View style={styles.actionsRow}>
+        <View style={[styles.actionsRow, { marginTop: 12 }]}>
           <Pressable 
             style={({ pressed }) => [styles.actionCard, styles.actionPurple, pressed && styles.actionPressed]}
             onPress={() => router.push('/membership')}
           >
-            <Text style={styles.actionIcon}>⭐</Text>
+            <Star size={28} color="#6D28D9" />
             <Text style={styles.actionTitle}>会员中心</Text>
           </Pressable>
           
@@ -97,14 +99,14 @@ export default function HomeScreen() {
             style={({ pressed }) => [styles.actionCard, styles.actionGold, pressed && styles.actionPressed]}
             onPress={() => router.push('/settings')}
           >
-            <Text style={styles.actionIcon}>⚙️</Text>
+            <Settings size={28} color="#D4AF37" />
             <Text style={styles.actionTitle}>系统设置</Text>
           </Pressable>
         </View>
       </View>
 
       <View style={styles.infoCard}>
-        <Text style={styles.infoTitle}>🌟 关于 Cosmos</Text>
+        <Text style={styles.infoTitle}>关于 Cosmos</Text>
         <Text style={styles.infoText}>
           Cosmos 是一个基于 Substrate 区块链的去中心化应用，
           融合了传统玄学文化与现代 Web3 技术。
@@ -166,9 +168,14 @@ const styles = StyleSheet.create({
   featureCardPressed: {
     backgroundColor: '#f9fafb',
   },
-  featureIcon: {
-    fontSize: 32,
-    marginBottom: 8,
+  featureIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#f3f4f6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
   },
   featureTitle: {
     fontSize: 14,
@@ -288,6 +295,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#374151',
+    marginTop: 8,
   },
   hintContainer: {
     paddingHorizontal: 20,

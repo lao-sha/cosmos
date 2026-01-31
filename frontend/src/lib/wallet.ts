@@ -302,8 +302,8 @@ export class WalletService {
   static async initializePrimaryAccount(mnemonic: string): Promise<AccountInfo> {
     await cryptoWaitReady();
     
-    // 使用派生路径创建主账户
-    const keyPair = await this.deriveAccount(mnemonic, 0);
+    // 直接使用助记词创建主账户（与脚本保持一致）
+    const keyPair = this.keyring.addFromUri(mnemonic);
     
     const primaryAccount: AccountInfo = {
       id: this.generateAccountId(),

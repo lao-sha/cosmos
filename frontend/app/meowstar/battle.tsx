@@ -1,6 +1,15 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, Platform } from 'react-native';
+import { useRouter } from 'expo-router';
 import { Swords, Shield, Zap, Trophy, Users } from 'lucide-react-native';
+
+const showAlert = (title: string, message: string) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+};
 
 type BattleMode = 'pve' | 'pvp';
 type Difficulty = 'easy' | 'normal' | 'hard' | 'nightmare';
@@ -13,6 +22,7 @@ interface BattleStats {
 }
 
 export default function BattleScreen() {
+  const router = useRouter();
   const [selectedMode, setSelectedMode] = useState<BattleMode>('pve');
   const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>('normal');
   const [selectedPetId, setSelectedPetId] = useState<number | null>(1);
@@ -34,7 +44,7 @@ export default function BattleScreen() {
 
   const handleStartBattle = () => {
     if (!selectedPetId) {
-      Alert.alert('提示', '请先选择一只宠物');
+      showAlert('提示', '请先选择一只宠物');
       return;
     }
 
@@ -43,10 +53,13 @@ export default function BattleScreen() {
       // 模拟匹配
       setTimeout(() => {
         setIsSearching(false);
-        Alert.alert('匹配成功', '找到对手！战斗即将开始...');
-      }, 3000);
+        showAlert('匹配成功', '找到对手！战斗即将开始...');
+        // PVP 模式跳转到战斗场景
+        router.push(`/meowstar/battle-arena?difficulty=normal&mode=pvp` as any);
+      }, 2000);
     } else {
-      Alert.alert('战斗开始', `开始 ${difficulties.find(d => d.key === selectedDifficulty)?.label} 难度 PVE 战斗！`);
+      // PVE 模式直接跳转到战斗场景
+      router.push(`/meowstar/battle-arena?difficulty=${selectedDifficulty}&mode=pve` as any);
     }
   };
 

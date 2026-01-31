@@ -173,7 +173,7 @@ export default function QimenScreen() {
       let juNumber = 1;
       
       for (const event of events) {
-        if (event?.event?.section === 'divinationQimen' && event?.event?.method === 'ChartCreated') {
+        if (event?.event?.section === 'qimen' && event?.event?.method === 'ChartCreated') {
           const data = event.event.data;
           if (data) {
             chartId = parseInt(data.chart_id || data.chartId || '0');

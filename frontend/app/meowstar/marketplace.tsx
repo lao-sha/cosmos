@@ -1,19 +1,35 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, TextInput } from 'react-native';
-import { Search, Filter, TrendingUp, Clock, Gavel } from 'lucide-react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, TextInput, Modal, Platform, ActivityIndicator } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Search, Filter, TrendingUp, Clock, Gavel, X, Check, AlertCircle } from 'lucide-react-native';
+import { useMeowstar, MarketListing } from '@/services/meowstar';
 
-interface Listing {
-  id: number;
-  petName: string;
-  element: string;
-  rarity: string;
-  level: number;
-  price: number;
-  seller: string;
-  type: 'fixed' | 'auction';
-  highestBid?: number;
-  endsAt?: string;
-}
+// 跨平台 Alert
+const showAlert = (title: string, message: string, onOk?: () => void) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n\n${message}`);
+    onOk?.();
+  } else {
+    const { Alert } = require('react-native');
+    Alert.alert(title, message, [{ text: '确定', onPress: onOk }]);
+  }
+};
+
+// 格式化剩余时间
+const formatTimeLeft = (endsAt: number): string => {
+  const now = Date.now();
+  const diff = endsAt - now;
+  if (diff <= 0) return '已结束';
+  
+  const hours = Math.floor(diff / 3600000);
+  const minutes = Math.floor((diff % 3600000) / 60000);
+  
+  if (hours >= 24) {
+    const days = Math.floor(hours / 24);
+    return `${days}天 ${hours % 24}小时`;
+  }
+  return `${hours}h ${minutes}m`;
+};
 
 const RARITY_COLORS: Record<string, string> = {
   common: '#888',
@@ -24,57 +40,19 @@ const RARITY_COLORS: Record<string, string> = {
 };
 
 export default function MarketplaceScreen() {
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'fixed' | 'auction'>('all');
+  const [selectedListing, setSelectedListing] = useState<MarketListing | null>(null);
+  const [showBuyModal, setShowBuyModal] = useState(false);
+  const [showBidModal, setShowBidModal] = useState(false);
+  const [bidAmount, setBidAmount] = useState('');
+  const [isPurchasing, setIsPurchasing] = useState(false);
 
-  const listings: Listing[] = [
-    {
-      id: 1,
-      petName: '烈焰之心',
-      element: 'fire',
-      rarity: 'legendary',
-      level: 35,
-      price: 500,
-      seller: '5Grw...aEF5',
-      type: 'fixed',
-    },
-    {
-      id: 2,
-      petName: '深海守护者',
-      element: 'water',
-      rarity: 'epic',
-      level: 28,
-      price: 150,
-      seller: '5FHn...eVkZ',
-      type: 'auction',
-      highestBid: 180,
-      endsAt: '2h 30m',
-    },
-    {
-      id: 3,
-      petName: '暗影猎手',
-      element: 'shadow',
-      rarity: 'rare',
-      level: 20,
-      price: 80,
-      seller: '5DAn...kLmP',
-      type: 'fixed',
-    },
-    {
-      id: 4,
-      petName: '光明使者',
-      element: 'light',
-      rarity: 'mythic',
-      level: 50,
-      price: 2000,
-      seller: '5Grw...aEF5',
-      type: 'auction',
-      highestBid: 2500,
-      endsAt: '5h 15m',
-    },
-  ];
+  // 使用全局状态
+  const { marketListings, user, buyPet, placeBid, isLoading } = useMeowstar();
 
-  const filteredListings = listings.filter((listing) => {
+  const filteredListings = marketListings.filter((listing) => {
     if (activeTab !== 'all' && listing.type !== activeTab) return false;
     if (searchQuery && !listing.petName.toLowerCase().includes(searchQuery.toLowerCase())) {
       return false;
@@ -85,8 +63,68 @@ export default function MarketplaceScreen() {
   const marketStats = {
     totalVolume: '125,430 COS',
     totalTrades: 1842,
-    activeListings: 156,
+    activeListings: marketListings.length,
   };
+
+  // 处理购买
+  const handleBuy = (listing: MarketListing) => {
+    setSelectedListing(listing);
+    setShowBuyModal(true);
+  };
+
+  // 处理出价
+  const handleBid = (listing: MarketListing) => {
+    setSelectedListing(listing);
+    setBidAmount(String((listing.highestBid || listing.price) + 10));
+    setShowBidModal(true);
+  };
+
+  // 确认购买
+  const confirmPurchase = async () => {
+    if (!selectedListing) return;
+    setIsPurchasing(true);
+    
+    const result = await buyPet(selectedListing.id);
+    setIsPurchasing(false);
+    setShowBuyModal(false);
+    
+    showAlert(
+      result.success ? '购买成功！' : '购买失败',
+      result.message,
+      result.success ? () => router.push('/meowstar/pets' as any) : undefined
+    );
+  };
+
+  // 确认出价
+  const confirmBid = async () => {
+    if (!selectedListing) return;
+    const minBid = (selectedListing.highestBid || selectedListing.price) + 1;
+    
+    if (!bidAmount || Number(bidAmount) < minBid) {
+      showAlert('出价失败', `出价必须高于当前最高价 ${minBid - 1} COS`);
+      return;
+    }
+    
+    setIsPurchasing(true);
+    
+    const result = await placeBid(selectedListing.id, Number(bidAmount));
+    setIsPurchasing(false);
+    setShowBidModal(false);
+    
+    showAlert(
+      result.success ? '出价成功！' : '出价失败',
+      result.message
+    );
+  };
+
+  if (isLoading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#4ECDC4" />
+        <Text style={{ color: '#888', marginTop: 16 }}>加载中...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -170,11 +208,14 @@ export default function MarketplaceScreen() {
                     <Clock size={12} color="#888" />
                     <Text style={styles.timeText}>{listing.endsAt}</Text>
                   </View>
+                  <TouchableOpacity style={styles.bidButton} onPress={() => handleBid(listing)}>
+                    <Text style={styles.bidButtonText}>出价</Text>
+                  </TouchableOpacity>
                 </>
               ) : (
                 <>
                   <Text style={styles.priceText}>{listing.price} COS</Text>
-                  <TouchableOpacity style={styles.buyButton}>
+                  <TouchableOpacity style={styles.buyButton} onPress={() => handleBuy(listing)}>
                     <Text style={styles.buyButtonText}>购买</Text>
                   </TouchableOpacity>
                 </>
@@ -183,6 +224,193 @@ export default function MarketplaceScreen() {
           </TouchableOpacity>
         ))}
       </ScrollView>
+
+      {/* 购买确认弹窗 */}
+      <Modal
+        visible={showBuyModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowBuyModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <TouchableOpacity
+              style={styles.modalClose}
+              onPress={() => setShowBuyModal(false)}
+            >
+              <X size={24} color="#888" />
+            </TouchableOpacity>
+            
+            <Text style={styles.modalTitle}>确认购买</Text>
+            
+            {selectedListing && (
+              <>
+                <View style={styles.modalPetInfo}>
+                  <View style={[styles.modalPetAvatar, { borderColor: RARITY_COLORS[selectedListing.rarity] }]}>
+                    <Text style={styles.modalPetEmoji}>🐱</Text>
+                  </View>
+                  <Text style={styles.modalPetName}>{selectedListing.petName}</Text>
+                  <View style={styles.modalPetMeta}>
+                    <Text style={[styles.modalRarity, { color: RARITY_COLORS[selectedListing.rarity] }]}>
+                      {selectedListing.rarity.toUpperCase()}
+                    </Text>
+                    <Text style={styles.modalLevel}>Lv.{selectedListing.level}</Text>
+                  </View>
+                </View>
+                
+                <View style={styles.modalPriceSection}>
+                  <Text style={styles.modalPriceLabel}>购买价格</Text>
+                  <Text style={styles.modalPrice}>{selectedListing.price} COS</Text>
+                </View>
+                
+                <View style={styles.modalFeeSection}>
+                  <View style={styles.modalFeeRow}>
+                    <Text style={styles.modalFeeLabel}>商品价格</Text>
+                    <Text style={styles.modalFeeValue}>{selectedListing.price} COS</Text>
+                  </View>
+                  <View style={styles.modalFeeRow}>
+                    <Text style={styles.modalFeeLabel}>手续费 (0%)</Text>
+                    <Text style={styles.modalFeeValue}>0 COS</Text>
+                  </View>
+                  <View style={[styles.modalFeeRow, styles.modalTotalRow]}>
+                    <Text style={styles.modalTotalLabel}>总计</Text>
+                    <Text style={styles.modalTotalValue}>{selectedListing.price} COS</Text>
+                  </View>
+                </View>
+                
+                <View style={styles.modalWarning}>
+                  <AlertCircle size={16} color="#F7DC6F" />
+                  <Text style={styles.modalWarningText}>购买后将从你的钱包扣除相应金额</Text>
+                </View>
+                
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    style={styles.modalCancelButton}
+                    onPress={() => setShowBuyModal(false)}
+                  >
+                    <Text style={styles.modalCancelText}>取消</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalConfirmButton, isPurchasing && styles.modalButtonDisabled]}
+                    onPress={confirmPurchase}
+                    disabled={isPurchasing}
+                  >
+                    {isPurchasing ? (
+                      <Text style={styles.modalConfirmText}>处理中...</Text>
+                    ) : (
+                      <>
+                        <Check size={18} color="#fff" />
+                        <Text style={styles.modalConfirmText}>确认购买</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* 出价弹窗 */}
+      <Modal
+        visible={showBidModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowBidModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <TouchableOpacity
+              style={styles.modalClose}
+              onPress={() => setShowBidModal(false)}
+            >
+              <X size={24} color="#888" />
+            </TouchableOpacity>
+            
+            <Text style={styles.modalTitle}>出价竞拍</Text>
+            
+            {selectedListing && (
+              <>
+                <View style={styles.modalPetInfo}>
+                  <View style={[styles.modalPetAvatar, { borderColor: RARITY_COLORS[selectedListing.rarity] }]}>
+                    <Text style={styles.modalPetEmoji}>🐱</Text>
+                  </View>
+                  <Text style={styles.modalPetName}>{selectedListing.petName}</Text>
+                  <View style={styles.modalPetMeta}>
+                    <Text style={[styles.modalRarity, { color: RARITY_COLORS[selectedListing.rarity] }]}>
+                      {selectedListing.rarity.toUpperCase()}
+                    </Text>
+                    <Text style={styles.modalLevel}>Lv.{selectedListing.level}</Text>
+                  </View>
+                </View>
+                
+                <View style={styles.modalBidInfo}>
+                  <View style={styles.bidInfoRow}>
+                    <Text style={styles.bidInfoLabel}>起拍价</Text>
+                    <Text style={styles.bidInfoValue}>{selectedListing.price} COS</Text>
+                  </View>
+                  <View style={styles.bidInfoRow}>
+                    <Text style={styles.bidInfoLabel}>当前最高出价</Text>
+                    <Text style={[styles.bidInfoValue, styles.bidHighest]}>
+                      {selectedListing.highestBid || selectedListing.price} COS
+                    </Text>
+                  </View>
+                  <View style={styles.bidInfoRow}>
+                    <Text style={styles.bidInfoLabel}>剩余时间</Text>
+                    <Text style={styles.bidInfoValue}>{selectedListing.endsAt}</Text>
+                  </View>
+                </View>
+                
+                <View style={styles.bidInputSection}>
+                  <Text style={styles.bidInputLabel}>你的出价 (COS)</Text>
+                  <View style={styles.bidInputWrapper}>
+                    <TextInput
+                      style={styles.bidInput}
+                      value={bidAmount}
+                      onChangeText={setBidAmount}
+                      keyboardType="numeric"
+                      placeholder={`最低 ${(selectedListing.highestBid || selectedListing.price) + 1}`}
+                      placeholderTextColor="#666"
+                    />
+                    <Text style={styles.bidInputSuffix}>COS</Text>
+                  </View>
+                  <Text style={styles.bidMinHint}>
+                    最低出价: {(selectedListing.highestBid || selectedListing.price) + 1} COS
+                  </Text>
+                </View>
+                
+                <View style={styles.modalWarning}>
+                  <AlertCircle size={16} color="#F7DC6F" />
+                  <Text style={styles.modalWarningText}>出价成功后金额将被冻结，如被超越将自动退还</Text>
+                </View>
+                
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    style={styles.modalCancelButton}
+                    onPress={() => setShowBidModal(false)}
+                  >
+                    <Text style={styles.modalCancelText}>取消</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalBidButton, isPurchasing && styles.modalButtonDisabled]}
+                    onPress={confirmBid}
+                    disabled={isPurchasing}
+                  >
+                    {isPurchasing ? (
+                      <Text style={styles.modalConfirmText}>处理中...</Text>
+                    ) : (
+                      <>
+                        <Gavel size={18} color="#fff" />
+                        <Text style={styles.modalConfirmText}>确认出价</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -359,5 +587,243 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 14,
+  },
+  bidButton: {
+    backgroundColor: '#F7DC6F',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  bidButtonText: {
+    color: '#000',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#1a1a2e',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+  },
+  modalClose: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    zIndex: 1,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  modalPetInfo: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalPetAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#252540',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    marginBottom: 12,
+  },
+  modalPetEmoji: {
+    fontSize: 40,
+  },
+  modalPetName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 8,
+  },
+  modalPetMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  modalRarity: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginRight: 12,
+  },
+  modalLevel: {
+    fontSize: 14,
+    color: '#888',
+  },
+  modalPriceSection: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalPriceLabel: {
+    fontSize: 14,
+    color: '#888',
+    marginBottom: 4,
+  },
+  modalPrice: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#4ECDC4',
+  },
+  modalFeeSection: {
+    backgroundColor: '#252540',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  modalFeeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  modalFeeLabel: {
+    fontSize: 14,
+    color: '#888',
+  },
+  modalFeeValue: {
+    fontSize: 14,
+    color: '#fff',
+  },
+  modalTotalRow: {
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+    paddingTop: 8,
+    marginTop: 4,
+    marginBottom: 0,
+  },
+  modalTotalLabel: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  modalTotalValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#4ECDC4',
+  },
+  modalWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F7DC6F15',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 20,
+  },
+  modalWarningText: {
+    fontSize: 12,
+    color: '#F7DC6F',
+    marginLeft: 8,
+    flex: 1,
+  },
+  modalActions: {
+    flexDirection: 'row',
+  },
+  modalCancelButton: {
+    flex: 1,
+    backgroundColor: '#252540',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  modalCancelText: {
+    fontSize: 16,
+    color: '#888',
+    fontWeight: '600',
+  },
+  modalConfirmButton: {
+    flex: 1,
+    backgroundColor: '#FF6B6B',
+    paddingVertical: 14,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  modalBidButton: {
+    flex: 1,
+    backgroundColor: '#F7DC6F',
+    paddingVertical: 14,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  modalButtonDisabled: {
+    opacity: 0.6,
+  },
+  modalConfirmText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: 'bold',
+    marginLeft: 6,
+  },
+  modalBidInfo: {
+    backgroundColor: '#252540',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  bidInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  bidInfoLabel: {
+    fontSize: 14,
+    color: '#888',
+  },
+  bidInfoValue: {
+    fontSize: 14,
+    color: '#fff',
+  },
+  bidHighest: {
+    color: '#F7DC6F',
+    fontWeight: 'bold',
+  },
+  bidInputSection: {
+    marginBottom: 16,
+  },
+  bidInputLabel: {
+    fontSize: 14,
+    color: '#888',
+    marginBottom: 8,
+  },
+  bidInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#252540',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+  },
+  bidInput: {
+    flex: 1,
+    fontSize: 20,
+    color: '#fff',
+    paddingVertical: 14,
+  },
+  bidInputSuffix: {
+    fontSize: 14,
+    color: '#888',
+  },
+  bidMinHint: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 8,
   },
 });

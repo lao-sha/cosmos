@@ -1,20 +1,18 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, TextInput, Alert } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Modal, TextInput, Alert, Platform, ActivityIndicator } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Plus, Flame, Droplets, Sun, Moon, Star, ChevronRight } from 'lucide-react-native';
+import { useMeowstar, Pet } from '@/services/meowstar';
 
-interface Pet {
-  id: number;
-  name: string;
-  element: 'normal' | 'fire' | 'water' | 'light' | 'shadow';
-  rarity: 'common' | 'rare' | 'epic' | 'legendary' | 'mythic';
-  level: number;
-  evolutionStage: number;
-  hp: number;
-  attack: number;
-  defense: number;
-  speed: number;
-}
+// 跨平台 Alert
+const showAlert = (title: string, message: string, onOk?: () => void) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n\n${message}`);
+    onOk?.();
+  } else {
+    Alert.alert(title, message, [{ text: '确定', onPress: onOk }]);
+  }
+};
 
 const ELEMENT_ICONS: Record<string, React.ReactNode> = {
   normal: <Star size={20} color="#888" />,
@@ -88,37 +86,20 @@ export default function PetsScreen() {
   const [petName, setPetName] = useState('');
   const [isHatching, setIsHatching] = useState(false);
 
-  // 模拟宠物数据
-  const [pets, setPets] = useState<Pet[]>([
-    {
-      id: 1,
-      name: '小火',
-      element: 'fire',
-      rarity: 'rare',
-      level: 15,
-      evolutionStage: 1,
-      hp: 120,
-      attack: 45,
-      defense: 30,
-      speed: 50,
-    },
-    {
-      id: 2,
-      name: '水灵',
-      element: 'water',
-      rarity: 'epic',
-      level: 22,
-      evolutionStage: 2,
-      hp: 180,
-      attack: 55,
-      defense: 60,
-      speed: 40,
-    },
-  ]);
+  // 使用全局状态
+  const { pets, user, isLoading, updateBalance } = useMeowstar();
+
+  // 孵化费用
+  const HATCH_COST = 10;
 
   const handleHatch = async () => {
     if (!petName.trim()) {
-      Alert.alert('提示', '请输入宠物名称');
+      showAlert('提示', '请输入宠物名称');
+      return;
+    }
+
+    if (!user || user.balance < HATCH_COST) {
+      showAlert('余额不足', `孵化需要 ${HATCH_COST} COS，当前余额 ${user?.balance || 0} COS`);
       return;
     }
 
@@ -129,30 +110,31 @@ export default function PetsScreen() {
       const elements = ['normal', 'fire', 'water', 'light', 'shadow'] as const;
       const rarities = ['common', 'rare', 'epic', 'legendary', 'mythic'] as const;
       
-      const newPet: Pet = {
-        id: pets.length + 1,
-        name: petName,
-        element: elements[Math.floor(Math.random() * elements.length)],
-        rarity: rarities[Math.floor(Math.random() * 3)], // 前三个更常见
-        level: 1,
-        evolutionStage: 0,
-        hp: 50 + Math.floor(Math.random() * 30),
-        attack: 10 + Math.floor(Math.random() * 10),
-        defense: 10 + Math.floor(Math.random() * 10),
-        speed: 10 + Math.floor(Math.random() * 10),
-      };
+      const newRarity = rarities[Math.floor(Math.random() * 3)];
+      const newElement = elements[Math.floor(Math.random() * elements.length)];
 
-      setPets([...pets, newPet]);
+      // 扣除费用
+      updateBalance(-HATCH_COST);
+
       setShowHatchModal(false);
       setPetName('');
       setIsHatching(false);
       
-      Alert.alert(
+      showAlert(
         '🎉 孵化成功！',
-        `恭喜获得 ${RARITY_LABELS[newPet.rarity]} ${newPet.element === 'fire' ? '火系' : newPet.element === 'water' ? '水系' : newPet.element === 'light' ? '光系' : newPet.element === 'shadow' ? '暗系' : '普通'} 宠物 "${newPet.name}"！`
+        `恭喜获得 ${RARITY_LABELS[newRarity]} ${newElement === 'fire' ? '火系' : newElement === 'water' ? '水系' : newElement === 'light' ? '光系' : newElement === 'shadow' ? '暗系' : '普通'} 宠物 "${petName}"！\n\n消耗: ${HATCH_COST} COS\n剩余余额: ${(user?.balance || 0) - HATCH_COST} COS`
       );
     }, 2000);
   };
+
+  if (isLoading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#4ECDC4" />
+        <Text style={{ color: '#888', marginTop: 16 }}>加载中...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>

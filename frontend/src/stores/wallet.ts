@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { AccountInfo, WalletService } from '../lib/wallet';
+import { useAuthStore } from './auth';
 
 interface WalletState {
   // 状态
@@ -71,6 +72,8 @@ export const useWalletStore = create<WalletState>()(
         if (account) {
           await WalletService.saveActiveAccountId(accountId);
           set({ activeAccountId: accountId });
+          // 同步更新 authStore 的地址
+          useAuthStore.setState({ address: account.address });
         }
       },
 

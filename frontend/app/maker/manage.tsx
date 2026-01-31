@@ -73,7 +73,8 @@ export default function MakerManageScreen() {
       return;
     }
 
-    const amountInWei = BigInt(Math.floor(amount * 1e18)).toString();
+    // 链上精度：1 COS = 1e12 最小单位
+    const amountInWei = BigInt(Math.floor(amount * 1e12)).toString();
 
     await requestMakerWithdrawal(mnemonic, amountInWei, {
       onSuccess: () => {

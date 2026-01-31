@@ -81,7 +81,8 @@ export async function signAndSend(
 
 export function formatCos(amount: bigint | string | number): string {
   const value = BigInt(amount);
-  const cos = Number(value) / 1e18;
+  // 链上精度：1 COS = 1e12 最小单位（12位小数）
+  const cos = Number(value) / 1e12;
   return `${cos.toLocaleString()} COS`;
 }
 
@@ -94,7 +95,8 @@ export function formatUsdt(amount: number): string {
 }
 
 export function toCosWei(cos: number): string {
-  return (BigInt(Math.floor(cos * 1e18))).toString();
+  // 链上精度：1 COS = 1e12 最小单位（12位小数）
+  return (BigInt(Math.floor(cos * 1e12))).toString();
 }
 
 export function toUsdtWei(usdt: number): string {

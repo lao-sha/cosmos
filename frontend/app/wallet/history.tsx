@@ -1,9 +1,13 @@
+import { chainService, TransferRecord } from '@/src/services/chain';
 import { useAuthStore } from '@/src/stores/auth';
+import { useChainStore } from '@/src/stores/chain';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     FlatList,
     Pressable,
+    RefreshControl,
     StyleSheet,
     Text,
     View,
@@ -23,56 +27,6 @@ interface Transaction {
   blockNumber?: number;
 }
 
-const MOCK_TRANSACTIONS: Transaction[] = [
-  {
-    id: '1',
-    hash: '0xabc123...def456',
-    type: 'transfer_out',
-    amount: '10.5',
-    counterparty: '5Grw...utQY',
-    status: 'confirmed',
-    timestamp: '2025-01-28 14:30',
-    blockNumber: 123456,
-  },
-  {
-    id: '2',
-    hash: '0xdef456...abc789',
-    type: 'transfer_in',
-    amount: '25.0',
-    counterparty: '5DAn...kQrB',
-    status: 'confirmed',
-    timestamp: '2025-01-27 10:15',
-    blockNumber: 123400,
-  },
-  {
-    id: '3',
-    hash: '0x789abc...123def',
-    type: 'reward',
-    amount: '0.5',
-    status: 'confirmed',
-    timestamp: '2025-01-26 08:00',
-    blockNumber: 123300,
-  },
-  {
-    id: '4',
-    hash: '0x456def...789abc',
-    type: 'transfer_out',
-    amount: '5.0',
-    counterparty: '5Ck8...mNpC',
-    status: 'pending',
-    timestamp: '2025-01-28 15:00',
-  },
-  {
-    id: '5',
-    hash: '0x123abc...456def',
-    type: 'stake',
-    amount: '100.0',
-    status: 'confirmed',
-    timestamp: '2025-01-25 16:45',
-    blockNumber: 123200,
-  },
-];
-
 const TYPE_INFO: Record<TxType, { label: string; icon: string; color: string }> = {
   transfer_in: { label: '收款', icon: '↙️', color: '#22c55e' },
   transfer_out: { label: '转账', icon: '↗️', color: '#ef4444' },
@@ -91,10 +45,54 @@ const STATUS_INFO: Record<TxStatus, { label: string; color: string }> = {
 export default function HistoryScreen() {
   const router = useRouter();
   const { isLoggedIn, address } = useAuthStore();
+  const { isConnected } = useChainStore();
 
   const [filter, setFilter] = useState<'all' | 'in' | 'out'>('all');
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const filteredTx = MOCK_TRANSACTIONS.filter((tx) => {
+  // 从链上获取交易记录
+  const fetchTransactions = useCallback(async () => {
+    if (!address || !isConnected) return;
+    
+    setLoading(true);
+    try {
+      const records = await chainService.getTransferHistory(address, 50);
+      // 转换为 Transaction 类型
+      const txList: Transaction[] = records.map((record: TransferRecord) => ({
+        id: record.id,
+        hash: record.hash,
+        type: record.type,
+        amount: record.amount,
+        counterparty: record.counterparty,
+        status: record.status,
+        timestamp: record.timestamp,
+        blockNumber: record.blockNumber,
+      }));
+      setTransactions(txList);
+    } catch (error) {
+      console.error('Failed to fetch transactions:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [address, isConnected]);
+
+  // 下拉刷新
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchTransactions();
+    setRefreshing(false);
+  }, [fetchTransactions]);
+
+  // 初始加载
+  useEffect(() => {
+    if (isLoggedIn && isConnected) {
+      fetchTransactions();
+    }
+  }, [isLoggedIn, isConnected, fetchTransactions]);
+
+  const filteredTx = transactions.filter((tx) => {
     if (filter === 'all') return true;
     if (filter === 'in') return ['transfer_in', 'reward'].includes(tx.type);
     return ['transfer_out', 'stake', 'fee'].includes(tx.type);
@@ -189,31 +187,46 @@ export default function HistoryScreen() {
         ))}
       </View>
 
-      <FlatList
-        data={filteredTx}
-        renderItem={renderItem}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyIcon}>📜</Text>
-            <Text style={styles.emptyTitle}>暂无交易记录</Text>
-            <Text style={styles.emptyDesc}>
-              你的交易记录将显示在这里
-            </Text>
-          </View>
-        }
-        ListFooterComponent={
-          filteredTx.length > 0 ? (
-            <View style={styles.footer}>
-              <Text style={styles.footerText}>
-                仅显示最近的交易记录
+      {loading && transactions.length === 0 ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#6D28D9" />
+          <Text style={styles.loadingText}>加载交易记录中...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filteredTx}
+          renderItem={renderItem}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#6D28D9']}
+              tintColor="#6D28D9"
+            />
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyIcon}>📜</Text>
+              <Text style={styles.emptyTitle}>暂无交易记录</Text>
+              <Text style={styles.emptyDesc}>
+                你的交易记录将显示在这里
               </Text>
             </View>
-          ) : null
-        }
-      />
+          }
+          ListFooterComponent={
+            filteredTx.length > 0 ? (
+              <View style={styles.footer}>
+                <Text style={styles.footerText}>
+                  仅显示最近 200 个区块的交易记录
+                </Text>
+              </View>
+            ) : null
+          }
+        />
+      )}
     </View>
   );
 }
@@ -222,6 +235,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#6b7280',
   },
   header: {
     flexDirection: 'row',

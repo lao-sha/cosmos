@@ -1,7 +1,18 @@
-import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, Platform, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Flame, Droplets, Sun, Moon, Star, TrendingUp, Zap, Shield, Heart, ArrowUp, Sparkles } from 'lucide-react-native';
+import { useMeowstar } from '@/services/meowstar';
+
+// 跨平台 Alert
+const showAlert = (title: string, message: string, onOk?: () => void) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n\n${message}`);
+    onOk?.();
+  } else {
+    Alert.alert(title, message, [{ text: '确定', onPress: onOk }]);
+  }
+};
 
 const ELEMENT_CONFIG = {
   normal: { icon: Star, color: '#888', name: '普通' },
@@ -24,68 +35,56 @@ export default function PetDetailScreen() {
   const router = useRouter();
   const [isLevelingUp, setIsLevelingUp] = useState(false);
   const [isEvolving, setIsEvolving] = useState(false);
+  
+  // 使用全局状态
+  const { user, getPetById, levelUpPet, evolvePet, isLoading } = useMeowstar();
+  
+  // 获取宠物数据
+  const pet = getPetById(Number(id));
 
-  // 模拟宠物数据
-  const pet = {
-    id: Number(id),
-    name: '小火',
-    element: 'fire' as const,
-    rarity: 'rare' as const,
-    level: 15,
-    experience: 1250,
-    expToNextLevel: 2000,
-    evolutionStage: 1,
-    maxEvolutionStage: 4,
-    hp: 120,
-    maxHp: 120,
-    attack: 45,
-    defense: 30,
-    speed: 50,
-    critRate: 15,
-    personality: {
-      extroversion: 70,
-      warmth: 80,
-      humor: 60,
-      curiosity: 75,
-      responsibility: 50,
-    },
-    skills: [
-      { name: '火焰冲击', level: 3, damage: 45 },
-      { name: '烈焰护盾', level: 2, damage: 0 },
-    ],
-    battleStats: {
-      wins: 28,
-      losses: 12,
-      winRate: 70,
-    },
-  };
+  // 加载中或宠物不存在
+  if (isLoading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#4ECDC4" />
+        <Text style={{ color: '#888', marginTop: 16 }}>加载中...</Text>
+      </View>
+    );
+  }
 
-  const ElementIcon = ELEMENT_CONFIG[pet.element].icon;
+  if (!pet) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: '#888', fontSize: 18 }}>宠物不存在</Text>
+      </View>
+    );
+  }
+
+  const ElementIcon = ELEMENT_CONFIG[pet.element]?.icon || Star;
   const expPercent = (pet.experience / pet.expToNextLevel) * 100;
 
-  const handleLevelUp = () => {
+  const handleLevelUp = async () => {
     setIsLevelingUp(true);
-    setTimeout(() => {
-      setIsLevelingUp(false);
-      Alert.alert('升级成功！', `${pet.name} 升到了 ${pet.level + 1} 级！`);
-    }, 1500);
+    const result = await levelUpPet(pet.id);
+    setIsLevelingUp(false);
+    showAlert(result.success ? '升级成功！' : '升级失败', result.message);
   };
 
-  const handleEvolve = () => {
-    if (pet.level < 10 * (pet.evolutionStage + 1)) {
-      Alert.alert('无法进化', `需要达到 ${10 * (pet.evolutionStage + 1)} 级才能进化`);
-      return;
-    }
-    
+  const handleEvolve = async () => {
     setIsEvolving(true);
-    setTimeout(() => {
-      setIsEvolving(false);
-      Alert.alert('进化成功！', `${pet.name} 进化到了第 ${pet.evolutionStage + 1} 阶段！`);
-    }, 2000);
+    const result = await evolvePet(pet.id);
+    setIsEvolving(false);
+    showAlert(result.success ? '进化成功！' : '进化失败', result.message);
   };
 
   return (
     <ScrollView style={styles.container}>
+      {/* 用户余额 */}
+      <View style={styles.balanceCard}>
+        <Text style={styles.balanceLabel}>💰 我的余额</Text>
+        <Text style={styles.balanceValue}>{user?.balance || 0} COS</Text>
+      </View>
+      
       {/* 宠物头像和基本信息 */}
       <View style={styles.header}>
         <View style={[styles.avatarContainer, { borderColor: ELEMENT_CONFIG[pet.element].color }]}>
@@ -231,7 +230,7 @@ export default function PetDetailScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.secondaryButton, styles.sellButton]}
-          onPress={() => Alert.alert('挂单出售', '确定要将这只宠物挂单出售吗？')}
+          onPress={() => router.push(`/meowstar/pet/sell?id=${id}` as any)}
         >
           <Text style={styles.sellButtonText}>出售</Text>
         </TouchableOpacity>
@@ -244,6 +243,27 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0f0f1a',
+  },
+  balanceCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#1a1a2e',
+    marginHorizontal: 16,
+    marginTop: 16,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#4ECDC430',
+  },
+  balanceLabel: {
+    fontSize: 14,
+    color: '#888',
+  },
+  balanceValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#4ECDC4',
   },
   header: {
     alignItems: 'center',

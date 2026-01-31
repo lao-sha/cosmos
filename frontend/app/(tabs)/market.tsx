@@ -81,8 +81,19 @@ export default function MarketScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>占卜市场</Text>
-        <Text style={styles.headerSubtitle}>寻找适合你的占卜师</Text>
+        <View style={styles.headerTop}>
+          <View>
+            <Text style={styles.headerTitle}>占卜市场</Text>
+            <Text style={styles.headerSubtitle}>寻找适合你的占卜师</Text>
+          </View>
+          <Pressable 
+            style={styles.myRecordsButton} 
+            onPress={() => router.push('/divination/my-records' as any)}
+          >
+            <Text style={styles.myRecordsIcon}>📜</Text>
+            <Text style={styles.myRecordsText}>我的占卜</Text>
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.categoriesSection}>
@@ -128,6 +139,28 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     paddingBottom: 20,
     paddingHorizontal: 20,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  myRecordsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  myRecordsIcon: {
+    fontSize: 14,
+    marginRight: 4,
+  },
+  myRecordsText: {
+    fontSize: 13,
+    color: '#fff',
+    fontWeight: '500',
   },
   headerTitle: {
     fontSize: 28,

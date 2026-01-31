@@ -127,7 +127,8 @@ export default function OtcScreen() {
     }
 
     const orderType = selectedSide === 'sell' ? 'Sell' : 'Buy';
-    const amountInUnits = (parseFloat(amount) * 1e10).toString();
+    // 链上精度：1 COS = 1e12 最小单位
+    const amountInUnits = (parseFloat(amount) * 1e12).toString();
     const priceInUnits = (parseFloat(price) * 100).toString();
 
     const result = await createOtcOrder(orderType, amountInUnits, priceInUnits, 'CNY');

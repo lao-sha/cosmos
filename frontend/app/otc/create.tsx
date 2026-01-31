@@ -101,7 +101,8 @@ export default function OtcCreateScreen() {
         return;
       }
 
-      const cosAmountWei = BigInt(Math.floor(parseFloat(cosAmount) * 1e18)).toString();
+      // 链上精度：1 COS = 1e12 最小单位
+      const cosAmountWei = BigInt(Math.floor(parseFloat(cosAmount) * 1e12)).toString();
 
       await createOtcOrderNew(
         mnemonic,

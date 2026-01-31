@@ -21,7 +21,8 @@ export function BalanceDisplay({ compact = false, showRefresh = true }: BalanceD
     setLoading(true);
     try {
       const result = await chainService.getBalance(address);
-      const formatted = (parseFloat(result) / 1e10).toFixed(4);
+      // 链上精度：1 COS = 1e12 最小单位（12位小数）
+      const formatted = (parseFloat(result) / 1e12).toFixed(4);
       setBalance(formatted);
     } catch (error) {
       console.error('Failed to fetch balance:', error);

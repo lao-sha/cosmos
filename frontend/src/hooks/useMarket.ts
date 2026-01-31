@@ -85,7 +85,8 @@ export function useProviders(category?: DivinationType | null) {
                 rating: (data.rating?.toNumber() || 45) / 10,
                 orderCount: data.totalOrders?.toNumber() || 0,
                 specialties: specialties as DivinationType[],
-                price: (data.minPrice?.toNumber() || 0) / 1e10,
+                // 链上精度：1 COS = 1e12 最小单位
+                price: (data.minPrice?.toNumber() || 0) / 1e12,
                 isOnline: data.status?.toHuman() === 'Active',
               });
             }
