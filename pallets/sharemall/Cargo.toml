@@ -1,0 +1,55 @@
+[package]
+name = "pallet-sharemall"
+version = "0.1.0"
+description = "COSMOS ShareMall 多店铺商城模块"
+authors = ["COSMOS Team"]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/cosmos/cosmos"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+codec = { features = ["derive"], workspace = true }
+scale-info = { features = ["derive"], workspace = true }
+frame-support = { workspace = true }
+frame-system = { workspace = true }
+sp-runtime = { workspace = true }
+sp-std = { workspace = true }
+sp-core = { workspace = true }
+log = { workspace = true }
+
+# 内部依赖
+pallet-escrow = { path = "../escrow", default-features = false }
+pallet-affiliate = { path = "../affiliate", default-features = false }
+pallet-storage-service = { path = "../storage-service", default-features = false }
+pallet-chat-permission = { path = "../chat/permission", default-features = false }
+
+[dev-dependencies]
+pallet-balances = { workspace = true }
+sp-io = { workspace = true }
+
+[features]
+default = ["std"]
+std = [
+    "codec/std",
+    "scale-info/std",
+    "frame-support/std",
+    "frame-system/std",
+    "sp-runtime/std",
+    "sp-std/std",
+    "sp-core/std",
+    "pallet-escrow/std",
+    "pallet-affiliate/std",
+    "pallet-storage-service/std",
+    "pallet-chat-permission/std",
+]
+runtime-benchmarks = [
+    "frame-support/runtime-benchmarks",
+    "frame-system/runtime-benchmarks",
+]
+try-runtime = [
+    "frame-support/try-runtime",
+    "frame-system/try-runtime",
+]
