@@ -12,6 +12,10 @@ export default function MallLayout() {
       <Stack.Screen name="checkout" options={{ title: '确认订单' }} />
       <Stack.Screen name="order/[id]" options={{ title: '订单详情' }} />
       <Stack.Screen name="search" options={{ title: '搜索结果' }} />
+      <Stack.Screen name="cart" options={{ title: '购物车' }} />
+      <Stack.Screen name="points" options={{ title: '我的积分' }} />
+      <Stack.Screen name="membership" options={{ title: '我的会员' }} />
+      <Stack.Screen name="governance/[shopId]" options={{ title: '店铺治理' }} />
     </Stack>
   );
 }

@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { ShoppingBag, Store, TrendingUp, ChevronRight, Star } from 'lucide-react-native';
+import { ShoppingBag, Store, TrendingUp, ChevronRight, Star, ShoppingCart, Coins, Users } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -64,17 +64,17 @@ export default function MallScreen() {
           onChangeText={setSearchText}
           onSubmitEditing={() => {
             if (searchText.trim()) {
-              router.push(`/mall/search?q=${encodeURIComponent(searchText)}`);
+              router.push(`/mall/search?q=${encodeURIComponent(searchText)}` as any);
             }
           }}
         />
       </View>
 
-      {/* 快捷入口 */}
+      {/* 快捷入口 - 第一行 */}
       <View style={styles.quickActions}>
         <TouchableOpacity
           style={styles.quickAction}
-          onPress={() => router.push('/mall/shops')}
+          onPress={() => router.push('/mall/shops' as any)}
         >
           <View style={[styles.quickIcon, { backgroundColor: '#E3F2FD' }]}>
             <Store size={24} color="#1976D2" />
@@ -84,7 +84,7 @@ export default function MallScreen() {
 
         <TouchableOpacity
           style={styles.quickAction}
-          onPress={() => router.push('/mall/orders')}
+          onPress={() => router.push('/mall/orders' as any)}
         >
           <View style={[styles.quickIcon, { backgroundColor: '#FFF3E0' }]}>
             <ShoppingBag size={24} color="#F57C00" />
@@ -94,23 +94,58 @@ export default function MallScreen() {
 
         <TouchableOpacity
           style={styles.quickAction}
-          onPress={() => router.push('/mall/market')}
+          onPress={() => router.push('/mall/cart' as any)}
+        >
+          <View style={[styles.quickIcon, { backgroundColor: '#FFEBEE' }]}>
+            <ShoppingCart size={24} color="#E53935" />
+          </View>
+          <Text style={styles.quickText}>购物车</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.quickAction}
+          onPress={() => router.push('/mall/market' as any)}
         >
           <View style={[styles.quickIcon, { backgroundColor: '#E8F5E9' }]}>
             <TrendingUp size={24} color="#388E3C" />
           </View>
           <Text style={styles.quickText}>代币交易</Text>
         </TouchableOpacity>
+      </View>
+
+      {/* 快捷入口 - 第二行 */}
+      <View style={styles.quickActions}>
+        <TouchableOpacity
+          style={styles.quickAction}
+          onPress={() => router.push('/mall/points' as any)}
+        >
+          <View style={[styles.quickIcon, { backgroundColor: '#FFF8E1' }]}>
+            <Coins size={24} color="#FFB300" />
+          </View>
+          <Text style={styles.quickText}>我的积分</Text>
+        </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.quickAction}
-          onPress={() => router.push('/mall/seller')}
+          onPress={() => router.push('/mall/membership' as any)}
+        >
+          <View style={[styles.quickIcon, { backgroundColor: '#F3E5F5' }]}>
+            <Users size={24} color="#7B1FA2" />
+          </View>
+          <Text style={styles.quickText}>我的会员</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.quickAction}
+          onPress={() => router.push('/mall/seller' as any)}
         >
           <View style={[styles.quickIcon, { backgroundColor: '#FCE4EC' }]}>
             <Store size={24} color="#C2185B" />
           </View>
           <Text style={styles.quickText}>卖家中心</Text>
         </TouchableOpacity>
+
+        <View style={styles.quickAction} />
       </View>
 
       {/* 热门店铺 */}
@@ -119,7 +154,7 @@ export default function MallScreen() {
           <Text style={styles.sectionTitle}>热门店铺</Text>
           <TouchableOpacity
             style={styles.moreBtn}
-            onPress={() => router.push('/mall/shops')}
+            onPress={() => router.push('/mall/shops' as any)}
           >
             <Text style={styles.moreText}>查看更多</Text>
             <ChevronRight size={16} color="#666" />
@@ -132,7 +167,7 @@ export default function MallScreen() {
               <TouchableOpacity
                 key={shop.id}
                 style={styles.shopCard}
-                onPress={() => router.push(`/mall/shop/${shop.id}`)}
+                onPress={() => router.push(`/mall/shop/${shop.id}` as any)}
               >
                 <View style={styles.shopLogo}>
                   {shop.logoCid ? (
@@ -180,7 +215,7 @@ export default function MallScreen() {
               <TouchableOpacity
                 key={product.id}
                 style={styles.productCard}
-                onPress={() => router.push(`/mall/product/${product.id}`)}
+                onPress={() => router.push(`/mall/product/${product.id}` as any)}
               >
                 <View style={styles.productImage}>
                   {product.imagesCid ? (
