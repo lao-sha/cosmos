@@ -49,6 +49,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="mall"
+        options={{
+          title: '商城',
+          tabBarIcon: ({ color }) => <IconSymbol size={18} name="bag.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="market"
         options={{
           title: '占卜',
