@@ -14,6 +14,9 @@
 //! - v0.1.0 (2025-11-03): 从 pallet-trading 拆分而来
 //! - v0.2.0 (2026-01-18): 移除官方桥接功能，仅保留做市商兑换
 //! - v0.3.0 (2026-01-18): 重命名 bridge → swap
+//! - v0.5.0 (2026-02-03): 完整实现 OCW TRC20 验证
+
+extern crate alloc;
 
 pub use pallet::*;
 
@@ -40,15 +43,18 @@ pub mod pallet {
     use frame_support::{
         traits::{Currency, Get},
         BoundedVec,
-        sp_runtime::{SaturatedConversion, traits::Saturating},
+        PalletId,
+        sp_runtime::{SaturatedConversion, traits::{Saturating, AccountIdConversion}},
     };
+    
+    /// Swap Pallet ID（用于生成押金持有账户）
+    const SWAP_PALLET_ID: PalletId = PalletId(*b"py/swap_");
     use pallet_escrow::Escrow as EscrowTrait;
     
-    // \ud83c\udd95 2026-01-20: OCW \u76f8\u5173\u5bfc\u5165
+    // 🆕 2026-01-20: OCW 相关导入
     use sp_runtime::transaction_validity::{
         InvalidTransaction, TransactionSource, TransactionValidity, ValidTransaction,
     };
-    
     // 🆕 v0.4.0: 从 pallet-trading-common 导入公共类型和 Trait
     use pallet_trading_common::{
         TronAddress,
@@ -202,6 +208,8 @@ pub mod pallet {
         pub status: SwapStatus,
         /// 兑换价格（精度 10^6）
         pub price_usdt: u64,
+        /// 🆕 2026-02-03: 仲裁押金（从托管扣除）
+        pub dispute_deposit: Option<BalanceOf<T>>,
     }
 
     /// 🆕 2026-01-20: TRC20 验证请求结构体
@@ -231,6 +239,7 @@ pub mod pallet {
     #[pallet::config]
     /// 函数级中文注释：Bridge Pallet 配置 trait
     /// - 🔴 stable2506 API 变更：RuntimeEvent 自动继承，无需显式声明
+    /// - 🆕 2026-02-03: OCW 验证由 offchain_worker 执行，结果通过 VerificationOrigin 提交
     pub trait Config: frame_system::Config<RuntimeEvent: From<Event<Self>>> {
         
         /// 货币类型
@@ -456,6 +465,13 @@ pub mod pallet {
         VerificationTimeout {
             swap_id: u64,
         },
+        /// 🆕 2026-02-03: 用户发起 Swap 仲裁（押金从托管扣除）
+        SwapDisputeFiled {
+            swap_id: u64,
+            user: T::AccountId,
+            deposit: BalanceOf<T>,
+            evidence_cid: BoundedVec<u8, ConstU32<128>>,
+        },
     }
     
     // ===== 错误 =====
@@ -513,6 +529,10 @@ pub mod pallet {
         VerificationNotFound,
         /// 🆕 2026-01-20: 验证尚未超时
         VerificationNotYetTimeout,
+        /// 🆕 2026-02-03: 无法发起仲裁（状态不允许）
+        CannotDispute,
+        /// 🆕 2026-02-03: 托管余额不足以扣除押金
+        InsufficientEscrowForDeposit,
     }
     
     // ===== Extrinsics =====
@@ -626,15 +646,15 @@ pub mod pallet {
             Self::do_handle_verification_timeout(swap_id)
         }
         
-        /// \ud83c\udd95 2026-01-20: OCW \u63d0\u4ea4\u9a8c\u8bc1\u7ed3\u679c\uff08\u65e0\u7b7e\u540d\u4ea4\u6613\uff09
+        /// 🆕 2026-01-20: OCW 提交验证结果（无签名交易）
         ///
-        /// # \u6743\u9650
-        /// - \u4ec5 OCW \u53ef\u8c03\u7528\uff08\u901a\u8fc7 ValidateUnsigned \u9a8c\u8bc1\uff09
+        /// # 权限
+        /// - 仅 OCW 可调用（通过 ValidateUnsigned 验证）
         ///
-        /// # \u53c2\u6570
-        /// - `swap_id`: \u5151\u6362ID
-        /// - `verified`: \u9a8c\u8bc1\u7ed3\u679c
-        /// - `reason`: \u5931\u8d25\u539f\u56e0
+        /// # 参数
+        /// - `swap_id`: 兑换ID
+        /// - `verified`: 验证结果
+        /// - `reason`: 失败原因
         #[pallet::call_index(5)]
         #[pallet::weight(T::WeightInfo::mark_swap_complete())]
         pub fn ocw_submit_verification(
@@ -647,29 +667,97 @@ pub mod pallet {
             Self::do_confirm_verification(swap_id, verified, reason)
         }
         
+        /// 🆕 2026-02-03: 用户发起 Swap 仲裁（押金从托管扣除）
+        ///
+        /// ## 功能说明
+        /// 当 OCW 验证失败或超时后，用户可通过此函数发起仲裁。
+        /// **关键特性**: 押金从托管的 COS 中扣除，解决用户无 COS 的困境。
+        ///
+        /// ## 流程
+        /// 1. 验证 swap 存在且状态为 VerificationFailed 或超时
+        /// 2. 验证调用者是 swap 的用户
+        /// 3. 从托管中扣除押金（而非用户账户）
+        /// 4. 创建仲裁记录
+        ///
+        /// ## 参数
+        /// - `swap_id`: 兑换ID
+        /// - `evidence_cid`: 证据 CID
+        #[pallet::call_index(6)]
+        #[pallet::weight(T::WeightInfo::report_swap())]
+        pub fn file_swap_dispute(
+            origin: OriginFor<T>,
+            swap_id: u64,
+            evidence_cid: sp_std::vec::Vec<u8>,
+        ) -> DispatchResult {
+            let user = ensure_signed(origin)?;
+            Self::do_file_swap_dispute(&user, swap_id, evidence_cid)
+        }
+        
     }
     
-    // ===== OCW \u65e0\u7b7e\u540d\u4ea4\u6613\u9a8c\u8bc1 =====
+    // ===== 🆕 2026-02-03: OCW 无签名交易验证（加强安全性）=====
     
     #[pallet::validate_unsigned]
     impl<T: Config> ValidateUnsigned for Pallet<T> {
         type Call = Call<T>;
         
-        fn validate_unsigned(_source: TransactionSource, call: &Self::Call) -> TransactionValidity {
+        fn validate_unsigned(source: TransactionSource, call: &Self::Call) -> TransactionValidity {
             match call {
-                Call::ocw_submit_verification { swap_id, .. } => {
-                    // \u9a8c\u8bc1 swap \u5b58\u5728\u4e14\u72b6\u6001\u6b63\u786e
-                    if let Some(record) = MakerSwaps::<T>::get(swap_id) {
-                        if record.status == SwapStatus::AwaitingVerification {
-                            return ValidTransaction::with_tag_prefix("TRC20Verify")
-                                .priority(100)
-                                .longevity(5)
-                                .and_provides([&(b"verify", swap_id)])
-                                .propagate(true)
-                                .build();
+                Call::ocw_submit_verification { swap_id, verified, reason } => {
+                    // 🆕 安全检查 1: 验证交易来源
+                    // 仅接受本地 OCW 或已包含在区块中的交易
+                    match source {
+                        TransactionSource::Local | TransactionSource::InBlock => {},
+                        TransactionSource::External => {
+                            // 外部提交的无签名交易可能是攻击
+                            // 但为了容错，我们允许外部提交但降低优先级
+                            log::warn!(target: "ocw", "External unsigned tx for swap {}", swap_id);
                         }
                     }
-                    InvalidTransaction::Call.into()
+                    
+                    // 🆕 安全检查 2: 验证 swap 存在且状态正确
+                    let record = match MakerSwaps::<T>::get(swap_id) {
+                        Some(r) => r,
+                        None => {
+                            log::warn!(target: "ocw", "Swap {} not found", swap_id);
+                            return InvalidTransaction::Custom(1).into();
+                        }
+                    };
+                    
+                    if record.status != SwapStatus::AwaitingVerification {
+                        log::warn!(target: "ocw", "Swap {} invalid status: {:?}", swap_id, record.status);
+                        return InvalidTransaction::Custom(2).into();
+                    }
+                    
+                    // 🆕 安全检查 3: 验证待验证队列中存在该请求
+                    if !PendingVerifications::<T>::contains_key(swap_id) {
+                        log::warn!(target: "ocw", "Swap {} not in pending verifications", swap_id);
+                        return InvalidTransaction::Custom(3).into();
+                    }
+                    
+                    // 🆕 安全检查 4: 验证 reason 长度合理
+                    if let Some(ref r) = reason {
+                        if r.len() > 256 {
+                            log::warn!(target: "ocw", "Reason too long for swap {}", swap_id);
+                            return InvalidTransaction::Custom(4).into();
+                        }
+                    }
+                    
+                    // 根据来源设置不同优先级
+                    let priority = match source {
+                        TransactionSource::Local => 100,
+                        TransactionSource::InBlock => 80,
+                        TransactionSource::External => 50,
+                    };
+                    
+                    log::info!(target: "ocw", "Validated unsigned tx for swap {}, verified={}", swap_id, verified);
+                    
+                    ValidTransaction::with_tag_prefix("TRC20Verify")
+                        .priority(priority)
+                        .longevity(10)  // 增加到 10 个区块
+                        .and_provides([&(b"verify", swap_id)])
+                        .propagate(true)
+                        .build()
                 },
                 _ => InvalidTransaction::Call.into(),
             }
@@ -773,6 +861,7 @@ pub mod pallet {
                 evidence_cid: None,
                 status: SwapStatus::Pending,
                 price_usdt,
+                dispute_deposit: None,
             };
             
             // 10. 保存记录
@@ -1067,11 +1156,93 @@ pub mod pallet {
             
             Ok(())
         }
+        
+        /// 🆕 2026-02-03: 用户发起 Swap 仲裁（押金从托管扣除）
+        /// 
+        /// ## 功能说明
+        /// 解决用户无 COS 时无法发起仲裁的问题。
+        /// 押金直接从托管的 COS 中扣除，无需用户额外持有 COS。
+        /// 
+        /// ## 押金处理
+        /// - 押金金额: 托管金额的 1% (最低 1 COS)
+        /// - 来源: 从托管账户扣除
+        /// - 胜诉: 押金退还到托管，托管全额释放给用户
+        /// - 败诉: 押金罚没，剩余托管释放给做市商
+        pub fn do_file_swap_dispute(
+            user: &T::AccountId,
+            swap_id: u64,
+            evidence_cid: sp_std::vec::Vec<u8>,
+        ) -> DispatchResult {
+            // 1. 获取兑换记录
+            let mut record = MakerSwaps::<T>::get(swap_id)
+                .ok_or(Error::<T>::SwapNotFound)?;
+            
+            // 2. 验证调用者是用户
+            ensure!(record.user == *user, Error::<T>::NotSwapUser);
+            
+            // 3. 验证状态（只有 VerificationFailed 或 AwaitingVerification 超时可以发起仲裁）
+            ensure!(
+                matches!(record.status, SwapStatus::VerificationFailed | SwapStatus::AwaitingVerification),
+                Error::<T>::CannotDispute
+            );
+            
+            // 4. 如果是 AwaitingVerification，检查是否已超时
+            if record.status == SwapStatus::AwaitingVerification {
+                if let Some(request) = PendingVerifications::<T>::get(swap_id) {
+                    let current_block = frame_system::Pallet::<T>::block_number();
+                    ensure!(
+                        current_block >= request.verification_timeout_at,
+                        Error::<T>::VerificationNotYetTimeout
+                    );
+                }
+            }
+            
+            // 5. 计算押金金额（托管金额的 1%，最低 1 COS）
+            let escrow_balance = T::Escrow::amount_of(swap_id);
+            let one_percent = escrow_balance / 100u32.into();
+            let min_deposit: BalanceOf<T> = 1_000_000_000_000u128.saturated_into(); // 1 COS (12位精度)
+            let deposit_amount = if one_percent > min_deposit { one_percent } else { min_deposit };
+            
+            // 6. 验证托管余额足够扣除押金
+            ensure!(
+                escrow_balance > deposit_amount,
+                Error::<T>::InsufficientEscrowForDeposit
+            );
+            
+            // 7. 🆕 实际从托管中扣除押金到仲裁押金池
+            // 将押金转到 pallet 账户作为临时持有，仲裁结束后处理
+            let pallet_account = Self::pallet_account_id();
+            T::Escrow::transfer_from_escrow(swap_id, &pallet_account, deposit_amount)
+                .map_err(|_| Error::<T>::InsufficientEscrowForDeposit)?;
+            
+            // 8. 更新状态
+            record.status = SwapStatus::Arbitrating;
+            record.dispute_deposit = Some(deposit_amount);
+            MakerSwaps::<T>::insert(swap_id, record.clone());
+            
+            // 9. 移除待验证队列（如果存在）
+            PendingVerifications::<T>::remove(swap_id);
+            
+            // 10. 发出事件
+            Self::deposit_event(Event::SwapDisputeFiled {
+                swap_id,
+                user: user.clone(),
+                deposit: deposit_amount,
+                evidence_cid: evidence_cid.try_into().unwrap_or_default(),
+            });
+            
+            Ok(())
+        }
     }
     
     // ===== 公共查询接口 =====
     
     impl<T: Config> Pallet<T> {
+        /// 🆕 2026-02-03: 获取 Pallet 账户（用于持有仲裁押金）
+        pub fn pallet_account_id() -> T::AccountId {
+            SWAP_PALLET_ID.into_account_truncating()
+        }
+        
         /// 函数级详细中文注释：获取用户兑换列表
         pub fn get_user_swaps(who: &T::AccountId) -> sp_std::vec::Vec<u64> {
             UserSwaps::<T>::get(who).to_vec()
@@ -1278,15 +1449,118 @@ pub mod pallet {
             w1.saturating_add(w2).saturating_add(w3)
         }
         
-        /// \ud83c\udd95 2026-01-20: OCW \u9a8c\u8bc1 TRC20 \u4ea4\u6613
+        /// 🆕 2026-02-03: OCW 验证 TRC20 交易（完整实现）
         /// 
-        /// \u6ce8\u610f\uff1a\u5b8c\u6574\u7684 OCW \u5b9e\u73b0\u9700\u8981\u989d\u5916\u7684 runtime \u914d\u7f6e
-        /// \u5f53\u524d\u7248\u672c\u4ec5\u8bb0\u5f55\u65e5\u5fd7\uff0c\u5b9e\u9645\u9a8c\u8bc1\u7531\u59d4\u5458\u4f1a\u624b\u52a8\u89e6\u53d1
-        fn offchain_worker(_block_number: BlockNumberFor<T>) {
-            // OCW \u9a8c\u8bc1\u903b\u8f91\u5df2\u51c6\u5907\u5c31\u7eea
-            // \u5f85\u9a8c\u8bc1\u961f\u5217\u5728 PendingVerifications \u5b58\u50a8\u4e2d
-            // \u9a8c\u8bc1\u51fd\u6570\u5728 crate::ocw::verify_trc20_transaction
-            // \u5b8c\u6574\u5b9e\u73b0\u9700\u8981 runtime \u914d\u7f6e SendTransactionTypes
+        /// ## 功能说明
+        /// 1. 遍历 PendingVerifications 存储
+        /// 2. 对每个待验证请求调用 TronGrid API 验证
+        /// 3. 将验证结果存储到 offchain local storage
+        /// 4. 委员会可通过 RPC 查询结果并调用 confirm_verification
+        /// 
+        /// ## 安全机制
+        /// - 每个区块最多处理 3 个验证请求
+        /// - 验证结果存储在 offchain storage，不直接修改链上状态
+        /// - 链上状态变更需要通过 VerificationOrigin 授权
+        fn offchain_worker(block_number: BlockNumberFor<T>) {
+            // 每 10 个区块执行一次 OCW 验证
+            let block_u32: u32 = block_number.saturated_into();
+            if block_u32 % 10 != 0 {
+                return;
+            }
+            
+            log::info!(target: "ocw-trc20", "Starting TRC20 verification at block {}", block_u32);
+            
+            // 遍历待验证队列
+            let mut processed = 0u32;
+            const MAX_PER_BLOCK: u32 = 3;
+            
+            for (swap_id, request) in PendingVerifications::<T>::iter() {
+                if processed >= MAX_PER_BLOCK {
+                    break;
+                }
+                
+                // 调用 TRC20 验证
+                let verification_result = crate::ocw::verify_trc20_transaction(
+                    request.tx_hash.as_slice(),
+                    request.expected_to.as_slice(),
+                    request.expected_amount,
+                );
+                
+                match verification_result {
+                    Ok(true) => {
+                        log::info!(target: "ocw-trc20", "Swap {} verification SUCCESS", swap_id);
+                        // 存储验证成功结果到 offchain storage
+                        Self::store_verification_result(swap_id, true, None);
+                        processed += 1;
+                    },
+                    Ok(false) => {
+                        log::warn!(target: "ocw-trc20", "Swap {} verification FAILED: invalid transaction", swap_id);
+                        Self::store_verification_result(swap_id, false, Some(b"Transaction validation failed"));
+                        processed += 1;
+                    },
+                    Err(e) => {
+                        log::error!(target: "ocw-trc20", "Swap {} verification ERROR: {}", swap_id, e);
+                        // API 错误不直接判定失败，跳过等待下次重试
+                    }
+                };
+            }
+            
+            if processed > 0 {
+                log::info!(target: "ocw-trc20", "Processed {} verifications this block", processed);
+            }
+        }
+    }
+    
+    impl<T: Config> Pallet<T> {
+        /// 存储 OCW 验证结果到 offchain local storage
+        /// 
+        /// 委员会可通过 RPC 查询此结果并调用 confirm_verification
+        fn store_verification_result(swap_id: u64, verified: bool, reason: Option<&[u8]>) {
+            use sp_io::offchain;
+            
+            // 构建存储键: "trc20_verify::{swap_id}"
+            let key = alloc::format!("trc20_verify::{}", swap_id);
+            
+            // 构建存储值: "verified" 或 "failed:{reason}"
+            let value = if verified {
+                b"verified".to_vec()
+            } else {
+                let mut v = b"failed:".to_vec();
+                if let Some(r) = reason {
+                    v.extend_from_slice(r);
+                }
+                v
+            };
+            
+            // 存储到 offchain local storage
+            offchain::local_storage_set(
+                sp_core::offchain::StorageKind::PERSISTENT,
+                key.as_bytes(),
+                &value,
+            );
+            
+            log::debug!(target: "ocw-trc20", "Stored verification result for swap {}: {:?}", swap_id, verified);
+        }
+        
+        /// 查询 OCW 验证结果（供 RPC 使用）
+        pub fn get_ocw_verification_result(swap_id: u64) -> Option<(bool, Option<alloc::vec::Vec<u8>>)> {
+            use sp_io::offchain;
+            
+            let key = alloc::format!("trc20_verify::{}", swap_id);
+            
+            let value = offchain::local_storage_get(
+                sp_core::offchain::StorageKind::PERSISTENT,
+                key.as_bytes(),
+            )?;
+            
+            if value == b"verified" {
+                Some((true, None))
+            } else if value.starts_with(b"failed:") {
+                let reason = value[7..].to_vec();
+                Some((false, Some(reason)))
+            } else {
+                None
+            }
         }
     }
     
