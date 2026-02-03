@@ -170,6 +170,27 @@ pub mod pallet {
         /// 🆕 订单聊天授权有效期（区块数，432000 ≈ 30天）
         #[pallet::constant]
         type OrderChatDuration: Get<BlockNumberFor<Self>>;
+
+        /// 🆕 悬赏强制结算宽限期（区块数，100800 ≈ 7天）
+        /// 悬赏过期关闭后，创建者有此时间窗口主动采纳答案
+        /// 超过宽限期后，任何人可触发强制结算
+        #[pallet::constant]
+        type ForceSettleGracePeriod: Get<BlockNumberFor<Self>>;
+
+        /// 🆕 悬赏奖励的联盟佣金比例（基点，500 = 5%）
+        /// 从回答者奖励中抽取此比例分配给其推荐链
+        #[pallet::constant]
+        type BountyAffiliateRate: Get<u16>;
+
+        /// 🆕 悬赏问答 L1 归档延迟（区块数，5256000 ≈ 1年）
+        /// 结算后经过此时间，悬赏问答数据将被归档为 L1 格式
+        #[pallet::constant]
+        type BountyArchiveL1Delay: Get<BlockNumberFor<Self>>;
+
+        /// 🆕 悬赏问答 L2 归档延迟（区块数，10512000 ≈ 2年）
+        /// L1 归档后经过此时间，数据将被归档为 L2 格式并删除 IPFS 内容
+        #[pallet::constant]
+        type BountyArchiveL2Delay: Get<BlockNumberFor<Self>>;
     }
 
     /// 货币余额类型别名
@@ -282,7 +303,12 @@ pub mod pallet {
 
     #[pallet::hooks]
     impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
-        /// 空闲时归档已完成订单和悬赏（仅移动索引，保留完整数据）
+        /// 每个区块自动恢复到期的限制/暂停大师
+        fn on_initialize(now: BlockNumberFor<T>) -> Weight {
+            Self::process_pending_restorations(now)
+        }
+
+        /// 空闲时归档已完成订单和悬赏
         fn on_idle(_now: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
             let base_weight = Weight::from_parts(20_000, 0);
             if remaining_weight.ref_time() < base_weight.ref_time() * 10 {
@@ -292,8 +318,8 @@ pub mod pallet {
             // 1. 归档已完成订单（保留完整订单数据）
             let w1 = Self::archive_completed_orders(5);
             
-            // 2. 归档已结束悬赏（保留完整悬赏数据）
-            let w2 = Self::archive_completed_bounties(5);
+            // 2. 🆕 分级归档已结束悬赏（L1/L2 + IPFS删除）
+            let w2 = Self::archive_settled_bounties(5);
             
             w1.saturating_add(w2)
         }
@@ -480,6 +506,52 @@ pub mod pallet {
     #[pallet::getter(fn bounty_stats)]
     pub type BountyStatistics<T: Config> = StorageValue<_, BountyStats<BalanceOf<T>>, ValueQuery>;
 
+    // ==================== 🆕 悬赏问答归档存储项 ====================
+
+    /// 悬赏问题 L1 归档存储
+    #[pallet::storage]
+    #[pallet::getter(fn archived_bounties_l1)]
+    pub type ArchivedBountiesL1<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,
+        ArchivedBountyL1<T::AccountId, BalanceOf<T>, BlockNumberFor<T>>,
+    >;
+
+    /// 悬赏问题 L2 归档存储
+    #[pallet::storage]
+    #[pallet::getter(fn archived_bounties_l2)]
+    pub type ArchivedBountiesL2<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,
+        ArchivedBountyL2<BalanceOf<T>>,
+    >;
+
+    /// 悬赏回答 L1 归档存储
+    #[pallet::storage]
+    #[pallet::getter(fn archived_answers_l1)]
+    pub type ArchivedAnswersL1<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,
+        ArchivedAnswerL1<T::AccountId, BalanceOf<T>, BlockNumberFor<T>>,
+    >;
+
+    /// 悬赏回答 L2 归档存储
+    #[pallet::storage]
+    #[pallet::getter(fn archived_answers_l2)]
+    pub type ArchivedAnswersL2<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,
+        ArchivedAnswerL2<BalanceOf<T>>,
+    >;
+
+    /// 悬赏归档游标（用于增量处理）
+    #[pallet::storage]
+    pub type BountyArchiveCursor<T> = StorageValue<_, u64, ValueQuery>;
+
     // ==================== 个人主页存储项 ====================
 
     /// 提供者详细资料
@@ -617,6 +689,17 @@ pub mod pallet {
     #[pallet::getter(fn credit_stats)]
     pub type CreditStatistics<T: Config> = StorageValue<_, GlobalCreditStats, ValueQuery>;
 
+    /// 待恢复列表（限制/暂停后自动恢复）
+    #[pallet::storage]
+    #[pallet::getter(fn pending_restorations)]
+    pub type PendingRestorations<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        T::AccountId,
+        RestorationInfo<BlockNumberFor<T>>,
+        OptionQuery,
+    >;
+
     // ==================== 🆕 存储膨胀防护：归档存储 ====================
 
     /// 客户已归档订单ID索引（永久保留，用于历史查询）
@@ -645,10 +728,6 @@ pub mod pallet {
     /// 归档游标（用于on_idle处理订单）
     #[pallet::storage]
     pub type ArchiveCursor<T: Config> = StorageValue<_, u64, ValueQuery>;
-
-    /// 悬赏归档游标
-    #[pallet::storage]
-    pub type BountyArchiveCursor<T: Config> = StorageValue<_, u64, ValueQuery>;
 
     /// 用户已归档悬赏问题ID索引（永久保留）
     /// 悬赏数据保留在 BountyQuestions 存储中，此处仅存储ID列表
@@ -728,6 +807,19 @@ pub mod pallet {
             provider: T::AccountId,
             current: BalanceOf<T>,
             required: BalanceOf<T>,
+        },
+
+        /// 提供者被限制/暂停（带恢复时间）
+        ProviderRestricted {
+            provider: T::AccountId,
+            penalty_type: PenaltyType,
+            restore_at: BlockNumberFor<T>,
+        },
+
+        /// 提供者自动恢复接单
+        ProviderAutoRestored {
+            provider: T::AccountId,
+            violation_id: u64,
         },
 
         /// 提供者等级已提升
@@ -926,6 +1018,15 @@ pub mod pallet {
             recipient: T::AccountId,
             amount: BalanceOf<T>,
             rank: u8, // 1=第一名, 2=第二名, 3=第三名, 0=参与奖
+        },
+
+        /// 🆕 悬赏强制结算（创建者未采纳，宽限期后系统自动分配）
+        BountyForceSettled {
+            bounty_id: u64,
+            total_distributed: BalanceOf<T>,
+            platform_fee: BalanceOf<T>,
+            participant_count: u32,
+            method: ForceSettleMethod,
         },
 
         // ==================== 个人主页事件 ====================
@@ -1224,6 +1325,13 @@ pub mod pallet {
         TooManyMediaItems,
         /// 修改窗口已过期
         EditWindowExpired,
+
+        // ==================== 🆕 强制结算错误 ====================
+
+        /// 宽限期未过，不能强制结算
+        GracePeriodNotPassed,
+        /// 悬赏状态无效（强制结算需要 Closed 状态）
+        InvalidBountyStatusForForceSettle,
     }
 
     // ==================== 可调用函数 ====================
@@ -2105,13 +2213,22 @@ pub mod pallet {
                 }
             }
             
-            // 5. 清理待处理
+            // 5. 🆕 自动 Pin 解读内容到 IPFS (Standard 层级)
+            // 费用从平台手续费中的存储费部分支付（用户已在订单中支付）
+            <T::ContentRegistry as pallet_storage_service::ContentRegistry>::register_content(
+                b"divination-market".to_vec(),
+                order_id,
+                content_cid_bounded.to_vec(),
+                pallet_storage_service::PinTier::Standard,
+            )?;
+
+            // 6. 清理待处理
             PendingInterpretations::<T>::remove(order_id);
             PendingInterpretationQueue::<T>::mutate(|queue| {
                 queue.retain(|id| *id != order_id);
             });
 
-            // 🆕 订单完成后撤销聊天授权（可选：保留一段时间供追问）
+            // 7. 订单完成后撤销聊天授权（可选：保留一段时间供追问）
             // 注意：这里不立即撤销，让授权自然过期，以便用户可以追问
             // 如需立即撤销，取消下面的注释：
             // let _ = T::ChatPermission::revoke_scene_authorization(
@@ -2122,7 +2239,7 @@ pub mod pallet {
             //     SceneId::Numeric(order_id),
             // );
             
-            // 6. 发送事件
+            // 8. 发送事件
             Self::deposit_event(Event::InterpretationConfirmed {
                 order_id,
                 content_cid: content_cid_bounded,
@@ -2710,12 +2827,14 @@ pub mod pallet {
         /// # 参数
         /// - `bounty_id`: 悬赏问题 ID
         /// - `answer_cid`: 回答内容 IPFS CID
+        /// - `content_meta`: 🆕 回答内容元数据（质量指标）
         #[pallet::call_index(19)]
         #[pallet::weight(Weight::from_parts(50_000_000, 0))]
         pub fn submit_bounty_answer(
             origin: OriginFor<T>,
             bounty_id: u64,
             answer_cid: Vec<u8>,
+            content_meta: AnswerContentMeta,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -2785,6 +2904,7 @@ pub mod pallet {
                 bounty_id,
                 answerer: who.clone(),
                 answer_cid: answer_cid_bounded,
+                content_meta,
                 status: BountyAnswerStatus::Pending,
                 votes: 0,
                 reward_amount: Zero::zero(),
@@ -3042,74 +3162,43 @@ pub mod pallet {
             let participation_pool =
                 total.saturating_mul(dist.participation_pool.into()) / 10000u32.into();
 
-            // 发放第一名奖励
+            // 🆕 使用联盟计酬集成的奖励支付函数
             let first_ans =
                 BountyAnswers::<T>::get(first_place_id).ok_or(Error::<T>::BountyAnswerNotFound)?;
-            T::Currency::transfer(
-                &T::PlatformAccount::get(),
+            let first_net = Self::pay_bounty_reward_with_affiliate(
+                bounty_id,
+                first_place_id,
                 &first_ans.answerer,
                 first_reward,
-                ExistenceRequirement::KeepAlive,
+                1,
             )?;
-            BountyAnswers::<T>::mutate(first_place_id, |maybe_answer| {
-                if let Some(a) = maybe_answer {
-                    a.reward_amount = first_reward;
-                }
-            });
-            Self::deposit_event(Event::BountyRewardPaid {
-                bounty_id,
-                recipient: first_ans.answerer.clone(),
-                amount: first_reward,
-                rank: 1,
-            });
-
-            let mut distributed = first_reward;
+            let mut distributed = first_net;
 
             // 发放第二名奖励
             if let Some(second_id) = bounty.second_place_id {
                 if let Some(second_ans) = BountyAnswers::<T>::get(second_id) {
-                    T::Currency::transfer(
-                        &T::PlatformAccount::get(),
+                    let second_net = Self::pay_bounty_reward_with_affiliate(
+                        bounty_id,
+                        second_id,
                         &second_ans.answerer,
                         second_reward,
-                        ExistenceRequirement::KeepAlive,
+                        2,
                     )?;
-                    BountyAnswers::<T>::mutate(second_id, |maybe_answer| {
-                        if let Some(a) = maybe_answer {
-                            a.reward_amount = second_reward;
-                        }
-                    });
-                    Self::deposit_event(Event::BountyRewardPaid {
-                        bounty_id,
-                        recipient: second_ans.answerer,
-                        amount: second_reward,
-                        rank: 2,
-                    });
-                    distributed = distributed.saturating_add(second_reward);
+                    distributed = distributed.saturating_add(second_net);
                 }
             }
 
             // 发放第三名奖励
             if let Some(third_id) = bounty.third_place_id {
                 if let Some(third_ans) = BountyAnswers::<T>::get(third_id) {
-                    T::Currency::transfer(
-                        &T::PlatformAccount::get(),
+                    let third_net = Self::pay_bounty_reward_with_affiliate(
+                        bounty_id,
+                        third_id,
                         &third_ans.answerer,
                         third_reward,
-                        ExistenceRequirement::KeepAlive,
+                        3,
                     )?;
-                    BountyAnswers::<T>::mutate(third_id, |maybe_answer| {
-                        if let Some(a) = maybe_answer {
-                            a.reward_amount = third_reward;
-                        }
-                    });
-                    Self::deposit_event(Event::BountyRewardPaid {
-                        bounty_id,
-                        recipient: third_ans.answerer,
-                        amount: third_reward,
-                        rank: 3,
-                    });
-                    distributed = distributed.saturating_add(third_reward);
+                    distributed = distributed.saturating_add(third_net);
                 }
             }
 
@@ -3130,25 +3219,14 @@ pub mod pallet {
                 let per_participant = participation_pool / other_count.into();
                 for answer_id in other_participants {
                     if let Some(ans) = BountyAnswers::<T>::get(answer_id) {
-                        T::Currency::transfer(
-                            &T::PlatformAccount::get(),
+                        let participant_net = Self::pay_bounty_reward_with_affiliate(
+                            bounty_id,
+                            *answer_id,
                             &ans.answerer,
                             per_participant,
-                            ExistenceRequirement::KeepAlive,
+                            0,
                         )?;
-                        BountyAnswers::<T>::mutate(answer_id, |maybe_answer| {
-                            if let Some(a) = maybe_answer {
-                                a.status = BountyAnswerStatus::Participated;
-                                a.reward_amount = per_participant;
-                            }
-                        });
-                        Self::deposit_event(Event::BountyRewardPaid {
-                            bounty_id,
-                            recipient: ans.answerer,
-                            amount: per_participant,
-                            rank: 0,
-                        });
-                        distributed = distributed.saturating_add(per_participant);
+                        distributed = distributed.saturating_add(participant_net);
                     }
                 }
             }
@@ -3280,6 +3358,94 @@ pub mod pallet {
                     refund_amount: bounty.bounty_amount,
                 });
             }
+
+            Ok(())
+        }
+
+        /// 🆕 强制结算悬赏（创建者未采纳，宽限期后任何人可触发）
+        ///
+        /// # 条件
+        /// 1. 悬赏状态为 `Closed`（过期且有回答，但创建者未采纳）
+        /// 2. 已过宽限期（`closed_at + ForceSettleGracePeriod`）
+        ///
+        /// # 结算规则
+        /// - 有投票：按投票数排序，分配给前三名 + 参与奖
+        /// - 无投票：可分配金额平均分配给所有回答者
+        #[pallet::call_index(40)]
+        #[pallet::weight(Weight::from_parts(120_000_000, 0))]
+        pub fn force_settle_bounty(origin: OriginFor<T>, bounty_id: u64) -> DispatchResult {
+            let _who = ensure_signed(origin)?;
+
+            let bounty = BountyQuestions::<T>::get(bounty_id)
+                .ok_or(Error::<T>::BountyNotFound)?;
+
+            // 验证状态必须是 Closed
+            ensure!(
+                bounty.status == BountyStatus::Closed,
+                Error::<T>::InvalidBountyStatusForForceSettle
+            );
+
+            // 验证已过宽限期
+            let current_block = <frame_system::Pallet<T>>::block_number();
+            let closed_at = bounty.closed_at.ok_or(Error::<T>::InvalidBountyStatusForForceSettle)?;
+            let grace_end = closed_at.saturating_add(T::ForceSettleGracePeriod::get());
+            ensure!(current_block > grace_end, Error::<T>::GracePeriodNotPassed);
+
+            // 获取所有回答
+            let answer_ids = BountyAnswerIds::<T>::get(bounty_id);
+            ensure!(!answer_ids.is_empty(), Error::<T>::NotEnoughAnswers);
+
+            // 计算平台费和可分配金额
+            let total = bounty.bounty_amount;
+            let dist = bounty.reward_distribution;
+            let platform_fee = total.saturating_mul(dist.platform_fee.into()) / 10000u32.into();
+            let distributable = total.saturating_sub(platform_fee);
+
+            // 根据是否有投票选择分配策略
+            let (method, distributed) = if bounty.total_votes > 0 {
+                // 策略 A: 按投票数分配
+                let amount = Self::do_force_settle_by_votes(
+                    bounty_id,
+                    &bounty,
+                    &answer_ids,
+                    distributable,
+                )?;
+                (ForceSettleMethod::ByVotes, amount)
+            } else {
+                // 策略 B: 平均分配
+                let amount = Self::do_force_settle_equal_split(
+                    bounty_id,
+                    &answer_ids,
+                    distributable,
+                )?;
+                (ForceSettleMethod::EqualSplit, amount)
+            };
+
+            // 更新悬赏状态
+            BountyQuestions::<T>::mutate(bounty_id, |maybe_bounty| {
+                if let Some(b) = maybe_bounty {
+                    b.status = BountyStatus::ForceSettled;
+                    b.settled_at = Some(current_block);
+                }
+            });
+
+            // 更新统计
+            BountyStatistics::<T>::mutate(|s| {
+                s.settled_bounties += 1;
+                s.total_rewards_paid = s.total_rewards_paid.saturating_add(distributed);
+                if s.settled_bounties > 0 {
+                    s.avg_answers_per_bounty =
+                        ((s.total_answers as u64 * 100) / s.settled_bounties) as u16;
+                }
+            });
+
+            Self::deposit_event(Event::BountyForceSettled {
+                bounty_id,
+                total_distributed: distributed,
+                platform_fee,
+                participant_count: answer_ids.len() as u32,
+                method,
+            });
 
             Ok(())
         }
@@ -3992,6 +4158,59 @@ pub mod pallet {
                 }
             }
 
+            // 🆕 根据信用等级计算限制/暂停时长，并添加自动恢复计划
+            if penalty == PenaltyType::OrderRestriction || penalty == PenaltyType::ServiceSuspension {
+                // 获取当前信用等级
+                let credit_level = CreditProfiles::<T>::get(&provider)
+                    .map(|p| p.level)
+                    .unwrap_or(CreditLevel::Fair);
+                
+                // 根据信用等级和处罚类型计算限制时长
+                let duration: u32 = match penalty {
+                    PenaltyType::OrderRestriction => credit_level.order_restriction_duration(),
+                    PenaltyType::ServiceSuspension => credit_level.service_suspension_duration(),
+                    _ => 0,
+                };
+                
+                // 如果有有效时长（Bad等级的ServiceSuspension返回0，表示永久）
+                if duration > 0 {
+                    let restore_at = current_block + duration.into();
+                    
+                    // 记录待恢复信息
+                    PendingRestorations::<T>::insert(&provider, RestorationInfo {
+                        restore_at,
+                        penalty_type: penalty,
+                        violation_id,
+                    });
+                    
+                    // 更新提供者状态为暂停
+                    Providers::<T>::mutate(&provider, |maybe_p| {
+                        if let Some(prov) = maybe_p {
+                            if prov.status == ProviderStatus::Active {
+                                prov.status = ProviderStatus::Paused;
+                            }
+                        }
+                    });
+                    
+                    Self::deposit_event(Event::ProviderRestricted {
+                        provider: provider.clone(),
+                        penalty_type: penalty,
+                        restore_at,
+                    });
+                } else {
+                    // Bad 等级的 ServiceSuspension 永久暂停，不添加自动恢复
+                    Providers::<T>::mutate(&provider, |maybe_p| {
+                        if let Some(prov) = maybe_p {
+                            if prov.status == ProviderStatus::Active {
+                                prov.status = ProviderStatus::Paused;
+                            }
+                        }
+                    });
+                    
+                    Self::deposit_event(Event::ProviderPaused { provider: provider.clone() });
+                }
+            }
+
             // 处理永久封禁
             if penalty == PenaltyType::PermanentBan {
                 CreditBlacklist::<T>::insert(&provider, current_block);
@@ -4357,6 +4576,217 @@ pub mod pallet {
         }
     }
 
+    // ==================== 🆕 强制结算辅助函数 ====================
+
+    impl<T: Config> Pallet<T> {
+        /// 按投票数强制结算
+        ///
+        /// 按投票数排序，分配给前三名 + 参与奖
+        fn do_force_settle_by_votes(
+            bounty_id: u64,
+            bounty: &BountyQuestionOf<T>,
+            answer_ids: &BoundedVec<u64, ConstU32<100>>,
+            distributable: BalanceOf<T>,
+        ) -> Result<BalanceOf<T>, DispatchError> {
+            use sp_std::cmp::Ordering;
+
+            // 收集所有回答及其投票数和提交时间
+            let mut answers_with_votes: Vec<(u64, u32, BlockNumberFor<T>)> = answer_ids
+                .iter()
+                .filter_map(|id| {
+                    BountyAnswers::<T>::get(id).map(|a| (*id, a.votes, a.submitted_at))
+                })
+                .collect();
+
+            // 按投票数降序排序，投票数相同则按提交时间升序（先提交者优先）
+            answers_with_votes.sort_by(|a, b| {
+                match b.1.cmp(&a.1) {
+                    Ordering::Equal => a.2.cmp(&b.2),
+                    other => other,
+                }
+            });
+
+            let dist = &bounty.reward_distribution;
+            let total_rate = dist.distributable_rate();
+            let mut distributed = BalanceOf::<T>::zero();
+
+            // 第一名
+            if let Some((first_id, _, _)) = answers_with_votes.get(0) {
+                let first_reward = distributable
+                    .saturating_mul(dist.first_place.into())
+                    / total_rate.into();
+                Self::pay_force_settle_reward(bounty_id, *first_id, first_reward, 1)?;
+                distributed = distributed.saturating_add(first_reward);
+
+                // 更新悬赏的采纳记录
+                BountyQuestions::<T>::mutate(bounty_id, |maybe_bounty| {
+                    if let Some(b) = maybe_bounty {
+                        b.adopted_answer_id = Some(*first_id);
+                    }
+                });
+            }
+
+            // 第二名
+            if let Some((second_id, _, _)) = answers_with_votes.get(1) {
+                let second_reward = distributable
+                    .saturating_mul(dist.second_place.into())
+                    / total_rate.into();
+                Self::pay_force_settle_reward(bounty_id, *second_id, second_reward, 2)?;
+                distributed = distributed.saturating_add(second_reward);
+
+                BountyQuestions::<T>::mutate(bounty_id, |maybe_bounty| {
+                    if let Some(b) = maybe_bounty {
+                        b.second_place_id = Some(*second_id);
+                    }
+                });
+            }
+
+            // 第三名
+            if let Some((third_id, _, _)) = answers_with_votes.get(2) {
+                let third_reward = distributable
+                    .saturating_mul(dist.third_place.into())
+                    / total_rate.into();
+                Self::pay_force_settle_reward(bounty_id, *third_id, third_reward, 3)?;
+                distributed = distributed.saturating_add(third_reward);
+
+                BountyQuestions::<T>::mutate(bounty_id, |maybe_bounty| {
+                    if let Some(b) = maybe_bounty {
+                        b.third_place_id = Some(*third_id);
+                    }
+                });
+            }
+
+            // 参与奖（第4名及以后平分）
+            let participation_pool = distributable
+                .saturating_mul(dist.participation_pool.into())
+                / total_rate.into();
+            let other_count = answers_with_votes.len().saturating_sub(3);
+            if other_count > 0 && !participation_pool.is_zero() {
+                let per_participant = participation_pool / (other_count as u32).into();
+                for (answer_id, _, _) in answers_with_votes.iter().skip(3) {
+                    Self::pay_force_settle_reward(bounty_id, *answer_id, per_participant, 0)?;
+                    distributed = distributed.saturating_add(per_participant);
+                }
+            }
+
+            Ok(distributed)
+        }
+
+        /// 平均分配强制结算
+        ///
+        /// 可分配金额平均分配给所有回答者
+        fn do_force_settle_equal_split(
+            bounty_id: u64,
+            answer_ids: &BoundedVec<u64, ConstU32<100>>,
+            distributable: BalanceOf<T>,
+        ) -> Result<BalanceOf<T>, DispatchError> {
+            let count = answer_ids.len() as u32;
+            if count == 0 {
+                return Ok(BalanceOf::<T>::zero());
+            }
+
+            let per_answer = distributable / count.into();
+            let mut distributed = BalanceOf::<T>::zero();
+
+            for answer_id in answer_ids.iter() {
+                Self::pay_force_settle_reward(bounty_id, *answer_id, per_answer, 0)?;
+                distributed = distributed.saturating_add(per_answer);
+            }
+
+            Ok(distributed)
+        }
+
+        /// 支付强制结算奖励（🆕 集成联盟计酬）
+        fn pay_force_settle_reward(
+            bounty_id: u64,
+            answer_id: u64,
+            amount: BalanceOf<T>,
+            rank: u8,
+        ) -> DispatchResult {
+            if amount.is_zero() {
+                return Ok(());
+            }
+
+            if let Some(answer) = BountyAnswers::<T>::get(answer_id) {
+                // 🆕 使用联盟计酬集成的支付函数
+                let _ = Self::pay_bounty_reward_with_affiliate(
+                    bounty_id,
+                    answer_id,
+                    &answer.answerer,
+                    amount,
+                    rank,
+                )?;
+            }
+
+            Ok(())
+        }
+
+        /// 🆕 支付悬赏奖励并触发联盟分成
+        ///
+        /// 从奖励中抽取 BountyAffiliateRate 比例作为联盟佣金，
+        /// 分配给回答者的推荐链，剩余部分转给回答者。
+        fn pay_bounty_reward_with_affiliate(
+            bounty_id: u64,
+            answer_id: u64,
+            recipient: &T::AccountId,
+            gross_reward: BalanceOf<T>,
+            rank: u8,
+        ) -> Result<BalanceOf<T>, DispatchError> {
+            if gross_reward.is_zero() {
+                return Ok(BalanceOf::<T>::zero());
+            }
+
+            // 计算联盟佣金
+            let affiliate_rate = T::BountyAffiliateRate::get();
+            let affiliate_commission = gross_reward
+                .saturating_mul(affiliate_rate.into())
+                / 10000u32.into();
+            let net_reward = gross_reward.saturating_sub(affiliate_commission);
+
+            // 1. 转账净奖励给回答者
+            T::Currency::transfer(
+                &T::PlatformAccount::get(),
+                recipient,
+                net_reward,
+                ExistenceRequirement::KeepAlive,
+            )?;
+
+            // 2. 触发联盟分成（如果有佣金）
+            if !affiliate_commission.is_zero() {
+                let commission_u128: u128 = affiliate_commission.saturated_into();
+                // 调用联盟计酬系统分配佣金
+                let _ = T::AffiliateDistributor::distribute_rewards(
+                    recipient,
+                    commission_u128,
+                    Some((1, bounty_id)), // domain=1 表示悬赏问答
+                );
+                // 注意：即使联盟分成失败，也不影响主流程
+            }
+
+            // 3. 更新回答记录
+            BountyAnswers::<T>::mutate(answer_id, |maybe_answer| {
+                if let Some(a) = maybe_answer {
+                    a.reward_amount = net_reward;
+                    a.status = match rank {
+                        1 => BountyAnswerStatus::Adopted,
+                        2 | 3 => BountyAnswerStatus::Selected,
+                        _ => BountyAnswerStatus::Participated,
+                    };
+                }
+            });
+
+            // 4. 发送事件
+            Self::deposit_event(Event::BountyRewardPaid {
+                bounty_id,
+                recipient: recipient.clone(),
+                amount: net_reward,
+                rank,
+            });
+
+            Ok(net_reward)
+        }
+    }
+
     // ==================== 🆕 存储膨胀防护：归档函数 ====================
 
     impl<T: Config> Pallet<T> {
@@ -4444,75 +4874,310 @@ pub mod pallet {
             Weight::from_parts(30_000 * processed as u64, 0)
         }
 
-        /// 归档已结束悬赏（保留完整数据，仅移动索引）
+        /// 🆕 分级归档已结束悬赏
         /// 
-        /// 悬赏数据永久保留在 BountyQuestions/BountyAnswers 存储中，
-        /// 仅将ID从活跃索引移至归档索引
-        fn archive_completed_bounties(max_count: u32) -> Weight {
+        /// 三级归档策略：
+        /// - L1归档（1年后）：保留核心字段，删除 CID 等大字段
+        /// - L2归档（2年后）：仅保留统计摘要，删除 IPFS 内容
+        fn archive_settled_bounties(max_count: u32) -> Weight {
             let mut cursor = BountyArchiveCursor::<T>::get();
             let next_id = NextBountyId::<T>::get();
             let mut processed = 0u32;
 
-            // 7天后归档（区块数，假设6秒/块）
-            const ARCHIVE_DELAY_BLOCKS: u32 = 7 * 24 * 60 * 10;
-            let current_block: u32 = <frame_system::Pallet<T>>::block_number().saturated_into();
+            let current_block = <frame_system::Pallet<T>>::block_number();
+            let l1_delay = T::BountyArchiveL1Delay::get();
+            let l2_delay = T::BountyArchiveL2Delay::get();
 
             while processed < max_count && cursor < next_id {
                 cursor = cursor.saturating_add(1);
 
+                // ========== 检查是否需要 L2 归档（从 L1 升级） ==========
+                if let Some(archived_l1) = ArchivedBountiesL1::<T>::get(cursor) {
+                    // 检查是否超过 L2 延迟
+                    if current_block >= archived_l1.archived_at.saturating_add(l2_delay.saturating_sub(l1_delay)) {
+                        // 转换为 L2 归档
+                        let archived_l2 = ArchivedBountyL2 {
+                            id: archived_l1.id,
+                            bounty_amount: archived_l1.bounty_amount,
+                            answer_count: archived_l1.answer_count,
+                            status: archived_l1.status,
+                        };
+                        ArchivedBountiesL2::<T>::insert(cursor, archived_l2);
+                        ArchivedBountiesL1::<T>::remove(cursor);
+
+                        // 归档回答到 L2 并删除 IPFS 内容
+                        let answer_ids = BountyAnswerIds::<T>::get(cursor);
+                        for answer_id in answer_ids.iter() {
+                            if let Some(answer_l1) = ArchivedAnswersL1::<T>::get(answer_id) {
+                                let answer_l2 = ArchivedAnswerL2 {
+                                    id: answer_l1.id,
+                                    bounty_id: answer_l1.bounty_id,
+                                    reward_amount: answer_l1.reward_amount,
+                                    status: answer_l1.status,
+                                };
+                                ArchivedAnswersL2::<T>::insert(answer_id, answer_l2);
+                                ArchivedAnswersL1::<T>::remove(answer_id);
+                            }
+
+                            // 删除回答的 IPFS 内容
+                            if let Some(answer) = BountyAnswers::<T>::get(answer_id) {
+                                let _ = <T::ContentRegistry as pallet_storage_service::ContentRegistry>::unregister_content(
+                                    b"divination-market".to_vec(),
+                                    answer.answer_cid.to_vec(),
+                                );
+                                // 删除原始回答数据
+                                BountyAnswers::<T>::remove(answer_id);
+                            }
+                        }
+
+                        // 删除悬赏问题的 IPFS 内容
+                        if let Some(bounty) = BountyQuestions::<T>::get(cursor) {
+                            let _ = <T::ContentRegistry as pallet_storage_service::ContentRegistry>::unregister_content(
+                                b"divination-market".to_vec(),
+                                bounty.question_cid.to_vec(),
+                            );
+                            // 删除原始悬赏数据
+                            BountyQuestions::<T>::remove(cursor);
+                        }
+
+                        // 清理索引
+                        BountyAnswerIds::<T>::remove(cursor);
+
+                        processed = processed.saturating_add(1);
+                        continue;
+                    }
+                }
+
+                // ========== 检查是否需要 L1 归档（从活跃数据） ==========
                 if let Some(bounty) = BountyQuestions::<T>::get(cursor) {
                     // 检查是否为可归档状态（终态）
                     let is_final_state = matches!(
                         bounty.status,
-                        BountyStatus::Settled | BountyStatus::Cancelled | BountyStatus::Expired
+                        BountyStatus::Settled | BountyStatus::ForceSettled | 
+                        BountyStatus::Cancelled | BountyStatus::Expired
                     );
 
                     if !is_final_state {
                         continue;
                     }
 
-                    // 检查结束时间是否超过归档延迟
-                    let ended_block: u32 = bounty.deadline.saturated_into();
-                    if current_block.saturating_sub(ended_block) < ARCHIVE_DELAY_BLOCKS {
+                    // 检查是否超过 L1 延迟
+                    let ended_at = bounty.settled_at.unwrap_or(bounty.deadline);
+                    if current_block < ended_at.saturating_add(l1_delay) {
                         continue;
                     }
 
-                    // ========== 保留悬赏数据，仅移动索引 ==========
-                    
-                    // 1. 从活跃悬赏列表移除
+                    // 转换为 L1 归档
+                    let archived_l1 = ArchivedBountyL1 {
+                        id: bounty.id,
+                        creator: bounty.creator.clone(),
+                        divination_type: bounty.divination_type,
+                        bounty_amount: bounty.bounty_amount,
+                        status: bounty.status.clone(),
+                        answer_count: bounty.answer_count,
+                        created_at: bounty.created_at,
+                        settled_at: bounty.settled_at,
+                        archived_at: current_block,
+                    };
+                    ArchivedBountiesL1::<T>::insert(cursor, archived_l1);
+
+                    // 归档回答到 L1
+                    let answer_ids = BountyAnswerIds::<T>::get(cursor);
+                    for answer_id in answer_ids.iter() {
+                        if let Some(answer) = BountyAnswers::<T>::get(answer_id) {
+                            let answer_l1 = ArchivedAnswerL1 {
+                                id: answer.id,
+                                bounty_id: answer.bounty_id,
+                                answerer: answer.answerer.clone(),
+                                status: answer.status.clone(),
+                                reward_amount: answer.reward_amount,
+                                submitted_at: answer.submitted_at,
+                                is_certified: answer.is_certified,
+                            };
+                            ArchivedAnswersL1::<T>::insert(answer_id, answer_l1);
+                        }
+                    }
+
+                    // 从活跃索引移除
                     UserBounties::<T>::mutate(&bounty.creator, |ids| {
                         ids.retain(|&id| id != cursor);
                     });
 
-                    // 2. 添加到归档悬赏列表
-                    let _ = UserArchivedBounties::<T>::try_mutate(&bounty.creator, |ids| {
-                        ids.try_push(cursor)
-                    });
-
-                    // 3. 归档该悬赏的所有回答
-                    let answer_ids = BountyAnswerIds::<T>::get(cursor);
+                    // 归档回答者索引
                     for answer_id in answer_ids.iter() {
                         if let Some(answer) = BountyAnswers::<T>::get(answer_id) {
-                            // 从活跃回答列表移除
                             UserBountyAnswers::<T>::mutate(&answer.answerer, |ids| {
                                 ids.retain(|&id| id != *answer_id);
                             });
-
-                            // 添加到归档回答列表
-                            let _ = UserArchivedBountyAnswers::<T>::try_mutate(&answer.answerer, |ids| {
-                                ids.try_push(*answer_id)
-                            });
                         }
                     }
-
-                    // 注意：不删除 BountyQuestions/BountyAnswers，保留完整数据！
 
                     processed = processed.saturating_add(1);
                 }
             }
 
             BountyArchiveCursor::<T>::put(cursor);
-            Weight::from_parts(35_000 * processed as u64, 0)
+            Weight::from_parts(50_000 * processed as u64, 0)
+        }
+
+        /// 处理待恢复的大师（on_initialize 调用）
+        /// 
+        /// 每个区块检查并自动恢复到期的限制/暂停大师
+        /// 限制每区块最多处理 10 个，避免区块处理时间过长
+        fn process_pending_restorations(now: BlockNumberFor<T>) -> Weight {
+            const MAX_RESTORATIONS_PER_BLOCK: u32 = 10;
+            let mut processed = 0u32;
+            let mut weight = Weight::from_parts(5_000, 0); // 基础读取开销
+            
+            // 收集需要恢复的账户（避免在迭代时修改存储）
+            let mut to_restore: Vec<(T::AccountId, RestorationInfo<BlockNumberFor<T>>)> = Vec::new();
+            
+            for (account, info) in PendingRestorations::<T>::iter() {
+                if processed >= MAX_RESTORATIONS_PER_BLOCK {
+                    break;
+                }
+                
+                // 检查是否到达恢复时间
+                if info.restore_at <= now {
+                    to_restore.push((account, info));
+                    processed = processed.saturating_add(1);
+                }
+                
+                weight = weight.saturating_add(Weight::from_parts(5_000, 0));
+            }
+            
+            // 执行恢复
+            for (account, info) in to_restore {
+                // 检查保证金是否达标
+                if let Some(provider) = Providers::<T>::get(&account) {
+                    let min_deposit = T::MinDeposit::get();
+                    
+                    if provider.deposit >= min_deposit {
+                        // 保证金达标，自动恢复
+                        Providers::<T>::mutate(&account, |maybe_p| {
+                            if let Some(prov) = maybe_p {
+                                prov.status = ProviderStatus::Active;
+                                prov.last_active_at = now;
+                            }
+                        });
+                        
+                        // 更新市场统计
+                        MarketStatistics::<T>::mutate(|s| {
+                            s.active_providers = s.active_providers.saturating_add(1);
+                        });
+                        
+                        // 移除待恢复记录
+                        PendingRestorations::<T>::remove(&account);
+                        
+                        // 发送自动恢复事件
+                        Self::deposit_event(Event::ProviderAutoRestored {
+                            provider: account,
+                            violation_id: info.violation_id,
+                        });
+                    }
+                    // 保证金不足则保持暂停状态，等待大师补充保证金后手动恢复
+                    // 但移除待恢复记录，避免重复检查
+                    else {
+                        PendingRestorations::<T>::remove(&account);
+                        
+                        // 发送保证金不足警告
+                        Self::deposit_event(Event::ProviderDepositInsufficient {
+                            provider: account,
+                            current: provider.deposit,
+                            required: min_deposit,
+                        });
+                    }
+                } else {
+                    // 提供者不存在，清理记录
+                    PendingRestorations::<T>::remove(&account);
+                }
+                
+                weight = weight.saturating_add(Weight::from_parts(20_000, 0));
+            }
+            
+            weight
+        }
+    }
+
+    // ==================== ChartCascadeDeleter 实现 ====================
+
+    impl<T: Config> pallet_divination_common::ChartCascadeDeleter<T::AccountId> for Pallet<T> {
+        /// 级联删除命盘关联的订单数据
+        ///
+        /// 当用户删除命盘时，此方法会：
+        /// 1. 查找所有关联订单（result_id == chart_id && divination_type 匹配）
+        /// 2. 收集所有 CID（question_cid, interpretation_cid, review_cid, follow_up CIDs）
+        /// 3. 取消 IPFS Pin
+        /// 4. 删除订单记录
+        fn cascade_delete_for_chart(
+            owner: &T::AccountId,
+            divination_type: DivinationType,
+            chart_id: u64,
+        ) -> Result<pallet_divination_common::CascadeDeleteResult, sp_runtime::DispatchError> {
+            let mut result = pallet_divination_common::CascadeDeleteResult::default();
+            
+            // 收集需要删除的订单 ID 和需要 Unpin 的 CID
+            let mut orders_to_delete: Vec<u64> = Vec::new();
+            let mut cids_to_unpin: Vec<Vec<u8>> = Vec::new();
+            
+            // 遍历所有订单，找到关联的订单
+            for (order_id, order) in Orders::<T>::iter() {
+                // 检查是否是该命盘的订单
+                if order.result_id == chart_id && order.divination_type == divination_type {
+                    // 验证订单属于该用户（作为客户）
+                    if &order.customer == owner {
+                        orders_to_delete.push(order_id);
+                        
+                        // 收集订单相关的 CID
+                        cids_to_unpin.push(order.question_cid.to_vec());
+                        
+                        if let Some(ref cid) = order.interpretation_cid {
+                            cids_to_unpin.push(cid.to_vec());
+                        }
+                        
+                        if let Some(ref cid) = order.review_cid {
+                            cids_to_unpin.push(cid.to_vec());
+                        }
+                        
+                        // 收集追问记录的 CID
+                        let follow_ups = FollowUps::<T>::get(order_id);
+                        for follow_up in follow_ups.iter() {
+                            cids_to_unpin.push(follow_up.question_cid.to_vec());
+                            if let Some(ref cid) = follow_up.reply_cid {
+                                cids_to_unpin.push(cid.to_vec());
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // 取消 IPFS Pin
+            for cid in cids_to_unpin.iter() {
+                // 调用 storage-service 的 unpin 接口
+                let _ = <T::ContentRegistry as pallet_storage_service::ContentRegistry>::unregister_content(
+                    b"divination-market".to_vec(),
+                    cid.clone(),
+                );
+                result.cids_unpinned = result.cids_unpinned.saturating_add(1);
+            }
+            
+            // 删除订单记录
+            for order_id in orders_to_delete.iter() {
+                // 删除追问记录
+                FollowUps::<T>::remove(order_id);
+                
+                // 从用户订单列表中移除
+                CustomerOrders::<T>::mutate(owner, |ids| {
+                    ids.retain(|&id| id != *order_id);
+                });
+                
+                // 删除订单
+                Orders::<T>::remove(order_id);
+                
+                result.orders_deleted = result.orders_deleted.saturating_add(1);
+            }
+            
+            Ok(result)
         }
     }
 }

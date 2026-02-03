@@ -1106,16 +1106,40 @@ impl<T: Config> IpfsPinner<T::AccountId, T::Balance> for Pallet<T> {
 
 ### ContentRegistry接口集成
 
-为新业务模块提供一键集成能力：
+为新业务模块提供一键集成能力，支持内容注册（Pin）和取消注册（Unpin）：
 
 ```rust
 pub trait ContentRegistry {
+    /// 注册内容到IPFS（自动域管理）
+    /// 
+    /// 功能：
+    /// 1. 自动创建或使用现有域
+    /// 2. 派生SubjectFunding账户
+    /// 3. 执行PIN操作
+    /// 4. 自动扣费（三层机制）
     fn register_content(
         domain: Vec<u8>,        // 域名标识
         subject_id: u64,        // 主体ID
         cid: Vec<u8>,          // 内容CID
         tier: PinTier,         // Pin层级
     ) -> DispatchResult;
+
+    /// 取消注册内容（Unpin）
+    /// 
+    /// 功能：
+    /// 1. 标记 CID 为待删除状态
+    /// 2. OCW 将在后续区块执行物理删除
+    /// 3. 停止后续扣费
+    fn unregister_content(
+        domain: Vec<u8>,        // 域名标识
+        cid: Vec<u8>,          // 内容CID
+    ) -> DispatchResult;
+
+    /// 查询域是否已注册
+    fn is_domain_registered(domain: &[u8]) -> bool;
+
+    /// 获取域的SubjectType映射
+    fn get_domain_subject_type(domain: &[u8]) -> Option<SubjectType>;
 }
 
 // 新模块使用示例
@@ -1128,6 +1152,52 @@ impl ContentRegistry for Pallet<T> {
     ) -> DispatchResult {
         // 自动注册域，派生SubjectFunding账户，提交Pin请求
     }
+
+    fn unregister_content(
+        domain: Vec<u8>,
+        cid: Vec<u8>,
+    ) -> DispatchResult {
+        // 标记CID为待删除状态，OCW后续执行物理删除
+    }
+}
+```
+
+#### 级联删除场景
+
+当业务模块需要删除记录时，可通过 `unregister_content` 批量取消关联的 IPFS Pin：
+
+```rust
+// 示例：删除命盘时级联删除关联的订单和IPFS内容
+fn cascade_delete_for_chart(
+    owner: &AccountId,
+    divination_type: DivinationType,
+    chart_id: u64,
+) -> Result<CascadeDeleteResult, DispatchError> {
+    let mut cids_to_unpin: Vec<Vec<u8>> = Vec::new();
+    
+    // 1. 收集关联订单的所有CID
+    for order in related_orders {
+        cids_to_unpin.push(order.question_cid.to_vec());
+        if let Some(cid) = order.interpretation_cid {
+            cids_to_unpin.push(cid.to_vec());
+        }
+        if let Some(cid) = order.review_cid {
+            cids_to_unpin.push(cid.to_vec());
+        }
+    }
+    
+    // 2. 批量取消Pin
+    for cid in cids_to_unpin {
+        let _ = T::ContentRegistry::unregister_content(
+            b"divination-market".to_vec(),
+            cid,
+        );
+    }
+    
+    // 3. 删除订单记录
+    // ...
+    
+    Ok(result)
 }
 ```
 
@@ -1728,10 +1798,10 @@ IpfsService::fund_subject_account(
 
 ### 删除时的Unpin处理
 
-当用户删除占卜相关记录时，应同步请求Unpin关联的IPFS内容：
+当用户删除占卜相关记录时，应同步请求Unpin关联的IPFS内容。推荐使用 `ContentRegistry::unregister_content` 接口：
 
 ```rust
-// 删除命盘时清理IPFS存储
+// 删除命盘时清理IPFS存储（使用 ContentRegistry 接口）
 fn delete_chart(chart_id: u64) -> DispatchResult {
     let chart = ChartById::<T>::get(chart_id)?;
     
@@ -1740,7 +1810,10 @@ fn delete_chart(chart_id: u64) -> DispatchResult {
     
     // 2. 如果有AI解读CID，请求Unpin
     if let Some(cid) = chart.interpretation_cid {
-        T::IpfsPinner::request_unpin(cid.to_vec())?;
+        let _ = T::ContentRegistry::unregister_content(
+            b"divination-ai".to_vec(),
+            cid.to_vec(),
+        );
     }
     
     // 3. 返还存储押金
@@ -1754,11 +1827,17 @@ fn burn_nft(nft_id: u64) -> DispatchResult {
     let nft = Nfts::<T>::get(nft_id)?;
     
     // Unpin图片
-    T::IpfsPinner::request_unpin(nft.metadata.image_cid.to_vec())?;
+    let _ = T::ContentRegistry::unregister_content(
+        b"divination-nft".to_vec(),
+        nft.metadata.image_cid.to_vec(),
+    );
     
     // Unpin动画（如果有）
     if let Some(anim_cid) = nft.metadata.animation_cid {
-        T::IpfsPinner::request_unpin(anim_cid.to_vec())?;
+        let _ = T::ContentRegistry::unregister_content(
+            b"divination-nft".to_vec(),
+            anim_cid.to_vec(),
+        );
     }
     
     // 删除NFT记录
@@ -1766,6 +1845,77 @@ fn burn_nft(nft_id: u64) -> DispatchResult {
     
     Ok(())
 }
+```
+
+### 级联删除（ChartCascadeDeleter）
+
+占卜模块支持通过 `ChartCascadeDeleter` trait 实现命盘级联删除，自动清理关联的订单、解读、评价等数据及其 IPFS 内容：
+
+```rust
+// pallet-divination-common/src/traits.rs
+pub trait ChartCascadeDeleter<AccountId> {
+    /// 级联删除命盘关联数据
+    fn cascade_delete_for_chart(
+        owner: &AccountId,
+        divination_type: DivinationType,
+        chart_id: u64,
+    ) -> Result<CascadeDeleteResult, DispatchError>;
+}
+
+/// 级联删除结果
+pub struct CascadeDeleteResult {
+    pub orders_deleted: u32,      // 删除的订单数量
+    pub cids_unpinned: u32,       // 取消Pin的CID数量
+    pub grants_revoked: u32,      // 撤销的授权数量
+}
+```
+
+**使用示例（pallet-bazi-chart）：**
+
+```rust
+// 删除八字命盘时自动级联删除
+pub fn delete_bazi_chart(origin, chart_id) -> DispatchResult {
+    let who = ensure_signed(origin)?;
+    
+    // 1. 验证所有者并删除命盘
+    // ...
+    
+    // 2. 级联删除关联数据（订单、解读、评价等）并取消 IPFS Pin
+    let cascade_result = T::CascadeDeleter::cascade_delete_for_chart(
+        &who,
+        DivinationType::Bazi,
+        chart_id,
+    )?;
+    
+    // 3. 触发事件
+    Self::deposit_event(Event::BaziChartCascadeDeleted {
+        owner: who,
+        chart_id,
+        orders_deleted: cascade_result.orders_deleted,
+        cids_unpinned: cascade_result.cids_unpinned,
+    });
+    
+    Ok(())
+}
+```
+
+**级联删除流程：**
+
+```
+用户调用 delete_bazi_chart(chart_id)
+    │
+    ├── 验证所有者
+    ├── 删除命盘存储
+    ├── 从用户列表移除
+    │
+    └── 级联删除（DivinationMarket）
+        ├── 查找关联订单（result_id == chart_id）
+        ├── 收集 CID（问题、解读、评价、追问）
+        ├── 调用 unregister_content 取消 IPFS Pin
+        ├── 删除订单和追问记录
+        └── 返回删除统计
+            │
+            └── 触发 BaziChartCascadeDeleted 事件
 ```
 
 ### 配置参数建议（占卜模块）

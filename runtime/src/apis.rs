@@ -43,7 +43,7 @@ use sp_version::RuntimeVersion;
 
 // Local module imports
 use super::{
-	AccountId, Aura, Balance, Bazi, Block, BlockNumber, Executive, Grandpa, InherentDataExt, Livestream, Nonce, Runtime,
+	AccountId, Aura, Balance, Bazi, Block, BlockNumber, Executive, Grandpa, InherentDataExt, Nonce, Runtime,
 	RuntimeCall, RuntimeGenesisConfig, SessionKeys, StorageService, System, TransactionPayment, TeePrivacy, VERSION,
 };
 
@@ -471,52 +471,6 @@ impl_runtime_apis! {
 
 		fn get_next_audit_log_id() -> u64 {
 			TeePrivacy::next_audit_log_id()
-		}
-	}
-
-	// ============================================================================
-	// Livestream Runtime API
-	// ============================================================================
-
-	impl pallet_livestream::runtime_api::LivestreamApi<Block, AccountId, Balance> for Runtime {
-		fn get_room(room_id: u64) -> Option<pallet_livestream::runtime_api::LiveRoomInfo<AccountId, Balance>> {
-			Livestream::get_room_info(room_id)
-		}
-
-		fn get_host_room(host: AccountId) -> Option<u64> {
-			Livestream::host_room(&host)
-		}
-
-		fn get_live_rooms() -> Vec<u64> {
-			Livestream::get_live_room_ids()
-		}
-
-		fn get_gift(gift_id: u32) -> Option<pallet_livestream::runtime_api::GiftInfo<Balance>> {
-			Livestream::get_gift_info(gift_id)
-		}
-
-		fn get_enabled_gifts() -> Vec<pallet_livestream::runtime_api::GiftInfo<Balance>> {
-			Livestream::get_enabled_gifts()
-		}
-
-		fn has_ticket(room_id: u64, user: AccountId) -> bool {
-			Livestream::has_ticket(room_id, &user)
-		}
-
-		fn is_blacklisted(room_id: u64, user: AccountId) -> bool {
-			Livestream::is_blacklisted(room_id, &user)
-		}
-
-		fn get_host_earnings(host: AccountId) -> Balance {
-			Livestream::host_earnings(&host)
-		}
-
-		fn get_user_room_gifts(room_id: u64, user: AccountId) -> Balance {
-			Livestream::user_room_gifts(room_id, &user)
-		}
-
-		fn get_co_hosts(room_id: u64) -> Vec<AccountId> {
-			Livestream::get_co_host_list(room_id)
 		}
 	}
 

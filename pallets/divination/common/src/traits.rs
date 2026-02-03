@@ -596,6 +596,74 @@ pub trait Deletable<AccountId, ChartId> {
 /// 用于测试或不需要删除功能的场景。
 pub struct NullDeletable;
 
+/// 命盘级联删除器 Trait
+///
+/// 当用户删除命盘时，需要级联删除关联的订单、解读、评价等数据，
+/// 并取消相关的 IPFS Pin。
+///
+/// # 实现说明
+///
+/// - `pallet-divination-market` 实现此 trait 以删除订单相关数据
+/// - `pallet-divination-privacy` 实现此 trait 以撤销授权
+///
+/// # 示例
+///
+/// ```ignore
+/// impl<T: Config> ChartCascadeDeleter<T::AccountId> for Pallet<T> {
+///     fn cascade_delete_for_chart(
+///         owner: &T::AccountId,
+///         divination_type: DivinationType,
+///         chart_id: u64,
+///     ) -> Result<CascadeDeleteResult, DispatchError> {
+///         // 1. 查找关联订单
+///         // 2. 收集 CID 并 Unpin
+///         // 3. 删除订单记录
+///         Ok(CascadeDeleteResult { ... })
+///     }
+/// }
+/// ```
+pub trait ChartCascadeDeleter<AccountId> {
+    /// 级联删除命盘关联数据
+    ///
+    /// # 参数
+    /// - `owner`: 命盘所有者
+    /// - `divination_type`: 占卜类型
+    /// - `chart_id`: 命盘 ID
+    ///
+    /// # 返回
+    /// - `Ok(CascadeDeleteResult)`: 删除结果统计
+    /// - `Err`: 删除失败
+    fn cascade_delete_for_chart(
+        owner: &AccountId,
+        divination_type: DivinationType,
+        chart_id: u64,
+    ) -> Result<CascadeDeleteResult, sp_runtime::DispatchError>;
+}
+
+/// 级联删除结果
+#[derive(Clone, Debug, Default)]
+pub struct CascadeDeleteResult {
+    /// 删除的订单数量
+    pub orders_deleted: u32,
+    /// 取消 Pin 的 CID 数量
+    pub cids_unpinned: u32,
+    /// 撤销的授权数量
+    pub grants_revoked: u32,
+}
+
+/// 空实现的级联删除器
+pub struct NullChartCascadeDeleter;
+
+impl<AccountId> ChartCascadeDeleter<AccountId> for NullChartCascadeDeleter {
+    fn cascade_delete_for_chart(
+        _owner: &AccountId,
+        _divination_type: DivinationType,
+        _chart_id: u64,
+    ) -> Result<CascadeDeleteResult, sp_runtime::DispatchError> {
+        Ok(CascadeDeleteResult::default())
+    }
+}
+
 impl<AccountId, ChartId: Default> Deletable<AccountId, ChartId> for NullDeletable {
     fn can_delete(_who: &AccountId, _chart_id: ChartId) -> bool {
         false

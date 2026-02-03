@@ -1,0 +1,798 @@
+//! # 实体财务披露模块 (pallet-entity-disclosure)
+//!
+//! ## 概述
+//!
+//! 本模块实现实体财务信息披露功能：
+//! - 多级别披露要求（基础、标准、增强、完全）
+//! - 多种披露类型（财务报告、重大事件、关联交易等）
+//! - 内幕交易控制（黑窗口期、交易限制）
+//! - 披露验证和审计追踪
+//!
+//! ## 披露级别
+//!
+//! - **Basic**: 基础披露（年度简报）
+//! - **Standard**: 标准披露（季度报告）
+//! - **Enhanced**: 增强披露（月度报告 + 重大事件）
+//! - **Full**: 完全披露（实时 + 详细财务）
+//!
+//! ## 版本历史
+//!
+//! - v0.1.0 (2026-02-03): Phase 6 初始版本
+
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+pub use pallet::*;
+
+#[cfg(test)]
+mod mock;
+
+#[cfg(test)]
+mod tests;
+
+#[frame_support::pallet]
+pub mod pallet {
+    use super::*;
+    use alloc::vec::Vec;
+    use frame_support::{
+        pallet_prelude::*,
+        traits::Get,
+        BoundedVec,
+    };
+    use frame_system::pallet_prelude::*;
+    use pallet_entity_common::ShopProvider;
+    use sp_runtime::traits::{Saturating, Zero};
+
+    // ==================== 类型定义 ====================
+
+    /// 披露级别
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    pub enum DisclosureLevel {
+        /// 基础披露（年度简报）
+        #[default]
+        Basic,
+        /// 标准披露（季度报告）
+        Standard,
+        /// 增强披露（月度报告 + 重大事件）
+        Enhanced,
+        /// 完全披露（实时 + 详细财务）
+        Full,
+    }
+
+    /// 披露类型
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    pub enum DisclosureType {
+        /// 年度财务报告
+        AnnualReport,
+        /// 季度财务报告
+        QuarterlyReport,
+        /// 月度财务报告
+        MonthlyReport,
+        /// 重大事件公告
+        MaterialEvent,
+        /// 关联交易披露
+        RelatedPartyTransaction,
+        /// 股权/代币变动
+        OwnershipChange,
+        /// 管理层变动
+        ManagementChange,
+        /// 业务变更
+        BusinessChange,
+        /// 风险提示
+        RiskWarning,
+        /// 分红公告
+        DividendAnnouncement,
+        /// 代币发行公告
+        TokenIssuance,
+        /// 回购公告
+        Buyback,
+        /// 其他
+        Other,
+    }
+
+    /// 披露状态
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    pub enum DisclosureStatus {
+        /// 待审核
+        #[default]
+        Pending,
+        /// 已发布
+        Published,
+        /// 已撤回
+        Withdrawn,
+        /// 已更正
+        Corrected,
+    }
+
+    /// 披露记录
+    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    #[scale_info(skip_type_params(MaxCidLen))]
+    pub struct DisclosureRecord<AccountId, BlockNumber, MaxCidLen: Get<u32>> {
+        /// 披露 ID
+        pub id: u64,
+        /// 实体 ID
+        pub entity_id: u64,
+        /// 披露类型
+        pub disclosure_type: DisclosureType,
+        /// 披露内容 CID (IPFS)
+        pub content_cid: BoundedVec<u8, MaxCidLen>,
+        /// 披露摘要 CID
+        pub summary_cid: Option<BoundedVec<u8, MaxCidLen>>,
+        /// 披露者
+        pub discloser: AccountId,
+        /// 披露时间
+        pub disclosed_at: BlockNumber,
+        /// 状态
+        pub status: DisclosureStatus,
+        /// 关联的前一个披露 ID（用于更正）
+        pub previous_id: Option<u64>,
+        /// 验证者（如有）
+        pub verifier: Option<AccountId>,
+        /// 验证时间
+        pub verified_at: Option<BlockNumber>,
+    }
+
+    /// 披露记录类型别名
+    pub type DisclosureRecordOf<T> = DisclosureRecord<
+        <T as frame_system::Config>::AccountId,
+        BlockNumberFor<T>,
+        <T as Config>::MaxCidLength,
+    >;
+
+    /// 实体披露配置
+    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    pub struct DisclosureConfig<BlockNumber> {
+        /// 披露级别
+        pub level: DisclosureLevel,
+        /// 是否启用内幕交易控制
+        pub insider_trading_control: bool,
+        /// 披露前黑窗口期（区块数）
+        pub blackout_period_before: BlockNumber,
+        /// 披露后黑窗口期（区块数）
+        pub blackout_period_after: BlockNumber,
+        /// 下次必须披露时间
+        pub next_required_disclosure: BlockNumber,
+        /// 上次披露时间
+        pub last_disclosure: BlockNumber,
+        /// 连续违规次数
+        pub violation_count: u32,
+    }
+
+    /// 披露配置类型别名
+    pub type DisclosureConfigOf<T> = DisclosureConfig<BlockNumberFor<T>>;
+
+    /// 内幕人员记录
+    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    pub struct InsiderRecord<AccountId, BlockNumber> {
+        /// 内幕人员账户
+        pub account: AccountId,
+        /// 角色（如 owner, admin, auditor）
+        pub role: InsiderRole,
+        /// 添加时间
+        pub added_at: BlockNumber,
+        /// 是否活跃
+        pub active: bool,
+    }
+
+    /// 内幕人员角色
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    pub enum InsiderRole {
+        /// 所有者
+        #[default]
+        Owner,
+        /// 管理员
+        Admin,
+        /// 审计员
+        Auditor,
+        /// 顾问
+        Advisor,
+        /// 大股东（持有超过阈值）
+        MajorHolder,
+    }
+
+    /// 内幕人员记录类型别名
+    pub type InsiderRecordOf<T> = InsiderRecord<
+        <T as frame_system::Config>::AccountId,
+        BlockNumberFor<T>,
+    >;
+
+    // ==================== 配置 ====================
+
+    #[pallet::config]
+    pub trait Config: frame_system::Config {
+        /// 运行时事件类型
+        type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
+
+        /// 实体查询接口
+        type EntityProvider: ShopProvider<Self::AccountId>;
+
+        /// CID 最大长度
+        #[pallet::constant]
+        type MaxCidLength: Get<u32>;
+
+        /// 每个实体最大内幕人员数
+        #[pallet::constant]
+        type MaxInsiders: Get<u32>;
+
+        /// 每个实体最大披露记录数（历史）
+        #[pallet::constant]
+        type MaxDisclosureHistory: Get<u32>;
+
+        /// 基础披露间隔（区块数，如年度 = 365 * 24 * 600）
+        #[pallet::constant]
+        type BasicDisclosureInterval: Get<BlockNumberFor<Self>>;
+
+        /// 标准披露间隔（区块数，如季度）
+        #[pallet::constant]
+        type StandardDisclosureInterval: Get<BlockNumberFor<Self>>;
+
+        /// 增强披露间隔（区块数，如月度）
+        #[pallet::constant]
+        type EnhancedDisclosureInterval: Get<BlockNumberFor<Self>>;
+
+        /// 大股东阈值（基点，如 500 = 5%）
+        #[pallet::constant]
+        type MajorHolderThreshold: Get<u16>;
+    }
+
+    #[pallet::pallet]
+    pub struct Pallet<T>(_);
+
+    // ==================== 存储项 ====================
+
+    /// 下一个披露 ID
+    #[pallet::storage]
+    #[pallet::getter(fn next_disclosure_id)]
+    pub type NextDisclosureId<T: Config> = StorageValue<_, u64, ValueQuery>;
+
+    /// 披露记录存储
+    #[pallet::storage]
+    #[pallet::getter(fn disclosures)]
+    pub type Disclosures<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,  // disclosure_id
+        DisclosureRecordOf<T>,
+    >;
+
+    /// 实体披露配置
+    #[pallet::storage]
+    #[pallet::getter(fn disclosure_configs)]
+    pub type DisclosureConfigs<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,  // entity_id
+        DisclosureConfigOf<T>,
+    >;
+
+    /// 实体披露历史索引
+    #[pallet::storage]
+    #[pallet::getter(fn entity_disclosures)]
+    pub type EntityDisclosures<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,  // entity_id
+        BoundedVec<u64, T::MaxDisclosureHistory>,
+        ValueQuery,
+    >;
+
+    /// 内幕人员列表
+    #[pallet::storage]
+    #[pallet::getter(fn insiders)]
+    pub type Insiders<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,  // entity_id
+        BoundedVec<InsiderRecordOf<T>, T::MaxInsiders>,
+        ValueQuery,
+    >;
+
+    /// 黑窗口期状态 (entity_id) -> (start_block, end_block)
+    #[pallet::storage]
+    #[pallet::getter(fn blackout_periods)]
+    pub type BlackoutPeriods<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,
+        (BlockNumberFor<T>, BlockNumberFor<T>),
+    >;
+
+    // ==================== 事件 ====================
+
+    #[pallet::event]
+    #[pallet::generate_deposit(pub(super) fn deposit_event)]
+    pub enum Event<T: Config> {
+        /// 披露已发布
+        DisclosurePublished {
+            disclosure_id: u64,
+            entity_id: u64,
+            disclosure_type: DisclosureType,
+            discloser: T::AccountId,
+        },
+        /// 披露已撤回
+        DisclosureWithdrawn {
+            disclosure_id: u64,
+            entity_id: u64,
+        },
+        /// 披露已更正
+        DisclosureCorrected {
+            old_disclosure_id: u64,
+            new_disclosure_id: u64,
+            entity_id: u64,
+        },
+        /// 披露配置已更新
+        DisclosureConfigUpdated {
+            entity_id: u64,
+            level: DisclosureLevel,
+        },
+        /// 内幕人员已添加
+        InsiderAdded {
+            entity_id: u64,
+            account: T::AccountId,
+            role: InsiderRole,
+        },
+        /// 内幕人员已移除
+        InsiderRemoved {
+            entity_id: u64,
+            account: T::AccountId,
+        },
+        /// 黑窗口期已开始
+        BlackoutStarted {
+            entity_id: u64,
+            start_block: BlockNumberFor<T>,
+            end_block: BlockNumberFor<T>,
+        },
+        /// 黑窗口期已结束
+        BlackoutEnded {
+            entity_id: u64,
+        },
+        /// 披露违规
+        DisclosureViolation {
+            entity_id: u64,
+            violation_type: ViolationType,
+        },
+    }
+
+    /// 违规类型
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    pub enum ViolationType {
+        /// 逾期披露
+        LateDisclosure,
+        /// 黑窗口期交易
+        BlackoutTrading,
+        /// 未披露重大事件
+        UndisclosedMaterialEvent,
+    }
+
+    // ==================== 错误 ====================
+
+    #[pallet::error]
+    pub enum Error<T> {
+        /// 实体不存在
+        EntityNotFound,
+        /// 不是管理员
+        NotAdmin,
+        /// 披露不存在
+        DisclosureNotFound,
+        /// CID 过长
+        CidTooLong,
+        /// 历史记录已满
+        HistoryFull,
+        /// 内幕人员已存在
+        InsiderExists,
+        /// 内幕人员不存在
+        InsiderNotFound,
+        /// 内幕人员列表已满
+        InsidersFull,
+        /// 黑窗口期内禁止交易
+        InBlackoutPeriod,
+        /// 无效的披露状态
+        InvalidDisclosureStatus,
+        /// 披露级别不满足要求
+        InsufficientDisclosureLevel,
+        /// 披露间隔未到
+        DisclosureIntervalNotReached,
+    }
+
+    // ==================== Extrinsics ====================
+
+    #[pallet::call]
+    impl<T: Config> Pallet<T> {
+        /// 配置实体披露设置
+        #[pallet::call_index(0)]
+        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        pub fn configure_disclosure(
+            origin: OriginFor<T>,
+            entity_id: u64,
+            level: DisclosureLevel,
+            insider_trading_control: bool,
+            blackout_before: BlockNumberFor<T>,
+            blackout_after: BlockNumberFor<T>,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            // 验证管理员权限
+            let owner = T::EntityProvider::shop_owner(entity_id).ok_or(Error::<T>::EntityNotFound)?;
+            ensure!(owner == who, Error::<T>::NotAdmin);
+
+            let now = <frame_system::Pallet<T>>::block_number();
+            let next_required = Self::calculate_next_disclosure(level, now);
+
+            DisclosureConfigs::<T>::insert(entity_id, DisclosureConfig {
+                level,
+                insider_trading_control,
+                blackout_period_before: blackout_before,
+                blackout_period_after: blackout_after,
+                next_required_disclosure: next_required,
+                last_disclosure: now,
+                violation_count: 0,
+            });
+
+            Self::deposit_event(Event::DisclosureConfigUpdated {
+                entity_id,
+                level,
+            });
+            Ok(())
+        }
+
+        /// 发布披露
+        #[pallet::call_index(1)]
+        #[pallet::weight(Weight::from_parts(50_000, 0))]
+        pub fn publish_disclosure(
+            origin: OriginFor<T>,
+            entity_id: u64,
+            disclosure_type: DisclosureType,
+            content_cid: Vec<u8>,
+            summary_cid: Option<Vec<u8>>,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            // 验证管理员权限
+            let owner = T::EntityProvider::shop_owner(entity_id).ok_or(Error::<T>::EntityNotFound)?;
+            ensure!(owner == who, Error::<T>::NotAdmin);
+
+            let content_bounded: BoundedVec<u8, T::MaxCidLength> = 
+                content_cid.try_into().map_err(|_| Error::<T>::CidTooLong)?;
+            let summary_bounded = summary_cid
+                .map(|s| s.try_into().map_err(|_| Error::<T>::CidTooLong))
+                .transpose()?;
+
+            let now = <frame_system::Pallet<T>>::block_number();
+            let disclosure_id = NextDisclosureId::<T>::get();
+
+            let record = DisclosureRecord {
+                id: disclosure_id,
+                entity_id,
+                disclosure_type,
+                content_cid: content_bounded,
+                summary_cid: summary_bounded,
+                discloser: who.clone(),
+                disclosed_at: now,
+                status: DisclosureStatus::Published,
+                previous_id: None,
+                verifier: None,
+                verified_at: None,
+            };
+
+            // 保存记录
+            Disclosures::<T>::insert(disclosure_id, record);
+            NextDisclosureId::<T>::put(disclosure_id.saturating_add(1));
+
+            // 更新实体披露历史
+            EntityDisclosures::<T>::try_mutate(entity_id, |history| -> DispatchResult {
+                history.try_push(disclosure_id).map_err(|_| Error::<T>::HistoryFull)?;
+                Ok(())
+            })?;
+
+            // 更新配置
+            DisclosureConfigs::<T>::mutate(entity_id, |maybe_config| {
+                if let Some(config) = maybe_config {
+                    config.last_disclosure = now;
+                    config.next_required_disclosure = Self::calculate_next_disclosure(config.level, now);
+                }
+            });
+
+            // 如果启用内幕交易控制，开始黑窗口期
+            if let Some(config) = DisclosureConfigs::<T>::get(entity_id) {
+                if config.insider_trading_control && !config.blackout_period_after.is_zero() {
+                    let end_block = now.saturating_add(config.blackout_period_after);
+                    BlackoutPeriods::<T>::insert(entity_id, (now, end_block));
+                    Self::deposit_event(Event::BlackoutStarted {
+                        entity_id,
+                        start_block: now,
+                        end_block,
+                    });
+                }
+            }
+
+            Self::deposit_event(Event::DisclosurePublished {
+                disclosure_id,
+                entity_id,
+                disclosure_type,
+                discloser: who,
+            });
+            Ok(())
+        }
+
+        /// 撤回披露
+        #[pallet::call_index(2)]
+        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        pub fn withdraw_disclosure(
+            origin: OriginFor<T>,
+            disclosure_id: u64,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            Disclosures::<T>::try_mutate(disclosure_id, |maybe_record| -> DispatchResult {
+                let record = maybe_record.as_mut().ok_or(Error::<T>::DisclosureNotFound)?;
+                
+                // 验证权限
+                let owner = T::EntityProvider::shop_owner(record.entity_id)
+                    .ok_or(Error::<T>::EntityNotFound)?;
+                ensure!(owner == who || record.discloser == who, Error::<T>::NotAdmin);
+                
+                // 验证状态
+                ensure!(record.status == DisclosureStatus::Published, Error::<T>::InvalidDisclosureStatus);
+                
+                record.status = DisclosureStatus::Withdrawn;
+                
+                Self::deposit_event(Event::DisclosureWithdrawn {
+                    disclosure_id,
+                    entity_id: record.entity_id,
+                });
+                Ok(())
+            })
+        }
+
+        /// 更正披露（发布新版本）
+        #[pallet::call_index(3)]
+        #[pallet::weight(Weight::from_parts(50_000, 0))]
+        pub fn correct_disclosure(
+            origin: OriginFor<T>,
+            old_disclosure_id: u64,
+            content_cid: Vec<u8>,
+            summary_cid: Option<Vec<u8>>,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            let old_record = Disclosures::<T>::get(old_disclosure_id)
+                .ok_or(Error::<T>::DisclosureNotFound)?;
+            
+            // 验证权限
+            let owner = T::EntityProvider::shop_owner(old_record.entity_id)
+                .ok_or(Error::<T>::EntityNotFound)?;
+            ensure!(owner == who, Error::<T>::NotAdmin);
+
+            let content_bounded: BoundedVec<u8, T::MaxCidLength> = 
+                content_cid.try_into().map_err(|_| Error::<T>::CidTooLong)?;
+            let summary_bounded = summary_cid
+                .map(|s| s.try_into().map_err(|_| Error::<T>::CidTooLong))
+                .transpose()?;
+
+            let now = <frame_system::Pallet<T>>::block_number();
+            let new_disclosure_id = NextDisclosureId::<T>::get();
+
+            // 创建新记录
+            let new_record = DisclosureRecord {
+                id: new_disclosure_id,
+                entity_id: old_record.entity_id,
+                disclosure_type: old_record.disclosure_type,
+                content_cid: content_bounded,
+                summary_cid: summary_bounded,
+                discloser: who.clone(),
+                disclosed_at: now,
+                status: DisclosureStatus::Published,
+                previous_id: Some(old_disclosure_id),
+                verifier: None,
+                verified_at: None,
+            };
+
+            // 更新旧记录状态
+            Disclosures::<T>::mutate(old_disclosure_id, |maybe_record| {
+                if let Some(record) = maybe_record {
+                    record.status = DisclosureStatus::Corrected;
+                }
+            });
+
+            // 保存新记录
+            Disclosures::<T>::insert(new_disclosure_id, new_record);
+            NextDisclosureId::<T>::put(new_disclosure_id.saturating_add(1));
+
+            // 更新历史
+            EntityDisclosures::<T>::try_mutate(old_record.entity_id, |history| -> DispatchResult {
+                history.try_push(new_disclosure_id).map_err(|_| Error::<T>::HistoryFull)?;
+                Ok(())
+            })?;
+
+            Self::deposit_event(Event::DisclosureCorrected {
+                old_disclosure_id,
+                new_disclosure_id,
+                entity_id: old_record.entity_id,
+            });
+            Ok(())
+        }
+
+        /// 添加内幕人员
+        #[pallet::call_index(4)]
+        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        pub fn add_insider(
+            origin: OriginFor<T>,
+            entity_id: u64,
+            account: T::AccountId,
+            role: InsiderRole,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            let owner = T::EntityProvider::shop_owner(entity_id).ok_or(Error::<T>::EntityNotFound)?;
+            ensure!(owner == who, Error::<T>::NotAdmin);
+
+            let now = <frame_system::Pallet<T>>::block_number();
+
+            Insiders::<T>::try_mutate(entity_id, |insiders| -> DispatchResult {
+                // 检查是否已存在
+                ensure!(
+                    !insiders.iter().any(|i| i.account == account && i.active),
+                    Error::<T>::InsiderExists
+                );
+
+                let record = InsiderRecord {
+                    account: account.clone(),
+                    role,
+                    added_at: now,
+                    active: true,
+                };
+
+                insiders.try_push(record).map_err(|_| Error::<T>::InsidersFull)?;
+                Ok(())
+            })?;
+
+            Self::deposit_event(Event::InsiderAdded {
+                entity_id,
+                account,
+                role,
+            });
+            Ok(())
+        }
+
+        /// 移除内幕人员
+        #[pallet::call_index(5)]
+        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        pub fn remove_insider(
+            origin: OriginFor<T>,
+            entity_id: u64,
+            account: T::AccountId,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            let owner = T::EntityProvider::shop_owner(entity_id).ok_or(Error::<T>::EntityNotFound)?;
+            ensure!(owner == who, Error::<T>::NotAdmin);
+
+            Insiders::<T>::try_mutate(entity_id, |insiders| -> DispatchResult {
+                let pos = insiders.iter().position(|i| i.account == account && i.active)
+                    .ok_or(Error::<T>::InsiderNotFound)?;
+                insiders[pos].active = false;
+                Ok(())
+            })?;
+
+            Self::deposit_event(Event::InsiderRemoved {
+                entity_id,
+                account,
+            });
+            Ok(())
+        }
+
+        /// 手动开始黑窗口期
+        #[pallet::call_index(6)]
+        #[pallet::weight(Weight::from_parts(20_000, 0))]
+        pub fn start_blackout(
+            origin: OriginFor<T>,
+            entity_id: u64,
+            duration: BlockNumberFor<T>,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            let owner = T::EntityProvider::shop_owner(entity_id).ok_or(Error::<T>::EntityNotFound)?;
+            ensure!(owner == who, Error::<T>::NotAdmin);
+
+            let now = <frame_system::Pallet<T>>::block_number();
+            let end_block = now.saturating_add(duration);
+
+            BlackoutPeriods::<T>::insert(entity_id, (now, end_block));
+
+            Self::deposit_event(Event::BlackoutStarted {
+                entity_id,
+                start_block: now,
+                end_block,
+            });
+            Ok(())
+        }
+
+        /// 结束黑窗口期
+        #[pallet::call_index(7)]
+        #[pallet::weight(Weight::from_parts(20_000, 0))]
+        pub fn end_blackout(
+            origin: OriginFor<T>,
+            entity_id: u64,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            let owner = T::EntityProvider::shop_owner(entity_id).ok_or(Error::<T>::EntityNotFound)?;
+            ensure!(owner == who, Error::<T>::NotAdmin);
+
+            BlackoutPeriods::<T>::remove(entity_id);
+
+            Self::deposit_event(Event::BlackoutEnded { entity_id });
+            Ok(())
+        }
+    }
+
+    // ==================== 辅助函数 ====================
+
+    impl<T: Config> Pallet<T> {
+        /// 计算下次必须披露时间
+        pub fn calculate_next_disclosure(level: DisclosureLevel, now: BlockNumberFor<T>) -> BlockNumberFor<T> {
+            let interval = match level {
+                DisclosureLevel::Basic => T::BasicDisclosureInterval::get(),
+                DisclosureLevel::Standard => T::StandardDisclosureInterval::get(),
+                DisclosureLevel::Enhanced => T::EnhancedDisclosureInterval::get(),
+                DisclosureLevel::Full => BlockNumberFor::<T>::zero(), // 实时，无固定间隔
+            };
+            now.saturating_add(interval)
+        }
+
+        /// 检查是否在黑窗口期内
+        pub fn is_in_blackout(entity_id: u64) -> bool {
+            if let Some((start, end)) = BlackoutPeriods::<T>::get(entity_id) {
+                let now = <frame_system::Pallet<T>>::block_number();
+                now >= start && now <= end
+            } else {
+                false
+            }
+        }
+
+        /// 检查账户是否是内幕人员
+        pub fn is_insider(entity_id: u64, account: &T::AccountId) -> bool {
+            Insiders::<T>::get(entity_id)
+                .iter()
+                .any(|i| &i.account == account && i.active)
+        }
+
+        /// 检查内幕人员是否可以交易
+        pub fn can_insider_trade(entity_id: u64, account: &T::AccountId) -> bool {
+            // 如果不是内幕人员，允许交易
+            if !Self::is_insider(entity_id, account) {
+                return true;
+            }
+
+            // 检查是否启用了内幕交易控制
+            if let Some(config) = DisclosureConfigs::<T>::get(entity_id) {
+                if !config.insider_trading_control {
+                    return true;
+                }
+            } else {
+                return true;
+            }
+
+            // 检查是否在黑窗口期内
+            !Self::is_in_blackout(entity_id)
+        }
+
+        /// 获取实体的披露级别
+        pub fn get_disclosure_level(entity_id: u64) -> DisclosureLevel {
+            DisclosureConfigs::<T>::get(entity_id)
+                .map(|c| c.level)
+                .unwrap_or_default()
+        }
+
+        /// 检查披露是否逾期
+        pub fn is_disclosure_overdue(entity_id: u64) -> bool {
+            if let Some(config) = DisclosureConfigs::<T>::get(entity_id) {
+                let now = <frame_system::Pallet<T>>::block_number();
+                now > config.next_required_disclosure
+            } else {
+                false
+            }
+        }
+    }
+}

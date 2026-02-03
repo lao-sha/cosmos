@@ -643,12 +643,14 @@ pub enum BountyStatus {
     Closed = 1,
     /// 已采纳 - 已选择答案，等待结算
     Adopted = 2,
-    /// 已结算 - 奖励已分配
+    /// 已结算 - 奖励已分配（创建者主动采纳后结算）
     Settled = 3,
     /// 已取消 - 提问者取消（无回答时）
     Cancelled = 4,
     /// 已过期 - 超时无人回答，退款
     Expired = 5,
+    /// 强制结算 - 创建者未采纳，宽限期后系统自动分配奖励
+    ForceSettled = 6,
 }
 
 /// 悬赏回答状态
@@ -735,6 +737,34 @@ impl RewardDistribution {
             .saturating_add(self.participation_pool)
             == 10000
     }
+
+    /// 获取排除平台费后的可分配比例总和
+    pub fn distributable_rate(&self) -> u16 {
+        self.first_place
+            .saturating_add(self.second_place)
+            .saturating_add(self.third_place)
+            .saturating_add(self.participation_pool)
+    }
+}
+
+/// 强制结算方式
+#[derive(
+    Clone,
+    Copy,
+    Encode,
+    Decode,
+    DecodeWithMemTracking,
+    TypeInfo,
+    MaxEncodedLen,
+    PartialEq,
+    Eq,
+    Debug,
+)]
+pub enum ForceSettleMethod {
+    /// 按投票数分配（有投票时）
+    ByVotes = 0,
+    /// 平均分配（无投票时）
+    EqualSplit = 1,
 }
 
 /// 悬赏问题（基于占卜结果）
@@ -791,6 +821,61 @@ pub struct BountyQuestion<AccountId, Balance, BlockNumber, MaxCidLen: Get<u32>> 
     pub total_votes: u32,
 }
 
+/// 🆕 回答结构类型
+#[derive(
+    Clone,
+    Copy,
+    Encode,
+    Decode,
+    DecodeWithMemTracking,
+    TypeInfo,
+    MaxEncodedLen,
+    PartialEq,
+    Eq,
+    Debug,
+    Default,
+)]
+pub enum AnswerStructureType {
+    /// 纯文字简答
+    #[default]
+    PlainText = 0,
+    /// 分段解读（有小标题）
+    Sectioned = 1,
+    /// 图文结合
+    Illustrated = 2,
+    /// 专业报告格式
+    ProfessionalReport = 3,
+}
+
+/// 🆕 回答内容元数据
+///
+/// 链下计算，提交时上链，用于质量评估和展示
+#[derive(
+    Clone,
+    Copy,
+    Encode,
+    Decode,
+    DecodeWithMemTracking,
+    TypeInfo,
+    MaxEncodedLen,
+    PartialEq,
+    Eq,
+    Debug,
+    Default,
+)]
+pub struct AnswerContentMeta {
+    /// 文字内容长度（字符数）
+    pub text_length: u32,
+    /// 是否包含图片
+    pub has_images: bool,
+    /// 是否包含语音/视频
+    pub has_media: bool,
+    /// 引用理论/典籍数量
+    pub reference_count: u8,
+    /// 内容结构类型
+    pub structure_type: AnswerStructureType,
+}
+
 /// 悬赏回答
 #[derive(Clone, Encode, Decode, DecodeWithMemTracking, TypeInfo, MaxEncodedLen, PartialEq, Eq, Debug)]
 #[scale_info(skip_type_params(MaxCidLen))]
@@ -803,6 +888,8 @@ pub struct BountyAnswer<AccountId, Balance, BlockNumber, MaxCidLen: Get<u32>> {
     pub answerer: AccountId,
     /// 回答内容 IPFS CID
     pub answer_cid: BoundedVec<u8, MaxCidLen>,
+    /// 🆕 回答内容元数据（质量指标）
+    pub content_meta: AnswerContentMeta,
     /// 状态
     pub status: BountyAnswerStatus,
     /// 获得票数
@@ -856,6 +943,82 @@ pub struct BountyStats<Balance: Default> {
     pub total_answers: u64,
     /// 平均每个悬赏的回答数（* 100）
     pub avg_answers_per_bounty: u16,
+}
+
+// ============================================================================
+// 🆕 悬赏问答归档类型定义
+// ============================================================================
+
+/// 悬赏问题 L1 归档（精简版，~60%压缩）
+///
+/// 保留核心业务字段，删除 IPFS CID 等大字段
+#[derive(Clone, Encode, Decode, DecodeWithMemTracking, TypeInfo, MaxEncodedLen, PartialEq, Eq, Debug)]
+pub struct ArchivedBountyL1<AccountId, Balance, BlockNumber> {
+    /// 悬赏问题 ID
+    pub id: u64,
+    /// 提问者账户
+    pub creator: AccountId,
+    /// 占卜类型
+    pub divination_type: DivinationType,
+    /// 悬赏金额
+    pub bounty_amount: Balance,
+    /// 状态
+    pub status: BountyStatus,
+    /// 回答数量
+    pub answer_count: u32,
+    /// 创建时间
+    pub created_at: BlockNumber,
+    /// 结算时间
+    pub settled_at: Option<BlockNumber>,
+    /// 归档时间
+    pub archived_at: BlockNumber,
+}
+
+/// 悬赏问题 L2 归档（统计版，~90%压缩）
+///
+/// 仅保留统计必需字段
+#[derive(Clone, Encode, Decode, DecodeWithMemTracking, TypeInfo, MaxEncodedLen, PartialEq, Eq, Debug)]
+pub struct ArchivedBountyL2<Balance> {
+    /// 悬赏问题 ID
+    pub id: u64,
+    /// 悬赏金额
+    pub bounty_amount: Balance,
+    /// 回答数量
+    pub answer_count: u32,
+    /// 状态
+    pub status: BountyStatus,
+}
+
+/// 悬赏回答 L1 归档（精简版）
+#[derive(Clone, Encode, Decode, DecodeWithMemTracking, TypeInfo, MaxEncodedLen, PartialEq, Eq, Debug)]
+pub struct ArchivedAnswerL1<AccountId, Balance, BlockNumber> {
+    /// 回答 ID
+    pub id: u64,
+    /// 所属悬赏问题 ID
+    pub bounty_id: u64,
+    /// 回答者账户
+    pub answerer: AccountId,
+    /// 状态
+    pub status: BountyAnswerStatus,
+    /// 获得奖励金额
+    pub reward_amount: Balance,
+    /// 提交时间
+    pub submitted_at: BlockNumber,
+    /// 是否为认证提供者
+    pub is_certified: bool,
+}
+
+/// 悬赏回答 L2 归档（统计版）
+#[derive(Clone, Encode, Decode, DecodeWithMemTracking, TypeInfo, MaxEncodedLen, PartialEq, Eq, Debug)]
+pub struct ArchivedAnswerL2<Balance> {
+    /// 回答 ID
+    pub id: u64,
+    /// 所属悬赏问题 ID
+    pub bounty_id: u64,
+    /// 获得奖励金额
+    pub reward_amount: Balance,
+    /// 状态
+    pub status: BountyAnswerStatus,
 }
 
 // ============================================================================
@@ -1135,6 +1298,35 @@ impl CreditLevel {
             CreditLevel::Poor => 5000, // 50% 降权
             CreditLevel::Warning => 2000, // 20% 降权
             _ => 0, // 无降权
+        }
+    }
+
+    /// 获取限制接单时长（区块数，假设 6 秒/区块）
+    /// 
+    /// 信用等级越高，限制时间越短
+    pub fn order_restriction_duration(&self) -> u32 {
+        match self {
+            CreditLevel::Excellent => 14400,   // 1天
+            CreditLevel::Good => 43200,        // 3天
+            CreditLevel::Fair => 100800,       // 7天
+            CreditLevel::Warning => 201600,    // 14天
+            CreditLevel::Poor => 432000,       // 30天
+            CreditLevel::Bad => 864000,        // 60天
+        }
+    }
+
+    /// 获取暂停服务时长（区块数，假设 6 秒/区块）
+    /// 
+    /// 信用等级越高，暂停时间越短
+    /// Bad 等级返回 0 表示需要人工处理（永久暂停直到申诉）
+    pub fn service_suspension_duration(&self) -> u32 {
+        match self {
+            CreditLevel::Excellent => 43200,   // 3天
+            CreditLevel::Good => 100800,       // 7天
+            CreditLevel::Fair => 201600,       // 14天
+            CreditLevel::Warning => 432000,    // 30天
+            CreditLevel::Poor => 864000,       // 60天
+            CreditLevel::Bad => 0,             // 永久（需人工处理）
         }
     }
 }
@@ -1423,6 +1615,19 @@ pub struct ViolationRecord<AccountId, BlockNumber, MaxReasonLen: Get<u32>> {
 
     /// 是否活跃（未过期）
     pub is_active: bool,
+}
+
+/// 待恢复信息
+/// 
+/// 记录因违规被限制/暂停的大师的恢复计划
+#[derive(Clone, Encode, Decode, DecodeWithMemTracking, TypeInfo, MaxEncodedLen, PartialEq, Eq, Debug)]
+pub struct RestorationInfo<BlockNumber> {
+    /// 计划恢复时间（区块号）
+    pub restore_at: BlockNumber,
+    /// 处罚类型
+    pub penalty_type: PenaltyType,
+    /// 违规记录 ID
+    pub violation_id: u64,
 }
 
 /// 信用变更原因

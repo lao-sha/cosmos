@@ -178,6 +178,13 @@ impl pallet_storage_service::ContentRegistry for MockContentRegistry {
         Ok(())
     }
 
+    fn unregister_content(
+        _domain: Vec<u8>,
+        _cid: Vec<u8>,
+    ) -> sp_runtime::DispatchResult {
+        Ok(())
+    }
+
     fn is_domain_registered(_domain: &[u8]) -> bool {
         true
     }
@@ -311,6 +318,14 @@ impl pallet_divination_market::Config for Test {
     // 🆕 聊天权限集成
     type ChatPermission = MockChatPermission;
     type OrderChatDuration = ConstU64<432000>;
+    // 🆕 悬赏强制结算宽限期（测试用 1000 区块）
+    type ForceSettleGracePeriod = ConstU64<1000>;
+    // 🆕 悬赏奖励的联盟佣金比例（测试用 500 = 5%）
+    type BountyAffiliateRate = ConstU16<500>;
+    // 🆕 悬赏问答 L1 归档延迟（测试用 5000 区块 ≈ 8小时）
+    type BountyArchiveL1Delay = ConstU64<5000>;
+    // 🆕 悬赏问答 L2 归档延迟（测试用 10000 区块 ≈ 16小时）
+    type BountyArchiveL2Delay = ConstU64<10000>;
 }
 
 /// 构建测试外部状态
@@ -323,8 +338,15 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
         balances: vec![
             (1, 1_000_000),    // 客户1
             (2, 1_000_000),    // 客户2
+            (3, 1_000_000),    // 客户3
+            (4, 1_000_000),    // 客户4
+            (5, 1_000_000),    // 客户5
+            (6, 1_000_000),    // 投票者1
+            (7, 1_000_000),    // 投票者2
+            (8, 1_000_000),    // 投票者3
             (10, 1_000_000),   // 提供者1
             (11, 1_000_000),   // 提供者2
+            (99, 1_000_000),   // 触发者
             (100, 1_000_000),  // 举报审核人（委员会成员）
             (888, 10_000_000), // 国库账户
             (999, 10_000_000), // 平台账户

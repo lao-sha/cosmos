@@ -324,9 +324,6 @@ mod runtime {
 	#[runtime::pallet_index(42)]
 	pub type ChatGroup = pallet_chat_group;
 
-	#[runtime::pallet_index(43)]
-	pub type Livestream = pallet_livestream;
-
 	// ============================================================================
 	// Trading Pallets
 	// ============================================================================
@@ -403,4 +400,51 @@ mod runtime {
 
 	#[runtime::pallet_index(104)]
 	pub type MeowstarMarketplace = pallet_meowstar_marketplace;
+
+	// ============================================================================
+	// Assets Pallet (for ShareMall Token)
+	// ============================================================================
+
+	#[runtime::pallet_index(110)]
+	pub type Assets = pallet_assets;
+
+	// ============================================================================
+	// Entity Pallets (原 ShareMall，已重构)
+	// ============================================================================
+
+	#[runtime::pallet_index(120)]
+	pub type EntityRegistry = pallet_entity_registry;
+
+	#[runtime::pallet_index(121)]
+	pub type EntityService = pallet_entity_service;
+
+	#[runtime::pallet_index(122)]
+	pub type EntityTransaction = pallet_entity_transaction;
+
+	#[runtime::pallet_index(123)]
+	pub type EntityReview = pallet_entity_review;
+
+	#[runtime::pallet_index(124)]
+	pub type EntityToken = pallet_entity_token;
+
+	#[runtime::pallet_index(125)]
+	pub type EntityGovernance = pallet_entity_governance;
+
+	#[runtime::pallet_index(126)]
+	pub type EntityMember = pallet_entity_member;
+
+	#[runtime::pallet_index(127)]
+	pub type EntityCommission = pallet_entity_commission;
+
+	#[runtime::pallet_index(128)]
+	pub type EntityMarket = pallet_entity_market;
+
+	#[runtime::pallet_index(130)]
+	pub type EntityDisclosure = pallet_entity_disclosure;
+
+	#[runtime::pallet_index(131)]
+	pub type EntityKyc = pallet_entity_kyc;
+
+	#[runtime::pallet_index(132)]
+	pub type EntitySale = pallet_entity_sale;
 }

@@ -1660,6 +1660,7 @@ dependencies = [
  "pallet-affiliate",
  "pallet-almanac",
  "pallet-arbitration",
+ "pallet-assets",
  "pallet-aura",
  "pallet-balances",
  "pallet-bazi-chart",
@@ -1677,11 +1678,23 @@ dependencies = [
  "pallet-divination-nft",
  "pallet-divination-ocw-tee",
  "pallet-divination-privacy",
+ "pallet-entity-commission",
+ "pallet-entity-common",
+ "pallet-entity-disclosure",
+ "pallet-entity-governance",
+ "pallet-entity-kyc",
+ "pallet-entity-market",
+ "pallet-entity-member",
+ "pallet-entity-registry",
+ "pallet-entity-review",
+ "pallet-entity-sale",
+ "pallet-entity-service",
+ "pallet-entity-token",
+ "pallet-entity-transaction",
  "pallet-escrow",
  "pallet-evidence",
  "pallet-grandpa",
  "pallet-liuyao",
- "pallet-livestream",
  "pallet-matchmaking-common",
  "pallet-matchmaking-membership",
  "pallet-matchmaking-profile",
@@ -6589,6 +6602,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-assets"
+version = "48.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe32957ed431e041d4a5f6a964d2a385a4b7d27d22881c77d18fbd3971bf605c"
+dependencies = [
+ "frame-benchmarking 45.0.1",
+ "frame-support 45.1.0",
+ "frame-system 45.0.0",
+ "impl-trait-for-tuples",
+ "log",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core 39.0.0",
+ "sp-runtime 45.0.0",
+]
+
+[[package]]
 name = "pallet-aura"
 version = "44.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7035,6 +7065,219 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-entity-commission"
+version = "0.1.0"
+dependencies = [
+ "frame-support 45.1.0",
+ "frame-system 45.0.0",
+ "log",
+ "pallet-balances",
+ "pallet-entity-common",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+ "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "pallet-entity-common"
+version = "0.1.0"
+dependencies = [
+ "frame-support 45.1.0",
+ "frame-system 45.0.0",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-runtime 45.0.0",
+ "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "pallet-entity-disclosure"
+version = "0.1.0"
+dependencies = [
+ "frame-support 45.1.0",
+ "frame-system 45.0.0",
+ "pallet-entity-common",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+]
+
+[[package]]
+name = "pallet-entity-governance"
+version = "0.1.0"
+dependencies = [
+ "frame-support 45.1.0",
+ "frame-system 45.0.0",
+ "pallet-balances",
+ "pallet-entity-commission",
+ "pallet-entity-common",
+ "pallet-entity-registry",
+ "pallet-entity-token",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+ "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "pallet-entity-kyc"
+version = "0.1.0"
+dependencies = [
+ "frame-support 45.1.0",
+ "frame-system 45.0.0",
+ "pallet-entity-common",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+]
+
+[[package]]
+name = "pallet-entity-market"
+version = "0.1.0"
+dependencies = [
+ "frame-support 45.1.0",
+ "frame-system 45.0.0",
+ "pallet-assets",
+ "pallet-balances",
+ "pallet-entity-common",
+ "pallet-entity-registry",
+ "pallet-entity-token",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+ "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "pallet-entity-member"
+version = "0.1.0"
+dependencies = [
+ "frame-support 45.1.0",
+ "frame-system 45.0.0",
+ "log",
+ "pallet-balances",
+ "pallet-entity-common",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+ "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "pallet-entity-registry"
+version = "0.1.0"
+dependencies = [
+ "frame-support 45.1.0",
+ "frame-system 45.0.0",
+ "log",
+ "pallet-balances",
+ "pallet-entity-common",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+ "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "pallet-entity-review"
+version = "0.1.0"
+dependencies = [
+ "frame-support 45.1.0",
+ "frame-system 45.0.0",
+ "log",
+ "pallet-balances",
+ "pallet-entity-common",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+ "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "pallet-entity-sale"
+version = "0.1.0"
+dependencies = [
+ "frame-support 45.1.0",
+ "frame-system 45.0.0",
+ "pallet-entity-common",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+]
+
+[[package]]
+name = "pallet-entity-service"
+version = "0.1.0"
+dependencies = [
+ "frame-support 45.1.0",
+ "frame-system 45.0.0",
+ "log",
+ "pallet-balances",
+ "pallet-entity-common",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+ "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "pallet-entity-token"
+version = "0.1.0"
+dependencies = [
+ "frame-support 45.1.0",
+ "frame-system 45.0.0",
+ "log",
+ "pallet-assets",
+ "pallet-balances",
+ "pallet-entity-common",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+ "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "pallet-entity-transaction"
+version = "0.1.0"
+dependencies = [
+ "frame-support 45.1.0",
+ "frame-system 45.0.0",
+ "log",
+ "pallet-balances",
+ "pallet-entity-common",
+ "pallet-escrow",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core 39.0.0",
+ "sp-io 44.0.0",
+ "sp-runtime 45.0.0",
+ "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "pallet-escrow"
 version = "0.1.0"
 dependencies = [
@@ -7108,25 +7351,6 @@ dependencies = [
  "pallet-divination-ocw-tee",
  "pallet-divination-privacy",
  "pallet-timestamp",
- "parity-scale-codec",
- "scale-info",
- "sp-api 40.0.0",
- "sp-core 39.0.0",
- "sp-io 44.0.0",
- "sp-runtime 45.0.0",
- "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "pallet-livestream"
-version = "0.1.0"
-dependencies = [
- "frame-benchmarking 45.0.1",
- "frame-support 45.1.0",
- "frame-system 45.0.0",
- "log",
- "pallet-balances",
- "pallet-trading-common",
  "parity-scale-codec",
  "scale-info",
  "sp-api 40.0.0",
@@ -7705,6 +7929,7 @@ dependencies = [
  "frame-benchmarking 45.0.1",
  "frame-support 45.1.0",
  "frame-system 45.0.0",
+ "log",
  "pallet-arbitration",
  "pallet-escrow",
  "pallet-storage-lifecycle",

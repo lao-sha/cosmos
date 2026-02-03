@@ -71,6 +71,7 @@ pub mod pallet {
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
 	use sp_runtime::SaturatedConversion;
+	use pallet_divination_common::ChartCascadeDeleter;
 
 	pub use crate::types::*;
 
@@ -102,6 +103,10 @@ pub mod pallet {
 			Self::AccountId,
 			BlockNumberFor<Self>,
 		>;
+
+		/// 级联删除器 - 用于删除命盘时级联删除关联的订单数据
+		#[pallet::no_default]
+		type CascadeDeleter: pallet_divination_common::ChartCascadeDeleter<Self::AccountId>;
 
 	}
 
@@ -183,6 +188,13 @@ pub mod pallet {
 		BaziChartDeleted {
 			owner: T::AccountId,
 			chart_id: u64,
+		},
+		/// 八字级联删除完成 [所有者, 八字ID, 删除的订单数, 取消Pin的CID数]
+		BaziChartCascadeDeleted {
+			owner: T::AccountId,
+			chart_id: u64,
+			orders_deleted: u32,
+			cids_unpinned: u32,
 		},
 	}
 
@@ -424,10 +436,25 @@ pub mod pallet {
 				Ok(())
 			})?;
 
+			// 🆕 级联删除关联数据（订单、解读、评价等）并取消 IPFS Pin
+			let cascade_result = T::CascadeDeleter::cascade_delete_for_chart(
+				&who,
+				pallet_divination_common::DivinationType::Bazi,
+				chart_id,
+			)?;
+
 			// 触发事件
 			Self::deposit_event(Event::BaziChartDeleted {
+				owner: who.clone(),
+				chart_id,
+			});
+
+			// 🆕 触发级联删除完成事件
+			Self::deposit_event(Event::BaziChartCascadeDeleted {
 				owner: who,
 				chart_id,
+				orders_deleted: cascade_result.orders_deleted,
+				cids_unpinned: cascade_result.cids_unpinned,
 			});
 
 			Ok(())

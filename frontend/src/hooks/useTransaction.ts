@@ -265,6 +265,35 @@ export function useTransaction() {
     return txResult;
   }, [mnemonic, checkReady, showMessage]);
 
+  const deleteBaziChart = useCallback(async (chartId: number) => {
+    if (!checkReady() || !mnemonic) return { success: false, error: '请先登录' } as TxResult;
+
+    setIsLoading(true);
+    setError(null);
+    setStatus('pending');
+
+    const txResult = await transactionService.deleteBaziChart(
+      mnemonic,
+      chartId,
+      {
+        onStatusChange: setStatus,
+        onSuccess: () => {
+          // 不在这里显示消息，由调用方处理
+        },
+        onError: (err) => {
+          // 不在这里显示消息，由调用方处理
+        },
+      }
+    );
+
+    setResult(txResult);
+    setIsLoading(false);
+    if (!txResult.success) {
+      setError(txResult.error || 'Unknown error');
+    }
+    return txResult;
+  }, [mnemonic, checkReady]);
+
   const createQimenChart = useCallback(async (params: {
     solar_year: number;
     solar_month: number;
@@ -945,6 +974,7 @@ export function useTransaction() {
     createMatchmakingProfile,
     createDivinationOrder,
     createBaziChart,
+    deleteBaziChart,
     createQimenChart,
     createGroup,
     sendGroupMessage,

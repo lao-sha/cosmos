@@ -298,6 +298,26 @@ class TransactionService {
     }
   }
 
+  async deleteBaziChart(
+    mnemonic: string,
+    chartId: number,
+    callbacks?: TxCallbacks
+  ): Promise<TxResult> {
+    try {
+      const api = this.getApi();
+      const keyPair = await this.getKeyPair(mnemonic);
+      
+      const tx = (api.tx as any).bazi.deleteBaziChart(chartId);
+      return await this.signAndSend(tx, keyPair, callbacks);
+    } catch (error: any) {
+      return {
+        success: false,
+        status: 'failed',
+        error: error.message,
+      };
+    }
+  }
+
   async createQimenChart(
     mnemonic: string,
     params: {

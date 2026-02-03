@@ -2,9 +2,10 @@
 # Rust / Cargo
 # =========================
 target/
-Cargo.lock
+# Cargo.lock - 保留用于可重现构建
 **/*.rs.bk
 *.pdb
+*.rlib
 
 # =========================
 # Substrate / Polkadot SDK
@@ -13,10 +14,15 @@ Cargo.lock
 chains/
 *.db
 *.rocksdb
+data/
 
 # Runtime WASM artifacts (generated)
 *.compact.wasm
 *.compact.compressed.wasm
+
+# Substrate node data
+node-data/
+spec/
 
 # Nested git repositories
 pallets/divination/xuanxue/
@@ -65,6 +71,14 @@ backend/node_modules/
 *~
 *.sublime-*
 
+# AI Assistants
+.claude/
+.kiro/
+.windsurf/
+.cursor/
+.aider*
+.continue/
+
 # =========================
 # OS Generated
 # =========================
@@ -88,6 +102,9 @@ desktop.ini
 *.key
 *.crt
 secrets/
+
+# Backend specific env (already has .env.example)
+backend/.env
 
 # =========================
 # Build & Cache
@@ -162,6 +179,37 @@ htmlcov/
 .hypothesis/
 
 # =========================
+# Nix / Flake
+# =========================
+result
+result-*
+.direnv/
+
+# =========================
+# Scripts
+# =========================
+# Test accounts (contains private keys)
+scripts/test-accounts.json
+scripts/test-accounts.txt
+
+# =========================
+# LiveKit Deploy
+# =========================
+backend/livekit-deploy/*.log
+backend/livekit-deploy/data/
+
+# =========================
+# Media Utils
+# =========================
+media-utils/output/
+media-utils/temp/
+
+# =========================
+# OpenClaw
+# =========================
+openclaw/
+
+# =========================
 # Misc
 # =========================
 *.bak
@@ -169,3 +217,13 @@ htmlcov/
 *.temp
 *.orig
 *.backup
+
+# Crash dumps
+crash-*.log
+hs_err_pid*
+
+# Profiling
+*.prof
+*.trace
+perf.data*
+flamegraph.svg

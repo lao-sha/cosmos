@@ -31,7 +31,6 @@ members = [
     "pallets/chat/core",
     "pallets/chat/group",
     "pallets/chat/contacts",
-    "pallets/chat/livestream",
     "pallets/trading/common",
     "pallets/trading/pricing",
     "pallets/trading/credit",
@@ -55,6 +54,20 @@ members = [
     "pallets/meowstar/staking",
     "pallets/meowstar/governance",
     "pallets/meowstar/marketplace",
+# Entity pallets (原 ShareMall，已重构为子模块)
+    "pallets/entity/common",
+    "pallets/entity/registry",
+    "pallets/entity/token",
+    "pallets/entity/governance",
+    "pallets/entity/member",
+    "pallets/entity/commission",
+    "pallets/entity/service",
+    "pallets/entity/transaction",
+    "pallets/entity/market",
+    "pallets/entity/review",
+    "pallets/entity/disclosure",
+    "pallets/entity/kyc",
+    "pallets/entity/sale",
     "media-utils",
     "runtime",
 ]
@@ -87,7 +100,6 @@ pallet-chat-permission = { path = "./pallets/chat/permission", default-features 
 pallet-chat-core = { path = "./pallets/chat/core", default-features = false }
 pallet-chat-group = { path = "./pallets/chat/group", default-features = false }
 pallet-chat-contacts = { path = "./pallets/chat/contacts", default-features = false }
-pallet-livestream = { path = "./pallets/chat/livestream", default-features = false }
 # Trading pallets
 pallet-trading-common = { path = "./pallets/trading/common", default-features = false }
 pallet-trading-pricing = { path = "./pallets/trading/pricing", default-features = false }
@@ -120,6 +132,20 @@ pallet-meowstar-battle = { path = "./pallets/meowstar/battle", default-features 
 pallet-meowstar-staking = { path = "./pallets/meowstar/staking", default-features = false }
 pallet-meowstar-governance = { path = "./pallets/meowstar/governance", default-features = false }
 pallet-meowstar-marketplace = { path = "./pallets/meowstar/marketplace", default-features = false }
+# Entity pallets (原 ShareMall，已重构为子模块)
+pallet-entity-common = { path = "./pallets/entity/common", default-features = false }
+pallet-entity-registry = { path = "./pallets/entity/registry", default-features = false }
+pallet-entity-token = { path = "./pallets/entity/token", default-features = false }
+pallet-entity-governance = { path = "./pallets/entity/governance", default-features = false }
+pallet-entity-member = { path = "./pallets/entity/member", default-features = false }
+pallet-entity-commission = { path = "./pallets/entity/commission", default-features = false }
+pallet-entity-service = { path = "./pallets/entity/service", default-features = false }
+pallet-entity-transaction = { path = "./pallets/entity/transaction", default-features = false }
+pallet-entity-market = { path = "./pallets/entity/market", default-features = false }
+pallet-entity-review = { path = "./pallets/entity/review", default-features = false }
+pallet-entity-disclosure = { path = "./pallets/entity/disclosure", default-features = false }
+pallet-entity-kyc = { path = "./pallets/entity/kyc", default-features = false }
+pallet-entity-sale = { path = "./pallets/entity/sale", default-features = false }
 # Additional dependencies
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 sp-application-crypto = { version = "44.0.0", default-features = false }
@@ -130,6 +156,7 @@ frame-system = { version = "45.0.0", default-features = false }
 futures = { version = "0.3.31" }
 jsonrpsee = { version = "0.24.3" }
 pallet-transaction-payment = { version = "45.0.0", default-features = false }
+pallet-assets = { version = "48.1.0", default-features = false }
 pallet-insecure-randomness-collective-flip = { version = "25.0.0", default-features = false }
 pallet-transaction-payment-rpc = { version = "48.0.0", default-features = false }
 sc-basic-authorship = { version = "0.53.0", default-features = false }

@@ -213,6 +213,25 @@ pub trait ContentRegistry {
     /// 
     /// 用途：查询域对应的SubjectType
     fn get_domain_subject_type(domain: &[u8]) -> Option<SubjectType>;
+
+    /// 函数级详细中文注释：取消注册内容（Unpin）
+    /// 
+    /// 功能：
+    /// 1. 标记 CID 为待删除状态
+    /// 2. OCW 将在后续区块执行物理删除
+    /// 3. 停止后续扣费
+    /// 
+    /// 参数：
+    /// - `domain`: 域名
+    /// - `cid`: IPFS 内容标识符
+    /// 
+    /// 返回：
+    /// - `Ok(())`: 取消注册成功
+    /// - `Err(...)`: 失败原因
+    fn unregister_content(
+        domain: Vec<u8>,
+        cid: Vec<u8>,
+    ) -> DispatchResult;
 }
 
 /// 函数级详细中文注释：CID 锁定管理器接口
@@ -5858,6 +5877,40 @@ impl<T: Config> ContentRegistry for Pallet<T> {
         } else {
             None
         }
+    }
+
+    /// 函数级详细中文注释：取消注册内容（Unpin）
+    /// 
+    /// 功能流程：
+    /// 1. 计算 CID 哈希
+    /// 2. 标记为待删除状态（state=2）
+    /// 3. OCW 将在后续区块执行物理删除
+    fn unregister_content(
+        _domain: Vec<u8>,
+        cid: Vec<u8>,
+    ) -> DispatchResult {
+        // 1. 计算 CID 哈希
+        let cid_hash = <T::Hashing as sp_runtime::traits::Hash>::hash(&cid);
+        
+        // 2. 检查 CID 是否存在
+        if !PinBilling::<T>::contains_key(&cid_hash) {
+            // CID 不存在，直接返回成功（幂等操作）
+            return Ok(());
+        }
+        
+        // 3. 标记为待删除状态
+        let current_block = <frame_system::Pallet<T>>::block_number();
+        if let Some((_, unit_price, _)) = PinBilling::<T>::get(&cid_hash) {
+            PinBilling::<T>::insert(&cid_hash, (current_block, unit_price, 2u8)); // 2=Expired/待删除
+        }
+        
+        // 4. 发送事件
+        Self::deposit_event(Event::MarkedForUnpin {
+            cid_hash,
+            reason: UnpinReason::ManualRequest,
+        });
+        
+        Ok(())
     }
 }
 

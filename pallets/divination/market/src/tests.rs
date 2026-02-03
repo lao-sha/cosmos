@@ -4,6 +4,17 @@ use crate::{mock::*, types::*, Error};
 use frame_support::{assert_noop, assert_ok};
 use pallet_divination_common::{DivinationType, RarityInput};
 
+/// 🆕 创建默认的回答内容元数据（用于测试）
+fn default_content_meta() -> AnswerContentMeta {
+    AnswerContentMeta {
+        text_length: 500,
+        has_images: false,
+        has_media: false,
+        reference_count: 1,
+        structure_type: AnswerStructureType::PlainText,
+    }
+}
+
 // ==================== 提供者测试 ====================
 
 /// 测试提供者注册
@@ -1335,7 +1346,8 @@ fn submit_bounty_answer_works() {
         assert_ok!(DivinationMarket::submit_bounty_answer(
             RuntimeOrigin::signed(2),
             0,
-            b"QmAnswerCid".to_vec()
+            b"QmAnswerCid".to_vec(),
+            default_content_meta()
         ));
 
         // 验证回答已创建
@@ -1386,7 +1398,8 @@ fn cannot_answer_own_bounty() {
             DivinationMarket::submit_bounty_answer(
                 RuntimeOrigin::signed(1), // 悬赏创建者自己
                 0,
-                b"Answer".to_vec()
+                b"Answer".to_vec(),
+                default_content_meta()
             ),
             Error::<Test>::CannotAnswerOwnBounty
         );
@@ -1416,14 +1429,14 @@ fn cannot_answer_twice() {
         assert_ok!(DivinationMarket::submit_bounty_answer(
             RuntimeOrigin::signed(2),
             0,
-            b"Answer1".to_vec()
+            b"Answer1".to_vec(), default_content_meta()
         ));
 
         assert_noop!(
             DivinationMarket::submit_bounty_answer(
                 RuntimeOrigin::signed(2), // 同一用户再次回答
                 0,
-                b"Answer2".to_vec()
+                b"Answer2".to_vec(), default_content_meta()
             ),
             Error::<Test>::AlreadyAnswered
         );
@@ -1453,17 +1466,17 @@ fn bounty_answer_limit_reached() {
         assert_ok!(DivinationMarket::submit_bounty_answer(
             RuntimeOrigin::signed(2),
             0,
-            b"Answer1".to_vec()
+            b"Answer1".to_vec(), default_content_meta()
         ));
 
         assert_ok!(DivinationMarket::submit_bounty_answer(
             RuntimeOrigin::signed(3),
             0,
-            b"Answer2".to_vec()
+            b"Answer2".to_vec(), default_content_meta()
         ));
 
         assert_noop!(
-            DivinationMarket::submit_bounty_answer(RuntimeOrigin::signed(4), 0, b"Answer3".to_vec()),
+            DivinationMarket::submit_bounty_answer(RuntimeOrigin::signed(4), 0, b"Answer3".to_vec(), default_content_meta()),
             Error::<Test>::BountyAnswerLimitReached
         );
     });
@@ -1493,7 +1506,7 @@ fn close_bounty_works() {
         assert_ok!(DivinationMarket::submit_bounty_answer(
             RuntimeOrigin::signed(2),
             0,
-            b"Answer".to_vec()
+            b"Answer".to_vec(), default_content_meta()
         ));
 
         // 关闭悬赏
@@ -1533,7 +1546,7 @@ fn close_bounty_not_enough_answers_fails() {
         assert_ok!(DivinationMarket::submit_bounty_answer(
             RuntimeOrigin::signed(2),
             0,
-            b"Answer".to_vec()
+            b"Answer".to_vec(), default_content_meta()
         ));
 
         assert_noop!(
@@ -1566,7 +1579,7 @@ fn vote_bounty_answer_works() {
         assert_ok!(DivinationMarket::submit_bounty_answer(
             RuntimeOrigin::signed(2),
             0,
-            b"Answer".to_vec()
+            b"Answer".to_vec(), default_content_meta()
         ));
 
         // 投票
@@ -1613,7 +1626,7 @@ fn cannot_vote_twice() {
         assert_ok!(DivinationMarket::submit_bounty_answer(
             RuntimeOrigin::signed(2),
             0,
-            b"Answer".to_vec()
+            b"Answer".to_vec(), default_content_meta()
         ));
 
         assert_ok!(DivinationMarket::vote_bounty_answer(
@@ -1653,17 +1666,17 @@ fn adopt_bounty_answers_works() {
         assert_ok!(DivinationMarket::submit_bounty_answer(
             RuntimeOrigin::signed(2),
             0,
-            b"Answer1".to_vec()
+            b"Answer1".to_vec(), default_content_meta()
         ));
         assert_ok!(DivinationMarket::submit_bounty_answer(
             RuntimeOrigin::signed(3),
             0,
-            b"Answer2".to_vec()
+            b"Answer2".to_vec(), default_content_meta()
         ));
         assert_ok!(DivinationMarket::submit_bounty_answer(
             RuntimeOrigin::signed(4),
             0,
-            b"Answer3".to_vec()
+            b"Answer3".to_vec(), default_content_meta()
         ));
 
         // 采纳答案
@@ -1729,22 +1742,22 @@ fn settle_bounty_works() {
         assert_ok!(DivinationMarket::submit_bounty_answer(
             RuntimeOrigin::signed(2),
             0,
-            b"Answer1".to_vec()
+            b"Answer1".to_vec(), default_content_meta()
         ));
         assert_ok!(DivinationMarket::submit_bounty_answer(
             RuntimeOrigin::signed(3),
             0,
-            b"Answer2".to_vec()
+            b"Answer2".to_vec(), default_content_meta()
         ));
         assert_ok!(DivinationMarket::submit_bounty_answer(
             RuntimeOrigin::signed(4),
             0,
-            b"Answer3".to_vec()
+            b"Answer3".to_vec(), default_content_meta()
         ));
         assert_ok!(DivinationMarket::submit_bounty_answer(
             RuntimeOrigin::signed(5),
             0,
-            b"Answer4".to_vec()
+            b"Answer4".to_vec(), default_content_meta()
         ));
 
         // 采纳答案
@@ -1854,7 +1867,7 @@ fn cancel_bounty_with_answers_fails() {
         assert_ok!(DivinationMarket::submit_bounty_answer(
             RuntimeOrigin::signed(2),
             0,
-            b"Answer".to_vec()
+            b"Answer".to_vec(), default_content_meta()
         ));
 
         assert_noop!(
@@ -1924,7 +1937,7 @@ fn expire_bounty_with_answers_closes() {
         assert_ok!(DivinationMarket::submit_bounty_answer(
             RuntimeOrigin::signed(2),
             0,
-            b"Answer".to_vec()
+            b"Answer".to_vec(), default_content_meta()
         ));
 
         // 设置区块超过 deadline
@@ -1978,7 +1991,7 @@ fn certified_only_bounty_works() {
 
         // 非认证用户回答失败
         assert_noop!(
-            DivinationMarket::submit_bounty_answer(RuntimeOrigin::signed(2), 0, b"Answer".to_vec()),
+            DivinationMarket::submit_bounty_answer(RuntimeOrigin::signed(2), 0, b"Answer".to_vec(), default_content_meta()),
             Error::<Test>::CertifiedProviderOnly
         );
 
@@ -1986,7 +1999,7 @@ fn certified_only_bounty_works() {
         assert_ok!(DivinationMarket::submit_bounty_answer(
             RuntimeOrigin::signed(10),
             0,
-            b"Answer".to_vec()
+            b"Answer".to_vec(), default_content_meta()
         ));
 
         // 验证回答包含认证信息
@@ -2597,3 +2610,222 @@ fn report_type_configurations() {
     assert_eq!(ReportType::Superstition.credit_deduction(), 50);
 }
 */
+
+// ==================== 🆕 强制结算测试 ====================
+
+/// 测试强制结算（按投票数分配）
+#[test]
+fn force_settle_bounty_by_votes_works() {
+    new_test_ext().execute_with(|| {
+        setup_divination_result(1, 1);
+
+        let bounty_amount = 10000u64;
+
+        // 记录初始余额
+        let answerer1_initial = Balances::free_balance(2);
+        let answerer2_initial = Balances::free_balance(3);
+        let answerer3_initial = Balances::free_balance(4);
+        let answerer4_initial = Balances::free_balance(5);
+
+        // 创建悬赏（允许投票）
+        assert_ok!(DivinationMarket::create_bounty(
+            RuntimeOrigin::signed(1),
+            DivinationType::Meihua,
+            1,
+            b"Question".to_vec(),
+            bounty_amount,
+            100, // deadline
+            1,
+            10,
+            None,
+            false,
+            true // allow_voting
+        ));
+
+        // 提交四个回答
+        assert_ok!(DivinationMarket::submit_bounty_answer(
+            RuntimeOrigin::signed(2), 0, b"Answer1".to_vec(), default_content_meta()
+        ));
+        assert_ok!(DivinationMarket::submit_bounty_answer(
+            RuntimeOrigin::signed(3), 0, b"Answer2".to_vec(), default_content_meta()
+        ));
+        assert_ok!(DivinationMarket::submit_bounty_answer(
+            RuntimeOrigin::signed(4), 0, b"Answer3".to_vec(), default_content_meta()
+        ));
+        assert_ok!(DivinationMarket::submit_bounty_answer(
+            RuntimeOrigin::signed(5), 0, b"Answer4".to_vec(), default_content_meta()
+        ));
+
+        // 投票：回答1获得2票，回答2获得1票
+        assert_ok!(DivinationMarket::vote_bounty_answer(RuntimeOrigin::signed(6), 0, 0));
+        assert_ok!(DivinationMarket::vote_bounty_answer(RuntimeOrigin::signed(7), 0, 0));
+        assert_ok!(DivinationMarket::vote_bounty_answer(RuntimeOrigin::signed(8), 0, 1));
+
+        // 过期
+        System::set_block_number(101);
+        assert_ok!(DivinationMarket::expire_bounty(RuntimeOrigin::signed(99), 0));
+
+        // 验证状态为 Closed
+        let bounty = DivinationMarket::bounty_questions(0).unwrap();
+        assert_eq!(bounty.status, BountyStatus::Closed);
+
+        // 宽限期未过，强制结算失败
+        assert_noop!(
+            DivinationMarket::force_settle_bounty(RuntimeOrigin::signed(99), 0),
+            Error::<Test>::GracePeriodNotPassed
+        );
+
+        // 设置区块超过宽限期（closed_at=101, grace_period=1000, 需要 > 1101）
+        System::set_block_number(1102);
+
+        // 强制结算
+        assert_ok!(DivinationMarket::force_settle_bounty(RuntimeOrigin::signed(99), 0));
+
+        // 验证状态
+        let bounty = DivinationMarket::bounty_questions(0).unwrap();
+        assert_eq!(bounty.status, BountyStatus::ForceSettled);
+        assert!(bounty.settled_at.is_some());
+
+        // 验证按投票数分配（排除平台费15%后的可分配金额 = 8500）
+        // distributable_rate = 60 + 15 + 5 + 5 = 85 (8500基点)
+        // 第1名(2票): 8500 * 60 / 85 = 6000，扣除5%联盟佣金后 = 5700
+        // 第2名(1票): 8500 * 15 / 85 = 1500，扣除5%联盟佣金后 = 1425
+        // 第3名(0票): 8500 * 5 / 85 = 500，扣除5%联盟佣金后 = 475
+        // 参与奖(1人): 8500 * 5 / 85 = 500，扣除5%联盟佣金后 = 475
+        assert_eq!(Balances::free_balance(2), answerer1_initial + 5700);
+        assert_eq!(Balances::free_balance(3), answerer2_initial + 1425);
+        assert_eq!(Balances::free_balance(4), answerer3_initial + 475);
+        assert_eq!(Balances::free_balance(5), answerer4_initial + 475);
+
+        // 验证答案状态
+        assert_eq!(DivinationMarket::bounty_answers(0).unwrap().status, BountyAnswerStatus::Adopted);
+        assert_eq!(DivinationMarket::bounty_answers(1).unwrap().status, BountyAnswerStatus::Selected);
+        assert_eq!(DivinationMarket::bounty_answers(2).unwrap().status, BountyAnswerStatus::Selected);
+        assert_eq!(DivinationMarket::bounty_answers(3).unwrap().status, BountyAnswerStatus::Participated);
+    });
+}
+
+/// 测试强制结算（平均分配，无投票）
+#[test]
+fn force_settle_bounty_equal_split_works() {
+    new_test_ext().execute_with(|| {
+        setup_divination_result(1, 1);
+
+        let bounty_amount = 10000u64;
+
+        let answerer1_initial = Balances::free_balance(2);
+        let answerer2_initial = Balances::free_balance(3);
+
+        // 创建悬赏（不允许投票）
+        assert_ok!(DivinationMarket::create_bounty(
+            RuntimeOrigin::signed(1),
+            DivinationType::Meihua,
+            1,
+            b"Question".to_vec(),
+            bounty_amount,
+            100,
+            1,
+            10,
+            None,
+            false,
+            false // no voting
+        ));
+
+        // 提交两个回答
+        assert_ok!(DivinationMarket::submit_bounty_answer(
+            RuntimeOrigin::signed(2), 0, b"Answer1".to_vec(), default_content_meta()
+        ));
+        assert_ok!(DivinationMarket::submit_bounty_answer(
+            RuntimeOrigin::signed(3), 0, b"Answer2".to_vec(), default_content_meta()
+        ));
+
+        // 过期并关闭
+        System::set_block_number(101);
+        assert_ok!(DivinationMarket::expire_bounty(RuntimeOrigin::signed(99), 0));
+
+        // 超过宽限期
+        System::set_block_number(1102);
+
+        // 强制结算
+        assert_ok!(DivinationMarket::force_settle_bounty(RuntimeOrigin::signed(99), 0));
+
+        // 验证状态
+        let bounty = DivinationMarket::bounty_questions(0).unwrap();
+        assert_eq!(bounty.status, BountyStatus::ForceSettled);
+
+        // 验证平均分配（排除平台费15%后 = 8500，2人平分 = 4250，扣除5%联盟佣金后 = 4038）
+        // 4250 - (4250 * 500 / 10000) = 4250 - 212 = 4038
+        assert_eq!(Balances::free_balance(2), answerer1_initial + 4038);
+        assert_eq!(Balances::free_balance(3), answerer2_initial + 4038);
+
+        // 验证答案状态（平均分配时都是 Participated）
+        assert_eq!(DivinationMarket::bounty_answers(0).unwrap().status, BountyAnswerStatus::Participated);
+        assert_eq!(DivinationMarket::bounty_answers(1).unwrap().status, BountyAnswerStatus::Participated);
+    });
+}
+
+/// 测试强制结算状态验证
+#[test]
+fn force_settle_bounty_invalid_status_fails() {
+    new_test_ext().execute_with(|| {
+        setup_divination_result(1, 1);
+
+        // 创建悬赏
+        assert_ok!(DivinationMarket::create_bounty(
+            RuntimeOrigin::signed(1),
+            DivinationType::Meihua,
+            1,
+            b"Question".to_vec(),
+            10000,
+            1000,
+            1,
+            10,
+            None,
+            false,
+            false
+        ));
+
+        // Open 状态不能强制结算
+        assert_noop!(
+            DivinationMarket::force_settle_bounty(RuntimeOrigin::signed(99), 0),
+            Error::<Test>::InvalidBountyStatusForForceSettle
+        );
+    });
+}
+
+/// 测试创建者采纳后不能强制结算
+#[test]
+fn force_settle_after_adopt_fails() {
+    new_test_ext().execute_with(|| {
+        setup_divination_result(1, 1);
+
+        assert_ok!(DivinationMarket::create_bounty(
+            RuntimeOrigin::signed(1),
+            DivinationType::Meihua,
+            1,
+            b"Question".to_vec(),
+            10000,
+            1000,
+            1,
+            10,
+            None,
+            false,
+            false
+        ));
+
+        assert_ok!(DivinationMarket::submit_bounty_answer(
+            RuntimeOrigin::signed(2), 0, b"Answer".to_vec(), default_content_meta()
+        ));
+
+        // 创建者采纳
+        assert_ok!(DivinationMarket::adopt_bounty_answers(
+            RuntimeOrigin::signed(1), 0, 0, None, None
+        ));
+
+        // 已采纳，不能强制结算（状态是 Adopted，不是 Closed）
+        assert_noop!(
+            DivinationMarket::force_settle_bounty(RuntimeOrigin::signed(99), 0),
+            Error::<Test>::InvalidBountyStatusForForceSettle
+        );
+    });
+}

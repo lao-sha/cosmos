@@ -18,7 +18,7 @@ hex = { version = "0.4", default-features = false, features = ["alloc"] }
 frame-benchmarking = { version = "45.0.0", optional = true, workspace = true }
 frame-executive = { version = "45.0.0", workspace = true }
 frame-metadata-hash-extension = { version = "0.13.0", workspace = true }
-frame-support = { version = "45.0.0", features = ["experimental"], workspace = true }
+frame-support = { version = "45.0.0", features = ["experimental", "tuples-96"], workspace = true }
 frame-system-benchmarking = { version = "45.0.0", optional = true, workspace = true }
 frame-system-rpc-runtime-api = { version = "40.0.0", workspace = true }
 frame-system = { version = "45.0.0", workspace = true }
@@ -60,8 +60,6 @@ pallet-chat-common = { workspace = true }
 pallet-chat-permission = { workspace = true }
 pallet-chat-core = { workspace = true }
 pallet-chat-group = { workspace = true }
-# Livestream pallet
-pallet-livestream = { workspace = true }
 # Trading pallets
 pallet-trading-common = { workspace = true }
 pallet-trading-pricing = { workspace = true }
@@ -89,6 +87,22 @@ pallet-meowstar-battle = { workspace = true }
 pallet-meowstar-staking = { workspace = true }
 pallet-meowstar-governance = { workspace = true }
 pallet-meowstar-marketplace = { workspace = true }
+# Assets pallet
+pallet-assets = { workspace = true }
+# Entity pallets (原 ShareMall，已重构)
+pallet-entity-common = { workspace = true }
+pallet-entity-registry = { workspace = true }
+pallet-entity-token = { workspace = true }
+pallet-entity-governance = { workspace = true }
+pallet-entity-member = { workspace = true }
+pallet-entity-commission = { workspace = true }
+pallet-entity-service = { workspace = true }
+pallet-entity-transaction = { workspace = true }
+pallet-entity-market = { workspace = true }
+pallet-entity-review = { workspace = true }
+pallet-entity-disclosure = { workspace = true }
+pallet-entity-kyc = { workspace = true }
+pallet-entity-sale = { workspace = true }
 scale-info = { features = ["derive", "serde"], workspace = true }
 serde_json = { workspace = true, default-features = false, features = ["alloc"] }
 sp-api = { version = "40.0.0", workspace = true }
@@ -159,8 +173,6 @@ std = [
 	"pallet-chat-permission/std",
 	"pallet-chat-core/std",
 	"pallet-chat-group/std",
-	# Livestream pallet std
-	"pallet-livestream/std",
 	# Trading pallets std
 	"pallet-trading-common/std",
 	"pallet-trading-pricing/std",
@@ -185,6 +197,22 @@ std = [
 	"pallet-meowstar-staking/std",
 	"pallet-meowstar-governance/std",
 	"pallet-meowstar-marketplace/std",
+	# Assets pallet std
+	"pallet-assets/std",
+	# Entity pallets std
+	"pallet-entity-common/std",
+	"pallet-entity-registry/std",
+	"pallet-entity-token/std",
+	"pallet-entity-governance/std",
+	"pallet-entity-member/std",
+	"pallet-entity-commission/std",
+	"pallet-entity-service/std",
+	"pallet-entity-transaction/std",
+	"pallet-entity-market/std",
+	"pallet-entity-review/std",
+	"pallet-entity-disclosure/std",
+	"pallet-entity-kyc/std",
+	"pallet-entity-sale/std",
 	"scale-info/std",
 	"serde_json/std",
 	"sp-api/std",
@@ -241,8 +269,6 @@ runtime-benchmarks = [
 	"pallet-chat-permission/runtime-benchmarks",
 	"pallet-chat-core/runtime-benchmarks",
 	"pallet-chat-group/runtime-benchmarks",
-	# Livestream pallet benchmarks
-	"pallet-livestream/runtime-benchmarks",
 	# Trading pallets benchmarks
 	"pallet-trading-pricing/runtime-benchmarks",
 	"pallet-trading-credit/runtime-benchmarks",
@@ -298,8 +324,6 @@ try-runtime = [
 	"pallet-chat-permission/try-runtime",
 	"pallet-chat-core/try-runtime",
 	"pallet-chat-group/try-runtime",
-	# Livestream pallet try-runtime
-	"pallet-livestream/try-runtime",
 	# Trading pallets try-runtime
 	"pallet-trading-pricing/try-runtime",
 	"pallet-trading-credit/try-runtime",

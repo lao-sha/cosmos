@@ -45,6 +45,8 @@ use super::{
 	RuntimeCall, RuntimeEvent, RuntimeFreezeReason, RuntimeHoldReason, RuntimeOrigin, RuntimeTask,
 	System, Timestamp, EXISTENTIAL_DEPOSIT, SLOT_DURATION, VERSION, UNIT, MINUTES, HOURS, DAYS,
 	TechnicalCommittee, ArbitrationCommittee, TreasuryCouncil, ContentCommittee,
+	// Entity types (原 ShareMall)
+	Assets, Escrow, EntityRegistry, EntityService, EntityTransaction, EntityToken,
 };
 
 const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(75);
@@ -292,6 +294,14 @@ impl pallet_divination_market::Config for Runtime {
 	type ChatPermission = pallet_chat_permission::Pallet<Runtime>;
 	// 🆕 订单聊天授权有效期（30天 ≈ 432000 blocks，按6秒/块）
 	type OrderChatDuration = ConstU32<{ 30 * DAYS }>;
+	// 🆕 悬赏强制结算宽限期（7天 ≈ 100800 blocks，按6秒/块）
+	type ForceSettleGracePeriod = ConstU32<{ 7 * DAYS }>;
+	// 🆕 悬赏奖励的联盟佣金比例（500 = 5%）
+	type BountyAffiliateRate = ConstU16<500>;
+	// 🆕 悬赏问答 L1 归档延迟（1年 ≈ 5256000 blocks）
+	type BountyArchiveL1Delay = ConstU32<{ 365 * DAYS }>;
+	// 🆕 悬赏问答 L2 归档延迟（2年 ≈ 10512000 blocks）
+	type BountyArchiveL2Delay = ConstU32<{ 730 * DAYS }>;
 }
 
 // Stub implementation for AffiliateDistributor until pallet_affiliate is integrated
@@ -454,6 +464,7 @@ impl pallet_bazi_chart::Config for Runtime {
 	type MaxDaYunSteps = ConstU32<12>;
 	type MaxCangGan = ConstU32<3>;
 	type PrivacyProvider = BaziPrivacyProvider;
+	type CascadeDeleter = crate::DivinationMarket;
 }
 
 // -------------------- Liuyao (六爻) --------------------
@@ -616,31 +627,6 @@ impl pallet_chat_group::Config for Runtime {
 	type DepositCalculator = pallet_trading_common::DepositCalculatorImpl<TradingPricingProvider, Balance>;
 	type TreasuryAccount = TreasuryAccountId;
 	type GovernanceOrigin = EnsureRoot<AccountId>;
-	type WeightInfo = ();
-}
-
-// -------------------- Livestream (直播间) --------------------
-
-parameter_types! {
-	pub const LivestreamPalletId: frame_support::PalletId = frame_support::PalletId(*b"py/lives");
-}
-
-impl pallet_livestream::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type Currency = Balances;
-	type MaxTitleLen = ConstU32<100>;
-	type MaxDescriptionLen = ConstU32<500>;
-	type MaxCidLen = ConstU32<64>;
-	type MaxGiftNameLen = ConstU32<32>;
-	type MaxCoHostsPerRoom = ConstU32<4>;
-	type PlatformFeePercent = ConstU8<20>; // 20% 平台抽成
-	type MinWithdrawAmount = ConstU128<{ 1 * UNIT }>; // 最小提现 1 COS
-	type RoomBond = ConstU128<{ UNIT / 20 }>; // 创建直播间保证金兜底值 0.05 COS
-	type RoomBondUsd = ConstU64<5_000_000>; // 创建直播间保证金 5 USDT
-	type DepositCalculator = pallet_trading_common::DepositCalculatorImpl<TradingPricingProvider, Balance>;
-	type PalletId = LivestreamPalletId;
-	// 🆕 封禁权限：内容委员会 1/2 多数
-	type GovernanceOrigin = pallet_collective::EnsureProportionAtLeast<AccountId, ContentCollectiveInstance, 1, 2>;
 	type WeightInfo = ();
 }
 
@@ -1071,7 +1057,6 @@ impl pallet_arbitration::pallet::ArbitrationRouter<AccountId, Balance> for Unifi
 					.unwrap_or(false)
 			},
 			// 需要验证对象存在的域
-			d if d == domains::LIVESTREAM => pallet_livestream::LiveRooms::<Runtime>::get(id).is_some(),
 			d if d == domains::MAKER => pallet_trading_maker::MakerApplications::<Runtime>::get(id).is_some(),
 			d if d == domains::NFT_TRADE => pallet_divination_nft::Nfts::<Runtime>::get(id).is_some(),
 			d if d == domains::SWAP => pallet_trading_swap::MakerSwaps::<Runtime>::get(id).is_some(),
@@ -1119,22 +1104,6 @@ impl pallet_arbitration::pallet::ArbitrationRouter<AccountId, Balance> for Unifi
 					Decision::Partial(_) => Ok(()), // 部分胜诉
 				}
 			},
-			d if d == domains::LIVESTREAM => {
-				// 直播间投诉裁决执行：扣除主播保证金
-				match decision {
-					Decision::Refund => {
-						// 投诉方胜诉：扣除主播30%保证金赔付投诉方
-						let _ = pallet_livestream::Pallet::<Runtime>::slash_room_bond(id, 3000, None);
-						Ok(())
-					},
-					Decision::Release => Ok(()), // 主播胜诉：不扣除
-					Decision::Partial(bps) => {
-						let slash_bps = (bps / 2) as u16;
-						let _ = pallet_livestream::Pallet::<Runtime>::slash_room_bond(id, slash_bps, None);
-						Ok(())
-					},
-				}
-			},
 			// 其他域暂时无需额外操作，仲裁模块已处理押金分配
 			_ => Ok(())
 		}
@@ -1154,11 +1123,6 @@ impl pallet_arbitration::pallet::ArbitrationRouter<AccountId, Balance> for Unifi
 				} else {
 					Ok(order.taker)
 				}
-			},
-			d if d == domains::LIVESTREAM => {
-				let room = pallet_livestream::LiveRooms::<Runtime>::get(id)
-					.ok_or(DispatchError::Other("RoomNotFound"))?;
-				Ok(room.host)
 			},
 			d if d == domains::DIVINATION => {
 				let order = pallet_divination_market::Orders::<Runtime>::get(id)
@@ -1201,10 +1165,6 @@ impl pallet_arbitration::pallet::ArbitrationRouter<AccountId, Balance> for Unifi
 				let order = pallet_divination_market::Orders::<Runtime>::get(id)
 					.ok_or(DispatchError::Other("OrderNotFound"))?;
 				Ok(order.amount)
-			},
-			d if d == domains::LIVESTREAM => {
-				// 直播间投诉：使用固定金额 10 UNIT
-				Ok(10 * UNIT)
 			},
 			d if d == domains::CHAT_GROUP => {
 				// 群组投诉：使用固定金额 5 UNIT
@@ -1912,3 +1872,278 @@ impl pallet_meowstar_marketplace::Config for Runtime {
 	type MarketWeightInfo = pallet_meowstar_marketplace::weights::SubstrateWeight<Runtime>;
 }
 
+// ============================================================================
+// Assets Configuration (for ShareMall Token)
+// ============================================================================
+
+parameter_types! {
+	/// 创建资产押金: 100 COS
+	pub const AssetDeposit: Balance = 100 * UNIT;
+	/// 账户持有资产押金: 1 COS
+	pub const AssetAccountDeposit: Balance = UNIT;
+	/// 元数据押金基础: 10 COS
+	pub const MetadataDepositBase: Balance = 10 * UNIT;
+	/// 元数据押金每字节: 0.1 COS
+	pub const MetadataDepositPerByte: Balance = UNIT / 10;
+	/// 授权押金: 1 COS
+	pub const ApprovalDeposit: Balance = UNIT;
+	/// 字符串长度限制
+	pub const AssetsStringLimit: u32 = 50;
+}
+
+impl pallet_assets::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Balance = Balance;
+	type AssetId = u64;
+	type AssetIdParameter = codec::Compact<u64>;
+	type Currency = Balances;
+	type CreateOrigin = frame_support::traits::AsEnsureOriginWithArg<frame_system::EnsureSigned<AccountId>>;
+	type ForceOrigin = EnsureRoot<AccountId>;
+	type AssetDeposit = AssetDeposit;
+	type AssetAccountDeposit = AssetAccountDeposit;
+	type MetadataDepositBase = MetadataDepositBase;
+	type MetadataDepositPerByte = MetadataDepositPerByte;
+	type ApprovalDeposit = ApprovalDeposit;
+	type StringLimit = AssetsStringLimit;
+	type Freezer = ();
+	type Extra = ();
+	type CallbackHandle = ();
+	type WeightInfo = pallet_assets::weights::SubstrateWeight<Runtime>;
+	type RemoveItemsLimit = ConstU32<1000>;
+	type ReserveData = ();
+	type Holder = ();
+	#[cfg(feature = "runtime-benchmarks")]
+	type BenchmarkHelper = ();
+}
+
+// ============================================================================
+// Entity Configuration (原 ShareMall，已重构)
+// ============================================================================
+
+parameter_types! {
+	/// 最低实体保证金: 100 COS
+	pub const EntityMinDeposit: Balance = 100 * UNIT;
+	/// 平台费率: 2% (200 基点)
+	pub const EntityPlatformFeeRate: u16 = 200;
+	/// 发货超时: 约 3 天 (假设 6 秒一个块)
+	pub const EntityShipTimeout: BlockNumber = 43200;
+	/// 确认收货超时: 约 7 天
+	pub const EntityConfirmTimeout: BlockNumber = 100800;
+	/// 实体代币 ID 偏移量
+	pub const EntityTokenOffset: u64 = 1_000_000;
+	/// 投票期: 7 天
+	pub const GovernanceVotingPeriod: BlockNumber = 100800;
+	/// 执行延迟: 2 天
+	pub const GovernanceExecutionDelay: BlockNumber = 28800;
+	/// 通过阈值: 50%
+	pub const GovernancePassThreshold: u8 = 50;
+	/// 法定人数: 10%
+	pub const GovernanceQuorumThreshold: u8 = 10;
+	/// 创建提案所需最低代币持有比例: 1%
+	pub const GovernanceMinProposalThreshold: u16 = 100;
+}
+
+/// 平台账户
+pub struct EntityPlatformAccount;
+impl frame_support::traits::Get<AccountId> for EntityPlatformAccount {
+	fn get() -> AccountId {
+		frame_support::PalletId(*b"entity//").into_account_truncating()
+	}
+}
+
+impl pallet_entity_registry::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type MaxShopNameLength = ConstU32<64>;
+	type MaxCidLength = ConstU32<64>;
+	type GovernanceOrigin = EnsureRoot<AccountId>;
+	type PricingProvider = EntityPricingProvider;
+	type InitialFundUsdt = ConstU64<50_000_000>;  // 50 USDT
+	type MinInitialFundCos = EntityMinDeposit;
+	type MaxInitialFundCos = ConstU128<{ 1000 * UNIT }>;
+	type MinOperatingBalance = ConstU128<{ UNIT / 10 }>;
+	type FundWarningThreshold = ConstU128<{ UNIT }>;
+	type MaxAdmins = ConstU32<10>;
+}
+
+impl pallet_entity_service::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type ShopProvider = EntityRegistry;
+	type PricingProvider = EntityPricingProvider;
+	type MaxProductsPerShop = ConstU32<1000>;
+	type MaxCidLength = ConstU32<64>;
+	type ProductDepositUsdt = ConstU64<1_000_000>;  // 1 USDT
+	type MinProductDepositCos = ConstU128<{ UNIT / 100 }>;
+	type MaxProductDepositCos = ConstU128<{ 10 * UNIT }>;
+}
+
+impl pallet_entity_transaction::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type Escrow = Escrow;
+	type ShopProvider = EntityRegistry;
+	type ProductProvider = EntityService;
+	type ShopToken = EntityToken;
+	type PlatformAccount = EntityPlatformAccount;
+	type PlatformFeeRate = EntityPlatformFeeRate;
+	type ShipTimeout = EntityShipTimeout;
+	type ConfirmTimeout = EntityConfirmTimeout;
+	type ServiceConfirmTimeout = ConstU32<{ 7 * 24 * 600 }>;  // 7 天
+	type MaxCidLength = ConstU32<64>;
+}
+
+impl pallet_entity_review::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type OrderProvider = EntityTransaction;
+	type ShopProvider = EntityRegistry;
+	type MaxCidLength = ConstU32<64>;
+}
+
+impl pallet_entity_token::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type AssetId = u64;
+	type AssetBalance = Balance;
+	type Assets = Assets;
+	type ShopProvider = EntityRegistry;
+	type ShopTokenOffset = ConstU64<1_000_000>;  // 店铺代币 ID 从 1,000,000 开始
+	type MaxTokenNameLength = ConstU32<64>;
+	type MaxTokenSymbolLength = ConstU32<8>;
+}
+
+// Entity Token Provider 实现
+pub struct EntityTokenProvider;
+impl pallet_entity_governance::pallet::ShopTokenProvider<AccountId, Balance> for EntityTokenProvider {
+	fn token_balance(entity_id: u64, holder: &AccountId) -> Balance {
+		pallet_entity_token::Pallet::<Runtime>::get_balance(entity_id, holder)
+	}
+	fn total_supply(entity_id: u64) -> Balance {
+		pallet_entity_token::Pallet::<Runtime>::get_total_supply(entity_id)
+	}
+	fn is_enabled(entity_id: u64) -> bool {
+		pallet_entity_token::Pallet::<Runtime>::is_token_enabled(entity_id)
+	}
+}
+
+/// Entity PricingProvider 适配器
+pub struct EntityPricingProvider;
+impl pallet_entity_common::PricingProvider for EntityPricingProvider {
+	fn get_cos_usdt_price() -> u64 {
+		// 调用 TradingPricingProvider 获取 COS/USD 汇率
+		<TradingPricingProvider as pallet_trading_common::PricingProvider<Balance>>::get_cos_to_usd_rate()
+			.map(|rate| rate as u64)
+			.unwrap_or(0)
+	}
+}
+
+/// 使用 Null 实现
+pub type EntityCommissionProvider = pallet_entity_commission::NullCommissionProvider;
+pub type EntityMemberProvider = pallet_entity_commission::NullMemberProvider;
+
+impl pallet_entity_governance::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Balance = Balance;
+	type ShopProvider = EntityRegistry;
+	type TokenProvider = EntityTokenProvider;
+	type CommissionProvider = EntityCommissionProvider;
+	type MemberProvider = EntityMemberProvider;
+	type VotingPeriod = GovernanceVotingPeriod;
+	type ExecutionDelay = GovernanceExecutionDelay;
+	type PassThreshold = GovernancePassThreshold;
+	type QuorumThreshold = GovernanceQuorumThreshold;
+	type MinProposalThreshold = GovernanceMinProposalThreshold;
+	type MaxTitleLength = ConstU32<128>;
+	type MaxCidLength = ConstU32<64>;
+	type MaxActiveProposals = ConstU32<10>;
+	type MaxCommitteeSize = ConstU32<20>;
+}
+
+impl pallet_entity_member::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type ShopProvider = EntityRegistry;
+	type MaxDirectReferrals = ConstU32<1000>;
+	type MaxCustomLevels = ConstU32<10>;
+	type SilverThreshold = ConstU64<100_000_000>;    // 100 USDT
+	type GoldThreshold = ConstU64<500_000_000>;      // 500 USDT
+	type PlatinumThreshold = ConstU64<2000_000_000>; // 2000 USDT
+	type DiamondThreshold = ConstU64<10000_000_000>; // 10000 USDT
+	type MaxUpgradeRules = ConstU32<50>;
+	type MaxUpgradeHistory = ConstU32<100>;
+}
+
+impl pallet_entity_commission::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type ShopProvider = EntityRegistry;
+	type MemberProvider = EntityMemberProvider;
+	type MaxCommissionRecordsPerOrder = ConstU32<20>;
+	type MaxSingleLineLength = ConstU32<50>;
+	type MaxMultiLevels = ConstU32<15>;
+	type MaxCustomLevels = ConstU32<10>;
+}
+
+impl pallet_entity_market::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type Balance = Balance;
+	type TokenBalance = Balance;
+	type ShopProvider = EntityRegistry;
+	type TokenProvider = EntityToken;
+	type DefaultOrderTTL = ConstU32<{ 7 * 24 * 600 }>;  // 7 天
+	type MaxActiveOrdersPerUser = ConstU32<100>;
+	type DefaultFeeRate = ConstU16<30>;  // 0.3%
+	type DefaultUsdtTimeout = ConstU32<{ 2 * 600 }>;  // 2 小时
+	type BlocksPerHour = ConstU32<600>;
+	type BlocksPerDay = ConstU32<{ 24 * 600 }>;
+	type BlocksPerWeek = ConstU32<{ 7 * 24 * 600 }>;
+	type CircuitBreakerDuration = ConstU32<600>;  // 1 小时
+}
+
+// ============================================================================
+// Entity Pallets Config (Phase 6-8 新模块)
+// ============================================================================
+
+parameter_types! {
+	// KYC 有效期
+	pub const BasicKycValidity: BlockNumber = 525600;      // ~1 年
+	pub const StandardKycValidity: BlockNumber = 262800;   // ~6 个月
+	pub const EnhancedKycValidity: BlockNumber = 525600;   // ~1 年
+	// 披露间隔
+	pub const BasicDisclosureInterval: BlockNumber = 5256000;    // ~1 年
+	pub const StandardDisclosureInterval: BlockNumber = 1314000; // ~3 个月
+	pub const EnhancedDisclosureInterval: BlockNumber = 438000;  // ~1 个月
+}
+
+impl pallet_entity_disclosure::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type EntityProvider = EntityRegistry;
+	type MaxCidLength = ConstU32<64>;
+	type MaxInsiders = ConstU32<50>;
+	type MaxDisclosureHistory = ConstU32<100>;
+	type BasicDisclosureInterval = BasicDisclosureInterval;
+	type StandardDisclosureInterval = StandardDisclosureInterval;
+	type EnhancedDisclosureInterval = EnhancedDisclosureInterval;
+	type MajorHolderThreshold = ConstU16<500>; // 5%
+}
+
+impl pallet_entity_kyc::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type MaxCidLength = ConstU32<64>;
+	type MaxProviderNameLength = ConstU32<64>;
+	type MaxProviders = ConstU32<20>;
+	type BasicKycValidity = BasicKycValidity;
+	type StandardKycValidity = StandardKycValidity;
+	type EnhancedKycValidity = EnhancedKycValidity;
+	type AdminOrigin = EnsureRoot<AccountId>;
+}
+
+impl pallet_entity_sale::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Balance = Balance;
+	type AssetId = u64;
+	type MaxPaymentOptions = ConstU32<5>;
+	type MaxWhitelistSize = ConstU32<1000>;
+	type MaxRoundsHistory = ConstU32<50>;
+	type MaxSubscriptionsPerRound = ConstU32<10000>;
+}

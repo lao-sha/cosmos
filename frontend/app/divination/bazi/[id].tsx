@@ -1,3 +1,4 @@
+import { useTransaction } from '@/src/hooks/useTransaction';
 import { chainService, FullBaziChartForApi } from '@/src/services/chain';
 import { useAuthStore } from '@/src/stores/auth';
 import { useChainStore } from '@/src/stores/chain';
@@ -5,6 +6,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,12 +20,56 @@ export default function BaziDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { isLoggedIn } = useAuthStore();
   const { isConnected } = useChainStore();
+  const { deleteBaziChart, isLoading: isTxLoading, status: txStatus } = useTransaction();
 
   const [loading, setLoading] = useState(true);
   const [chartData, setChartData] = useState<FullBaziChartForApi | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const chartId = parseInt(id || '0');
+
+  // 显示提示
+  const showAlert = (title: string, message: string, onConfirm?: () => void) => {
+    if (Platform.OS === 'web') {
+      if (onConfirm) {
+        if (window.confirm(`${title}\n${message}`)) {
+          onConfirm();
+        }
+      } else {
+        window.alert(`${title}\n${message}`);
+      }
+    } else {
+      if (onConfirm) {
+        Alert.alert(title, message, [
+          { text: '取消', style: 'cancel' },
+          { text: '确定', onPress: onConfirm, style: 'destructive' },
+        ]);
+      } else {
+        Alert.alert(title, message);
+      }
+    }
+  };
+
+  // 删除命盘
+  const handleDelete = () => {
+    showAlert('确认删除', '删除后无法恢复，确定要删除这个命盘吗？', async () => {
+      setDeleting(true);
+      try {
+        const result = await deleteBaziChart(chartId);
+        if (result.success) {
+          showAlert('成功', '命盘已删除');
+          router.back();
+        } else {
+          showAlert('删除失败', result.error || '请稍后重试');
+        }
+      } catch (e: any) {
+        showAlert('删除失败', e.message || '请稍后重试');
+      } finally {
+        setDeleting(false);
+      }
+    });
+  };
 
   // 获取命盘详情
   const fetchChartDetail = useCallback(async () => {
@@ -99,7 +146,13 @@ export default function BaziDetailScreen() {
           <Text style={styles.backText}>‹ 返回</Text>
         </Pressable>
         <Text style={styles.headerTitle}>八字命盘 #{chartId}</Text>
-        <View style={styles.headerRight} />
+        <Pressable 
+          style={[styles.deleteButton, deleting && styles.buttonDisabled]} 
+          onPress={handleDelete}
+          disabled={deleting}
+        >
+          <Text style={styles.deleteButtonText}>{deleting ? '删除中...' : '🗑️ 删除'}</Text>
+        </Pressable>
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
@@ -332,6 +385,20 @@ const styles = StyleSheet.create({
   },
   headerRight: {
     width: 50,
+  },
+  deleteButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#fee2e2',
+  },
+  deleteButtonText: {
+    fontSize: 13,
+    color: '#dc2626',
+    fontWeight: '500',
+  },
+  buttonDisabled: {
+    opacity: 0.5,
   },
   loadingContainer: {
     flex: 1,
