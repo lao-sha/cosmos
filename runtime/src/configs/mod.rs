@@ -196,6 +196,49 @@ impl pallet_affiliate::UserFundingProvider<AccountId> for StorageUserFundingProv
 }
 
 // ============================================================================
+// 随机数生成器
+// ============================================================================
+
+/// 安全随机数生成器 - 基于 Collective Coin Flipping 机制
+/// 
+/// 原理：
+/// - 结合多个历史区块哈希（81个区块，对应九宫格 9x9）
+/// - 混合当前区块信息和用户提供的 subject
+/// - 使用 blake2_256 进行哈希混合
+pub struct CollectiveFlipRandomness;
+
+impl frame_support::traits::Randomness<Hash, BlockNumber> for CollectiveFlipRandomness {
+	fn random(subject: &[u8]) -> (Hash, BlockNumber) {
+		let block_number = System::block_number();
+		
+		// 收集最近 81 个区块的哈希
+		let mut combined_entropy = alloc::vec::Vec::with_capacity(81 * 32 + subject.len() + 8);
+		
+		// 添加 subject 作为熵源
+		combined_entropy.extend_from_slice(subject);
+		
+		// 添加当前区块号
+		combined_entropy.extend_from_slice(&block_number.to_le_bytes());
+		
+		// 收集历史区块哈希
+		let blocks_to_collect = core::cmp::min(block_number.saturating_sub(1), 81);
+		for i in 1..=blocks_to_collect {
+			let hash = System::block_hash(block_number.saturating_sub(i as u32));
+			combined_entropy.extend_from_slice(hash.as_ref());
+		}
+		
+		// 添加父区块哈希作为额外熵源
+		let parent_hash = System::parent_hash();
+		combined_entropy.extend_from_slice(parent_hash.as_ref());
+		
+		// 使用 blake2_256 生成最终随机值
+		let final_hash = sp_core::hashing::blake2_256(&combined_entropy);
+		
+		(Hash::from_slice(&final_hash), block_number)
+	}
+}
+
+// ============================================================================
 // Chat Pallets Configuration
 // ============================================================================
 

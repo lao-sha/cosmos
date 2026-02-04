@@ -258,12 +258,12 @@ pub enum PersonalitySource {
 }
 
 // ============================================================================
-// 八字性格特征（与 pallet-bazi-chart 对应）
+// 八字性格特征（本地定义）
 // ============================================================================
 
-/// 八字性格特征（与 pallet_bazi_chart::interpretation::XingGeTrait 对应）
+/// 八字性格特征
 /// 
-/// 用于存储从八字解盘获取的性格分析结果
+/// 用于存储性格分析结果
 #[derive(
     Clone, Copy, Encode, Decode, DecodeWithMemTracking, TypeInfo, MaxEncodedLen, PartialEq, Eq, Debug, Default,
 )]
