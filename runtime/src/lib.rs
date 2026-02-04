@@ -255,63 +255,6 @@ mod runtime {
 	pub type ContentMembership = pallet_collective_membership<Instance4>;
 
 	// ============================================================================
-	// Divination Pallets
-	// ============================================================================
-
-	// 基础模块
-	#[runtime::pallet_index(10)]
-	pub type Almanac = pallet_almanac;
-
-	#[runtime::pallet_index(11)]
-	pub type Privacy = pallet_divination_privacy;
-
-	#[runtime::pallet_index(15)]
-	pub type TeePrivacy = pallet_tee_privacy;
-
-	#[runtime::pallet_index(16)]
-	pub type DivinationOcwTee = pallet_divination_ocw_tee;
-
-	// 服务模块
-	#[runtime::pallet_index(12)]
-	pub type DivinationAi = pallet_divination_ai;
-
-	#[runtime::pallet_index(13)]
-	pub type DivinationMarket = pallet_divination_market;
-
-	#[runtime::pallet_index(14)]
-	pub type DivinationNft = pallet_divination_nft;
-
-	// 占卜模块 - 中华术数
-	#[runtime::pallet_index(20)]
-	pub type Meihua = pallet_meihua;
-
-	#[runtime::pallet_index(21)]
-	pub type Bazi = pallet_bazi_chart;
-
-	#[runtime::pallet_index(22)]
-	pub type Liuyao = pallet_liuyao;
-
-	#[runtime::pallet_index(23)]
-	pub type Qimen = pallet_qimen;
-
-	#[runtime::pallet_index(24)]
-	pub type Ziwei = pallet_ziwei;
-
-	#[runtime::pallet_index(25)]
-	pub type Xiaoliuren = pallet_xiaoliuren;
-
-	#[runtime::pallet_index(26)]
-	pub type Daliuren = pallet_daliuren;
-
-	// 占卜模块 - 西方占卜
-	#[runtime::pallet_index(30)]
-	pub type Tarot = pallet_tarot;
-
-	// 占卜会员模块
-	#[runtime::pallet_index(31)]
-	pub type DivinationMembership = pallet_divination_membership;
-
-	// ============================================================================
 	// Chat Pallets
 	// ============================================================================
 

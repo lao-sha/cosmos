@@ -8,23 +8,6 @@ edition = "2021"
 [workspace]
 members = [
     "node",
-    "pallets/divination/common",
-    "pallets/divination/privacy",
-    "pallets/divination/almanac",
-    "pallets/divination/ai",
-    "pallets/divination/market",
-    "pallets/divination/nft",
-    "pallets/divination/meihua",
-    "pallets/divination/bazi",
-    "pallets/divination/liuyao",
-    "pallets/divination/qimen",
-    "pallets/divination/ziwei",
-    "pallets/divination/xiaoliuren",
-    "pallets/divination/daliuren",
-    "pallets/divination/tarot",
-    "pallets/divination/membership",
-    "pallets/divination/tee-privacy",
-    "pallets/divination/ocw-tee",
     "pallets/affiliate",
     "pallets/chat/common",
     "pallets/chat/permission",
@@ -70,25 +53,7 @@ resolver = "2"
 
 [workspace.dependencies]
 cosmos-runtime = { path = "./runtime", default-features = false }
-# Divination pallets
-pallet-divination-common = { path = "./pallets/divination/common", default-features = false }
-pallet-divination-privacy = { path = "./pallets/divination/privacy", default-features = false }
 pallet-affiliate = { path = "./pallets/affiliate", default-features = false }
-pallet-almanac = { path = "./pallets/divination/almanac", default-features = false }
-pallet-divination-ai = { path = "./pallets/divination/ai", default-features = false }
-pallet-divination-market = { path = "./pallets/divination/market", default-features = false }
-pallet-divination-nft = { path = "./pallets/divination/nft", default-features = false }
-pallet-meihua = { path = "./pallets/divination/meihua", default-features = false }
-pallet-bazi-chart = { path = "./pallets/divination/bazi", default-features = false }
-pallet-liuyao = { path = "./pallets/divination/liuyao", default-features = false }
-pallet-qimen = { path = "./pallets/divination/qimen", default-features = false }
-pallet-ziwei = { path = "./pallets/divination/ziwei", default-features = false }
-pallet-xiaoliuren = { path = "./pallets/divination/xiaoliuren", default-features = false }
-pallet-daliuren = { path = "./pallets/divination/daliuren", default-features = false }
-pallet-tarot = { path = "./pallets/divination/tarot", default-features = false }
-pallet-divination-membership = { path = "./pallets/divination/membership", default-features = false }
-pallet-tee-privacy = { path = "./pallets/divination/tee-privacy", default-features = false }
-pallet-divination-ocw-tee = { path = "./pallets/divination/ocw-tee", default-features = false }
 # Chat pallets
 pallet-chat-common = { path = "./pallets/chat/common", default-features = false }
 pallet-chat-permission = { path = "./pallets/chat/permission", default-features = false }

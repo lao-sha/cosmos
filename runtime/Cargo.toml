@@ -34,27 +34,7 @@ pallet-transaction-payment-rpc-runtime-api = { version = "45.0.0", workspace = t
 pallet-transaction-payment = { version = "45.0.0", workspace = true }
 # Contracts pallet
 pallet-contracts = { version = "45.0.1", workspace = true }
-# Divination pallets
-pallet-divination-common = { workspace = true }
-pallet-divination-privacy = { workspace = true }
 pallet-affiliate = { workspace = true }
-pallet-almanac = { workspace = true }
-pallet-divination-ai = { workspace = true }
-pallet-divination-market = { workspace = true }
-pallet-divination-nft = { workspace = true }
-pallet-meihua = { workspace = true }
-pallet-bazi-chart = { workspace = true }
-pallet-liuyao = { workspace = true }
-pallet-qimen = { workspace = true }
-pallet-ziwei = { workspace = true }
-pallet-xiaoliuren = { workspace = true }
-pallet-daliuren = { workspace = true }
-pallet-tarot = { workspace = true }
-pallet-divination-membership = { workspace = true }
-# TEE Privacy pallet
-pallet-tee-privacy = { workspace = true }
-# OCW-TEE pallet
-pallet-divination-ocw-tee = { workspace = true }
 # Chat pallets
 pallet-chat-common = { workspace = true }
 pallet-chat-permission = { workspace = true }
@@ -141,27 +121,7 @@ std = [
 	"pallet-transaction-payment/std",
 	# Contracts pallet std
 	"pallet-contracts/std",
-	# Divination pallets std
-	"pallet-divination-common/std",
-	"pallet-divination-privacy/std",
 	"pallet-affiliate/std",
-	"pallet-almanac/std",
-	"pallet-divination-ai/std",
-	"pallet-divination-market/std",
-	"pallet-divination-nft/std",
-	"pallet-meihua/std",
-	"pallet-bazi-chart/std",
-	"pallet-liuyao/std",
-	"pallet-qimen/std",
-	"pallet-ziwei/std",
-	"pallet-xiaoliuren/std",
-	"pallet-daliuren/std",
-	"pallet-tarot/std",
-	"pallet-divination-membership/std",
-	# TEE Privacy pallet std
-	"pallet-tee-privacy/std",
-	# OCW-TEE pallet std
-	"pallet-divination-ocw-tee/std",
 	# Chat pallets std
 	"pallet-chat-common/std",
 	"pallet-chat-permission/std",
@@ -234,25 +194,6 @@ runtime-benchmarks = [
 	"pallet-transaction-payment/runtime-benchmarks",
 	# Contracts pallet benchmarks
 	"pallet-contracts/runtime-benchmarks",
-	# Divination pallets benchmarks
-	"pallet-divination-privacy/runtime-benchmarks",
-	"pallet-almanac/runtime-benchmarks",
-	"pallet-divination-ai/runtime-benchmarks",
-	"pallet-divination-market/runtime-benchmarks",
-	"pallet-divination-nft/runtime-benchmarks",
-	"pallet-meihua/runtime-benchmarks",
-	"pallet-bazi-chart/runtime-benchmarks",
-	"pallet-liuyao/runtime-benchmarks",
-	"pallet-qimen/runtime-benchmarks",
-	"pallet-ziwei/runtime-benchmarks",
-	"pallet-xiaoliuren/runtime-benchmarks",
-	"pallet-daliuren/runtime-benchmarks",
-	"pallet-tarot/runtime-benchmarks",
-	"pallet-divination-membership/runtime-benchmarks",
-	# TEE Privacy pallet benchmarks
-	"pallet-tee-privacy/runtime-benchmarks",
-	# OCW-TEE pallet benchmarks
-	"pallet-divination-ocw-tee/runtime-benchmarks",
 	# Chat pallets benchmarks
 	"pallet-chat-permission/runtime-benchmarks",
 	"pallet-chat-core/runtime-benchmarks",
@@ -289,25 +230,6 @@ try-runtime = [
 	"pallet-transaction-payment/try-runtime",
 	# Contracts pallet try-runtime
 	"pallet-contracts/try-runtime",
-	# Divination pallets try-runtime
-	"pallet-divination-privacy/try-runtime",
-	"pallet-almanac/try-runtime",
-	"pallet-divination-ai/try-runtime",
-	"pallet-divination-market/try-runtime",
-	"pallet-divination-nft/try-runtime",
-	"pallet-meihua/try-runtime",
-	"pallet-bazi-chart/try-runtime",
-	"pallet-liuyao/try-runtime",
-	"pallet-qimen/try-runtime",
-	"pallet-ziwei/try-runtime",
-	"pallet-xiaoliuren/try-runtime",
-	"pallet-daliuren/try-runtime",
-	"pallet-tarot/try-runtime",
-	"pallet-divination-membership/try-runtime",
-	# TEE Privacy pallet try-runtime
-	"pallet-tee-privacy/try-runtime",
-	# OCW-TEE pallet try-runtime
-	"pallet-divination-ocw-tee/try-runtime",
 	# Chat pallets try-runtime
 	"pallet-chat-permission/try-runtime",
 	"pallet-chat-core/try-runtime",

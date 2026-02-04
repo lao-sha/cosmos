@@ -493,13 +493,13 @@ pub mod pallet {
 // Trait 定义
 // ============================================================================
 
-/// 八字数据提供者 Trait
+/// 八字数据提供者 Trait（存根，divination 模块已移除）
 pub trait BaziDataProvider<AccountId> {
     fn exists(bazi_id: u64) -> bool;
     fn is_owner(account: &AccountId, bazi_id: u64) -> bool;
-    fn get_sizhu_index(bazi_id: u64) -> Option<pallet_bazi_chart::types::SiZhuIndex>;
-    fn get_interpretation(bazi_id: u64) -> Option<pallet_bazi_chart::interpretation::CoreInterpretation>;
-    fn get_personality(bazi_id: u64) -> Option<pallet_bazi_chart::interpretation::CompactXingGe>;
+    fn get_sizhu_index(bazi_id: u64) -> Option<pallet_matchmaking_common::traits::SiZhuIndex>;
+    fn get_interpretation(bazi_id: u64) -> Option<pallet_matchmaking_common::traits::CoreInterpretation>;
+    fn get_personality(bazi_id: u64) -> Option<pallet_matchmaking_common::traits::CompactXingGe>;
 }
 
 // WeightInfo trait 和实现已移至 weights.rs

@@ -24,7 +24,6 @@ log = { workspace = true }
 
 # 本地依赖
 pallet-matchmaking-common = { path = "../common", default-features = false }
-pallet-divination-privacy = { path = "../../divination/privacy", default-features = false }
 pallet-storage-service = { path = "../../storage-service", default-features = false }
 pallet-trading-common = { path = "../../trading/common", default-features = false }
 pallet-affiliate = { path = "../../affiliate", default-features = false }
@@ -47,7 +46,6 @@ std = [
     "sp-core/std",
     "sp-io/std",
     "pallet-matchmaking-common/std",
-    "pallet-divination-privacy/std",
     "pallet-storage-service/std",
     "pallet-trading-common/std",
     "pallet-affiliate/std",

@@ -24,7 +24,6 @@ log = { workspace = true }
 # 本地依赖
 pallet-matchmaking-common = { path = "../common", default-features = false }
 pallet-matchmaking-profile = { path = "../profile", default-features = false }
-pallet-bazi-chart = { path = "../../divination/bazi", default-features = false }
 
 [dev-dependencies]
 sp-io = { workspace = true, features = ["std"] }
@@ -44,7 +43,6 @@ std = [
     "sp-core/std",
     "pallet-matchmaking-common/std",
     "pallet-matchmaking-profile/std",
-    "pallet-bazi-chart/std",
     "log/std",
 ]
 runtime-benchmarks = [

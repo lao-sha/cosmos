@@ -7,8 +7,77 @@
 //! - 天干: 甲(0) 乙(1) 丙(2) 丁(3) 戊(4) 己(5) 庚(6) 辛(7) 壬(8) 癸(9)
 //! - 地支: 子(0) 丑(1) 寅(2) 卯(3) 辰(4) 巳(5) 午(6) 未(7) 申(8) 酉(9) 戌(10) 亥(11)
 
-use pallet_bazi_chart::types::{TianGan, DiZhi, WuXing, GanZhi};
-use pallet_bazi_chart::interpretation::CoreInterpretation;
+// ============================================================================
+// 八字类型存根（divination 模块已移除）
+// ============================================================================
+
+/// 天干
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct TianGan(pub u8);
+
+impl TianGan {
+    pub fn to_wuxing(&self) -> WuXing {
+        match self.0 {
+            0 | 1 => WuXing::Mu,   // 甲乙
+            2 | 3 => WuXing::Huo,  // 丙丁
+            4 | 5 => WuXing::Tu,   // 戊己
+            6 | 7 => WuXing::Jin,  // 庚辛
+            8 | 9 => WuXing::Shui, // 壬癸
+            _ => WuXing::Tu,
+        }
+    }
+}
+
+/// 地支
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct DiZhi(pub u8);
+
+impl DiZhi {
+    pub fn to_wuxing(&self) -> WuXing {
+        match self.0 {
+            0 => WuXing::Shui,  // 子
+            1 => WuXing::Tu,    // 丑
+            2 => WuXing::Mu,    // 寅
+            3 => WuXing::Mu,    // 卯
+            4 => WuXing::Tu,    // 辰
+            5 => WuXing::Huo,   // 巳
+            6 => WuXing::Huo,   // 午
+            7 => WuXing::Tu,    // 未
+            8 => WuXing::Jin,   // 申
+            9 => WuXing::Jin,   // 酉
+            10 => WuXing::Tu,   // 戌
+            11 => WuXing::Shui, // 亥
+            _ => WuXing::Tu,
+        }
+    }
+}
+
+/// 五行
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum WuXing {
+    #[default]
+    Mu,   // 木
+    Huo,  // 火
+    Tu,   // 土
+    Jin,  // 金
+    Shui, // 水
+}
+
+/// 干支
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct GanZhi {
+    pub gan: TianGan,
+    pub zhi: DiZhi,
+}
+
+/// 核心解盘结果存根
+#[derive(Clone, Debug, Default)]
+pub struct CoreInterpretation {
+    pub yong_shen: WuXing,
+    pub xi_shen: WuXing,
+    pub ji_shen: WuXing,
+    pub score: u8,
+}
 
 /// 日柱合婚结果
 #[derive(Clone, Debug, Default)]

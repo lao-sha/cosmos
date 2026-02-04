@@ -161,73 +161,6 @@ impl pallet_sudo::Config for Runtime {
 	type WeightInfo = pallet_sudo::weights::SubstrateWeight<Runtime>;
 }
 
-// ============================================================================
-// Divination Pallets Configuration
-// ============================================================================
-
-// -------------------- Almanac (黄历) --------------------
-
-parameter_types! {
-	pub const MaxBatchSize: u32 = 31;
-	pub const MaxHistoryYears: u32 = 3;
-}
-
-impl pallet_almanac::Config for Runtime {
-	type WeightInfo = ();
-	type MaxBatchSize = MaxBatchSize;
-	type MaxHistoryYears = MaxHistoryYears;
-}
-
-// -------------------- Privacy (隐私授权) --------------------
-
-parameter_types! {
-	pub const MaxEncryptedDataLen: u32 = 4096;
-	pub const MaxEncryptedKeyLen: u32 = 256;
-	pub const MaxGranteesPerRecord: u32 = 100;
-	pub const MaxRecordsPerUser: u32 = 10000;
-	pub const MaxProvidersPerType: u32 = 10000;
-	pub const MaxGrantsPerProvider: u32 = 1000;
-	pub const MaxAuthorizationsPerBounty: u32 = 100;
-}
-
-impl pallet_divination_privacy::Config for Runtime {
-	type MaxEncryptedDataLen = MaxEncryptedDataLen;
-	type MaxEncryptedKeyLen = MaxEncryptedKeyLen;
-	type MaxGranteesPerRecord = MaxGranteesPerRecord;
-	type MaxRecordsPerUser = MaxRecordsPerUser;
-	type MaxProvidersPerType = MaxProvidersPerType;
-	type MaxGrantsPerProvider = MaxGrantsPerProvider;
-	type MaxAuthorizationsPerBounty = MaxAuthorizationsPerBounty;
-	type EventHandler = ();
-	type WeightInfo = ();
-}
-
-// -------------------- TEE Privacy (TEE 隐私计算) --------------------
-
-parameter_types! {
-	/// TEE 节点认证有效期 (约 24 小时)
-	pub const AttestationValidity: u32 = 14400;
-	/// 计算请求超时区块数 (约 10 分钟)
-	pub const TeeRequestTimeout: u32 = 100;
-	/// TEE 节点惩罚比例 (10%)
-	pub const TeeSlashRatio: u32 = 100;
-}
-
-impl pallet_tee_privacy::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type Currency = Balances;
-	type MaxNodes = ConstU32<100>;
-	type MaxPendingRequests = ConstU32<10000>;
-	type AttestationValidity = AttestationValidity;
-	type MaxAllowedMrEnclaves = ConstU32<50>;
-	type RequestTimeout = TeeRequestTimeout;
-	type MinimumStake = ConstU128<{ 100 * UNIT }>;
-	type BaseComputeFee = ConstU128<{ UNIT / 10 }>;
-	type SlashRatio = TeeSlashRatio;
-	type MaxBatchSize = ConstU32<100>;
-	type WeightInfo = pallet_tee_privacy::weights::SubstrateWeight<Runtime>;
-}
-
 // -------------------- 全局系统账户（简化方案：4 个核心账户）--------------------
 
 parameter_types! {
@@ -238,70 +171,6 @@ parameter_types! {
 	// 2. 销毁账户 - 专用于代币销毁，必须独立
 	pub const BurnPalletId: frame_support::PalletId = frame_support::PalletId(*b"py/burn!");
 	pub BurnAccountId: AccountId = BurnPalletId::get().into_account_truncating();
-}
-
-
-// -------------------- AI 解读模块 --------------------
-
-impl pallet_divination_ai::Config for Runtime {
-	type AiCurrency = Balances;
-	type DivinationProvider = pallet_divination_common::NullDivinationProvider;
-	type ContentRegistry = pallet_storage_service::Pallet<Runtime>;
-	type BaseInterpretationFee = ConstU128<{ 1 * UNIT }>;
-	type MinOracleStake = ConstU128<{ 10 * UNIT }>;
-	type DisputeDeposit = ConstU128<{ UNIT / 2 }>;
-	type DisputeDepositUsd = ConstU64<1_000_000>; // 1 USDT
-	type DepositCalculator = pallet_trading_common::DepositCalculatorImpl<TradingPricingProvider, Balance>;
-	type RequestTimeout = ConstU32<{ 10 * MINUTES }>;
-	type ProcessingTimeout = ConstU32<{ 5 * MINUTES }>;
-	type DisputePeriod = ConstU32<{ 1 * HOURS }>;
-	type MaxCidLength = ConstU32<128>;
-	type MaxOracles = ConstU32<100>;
-	type TreasuryAccount = TreasuryAccountId;
-	type ArbitratorOrigin = frame_system::EnsureRoot<AccountId>;
-	type GovernanceOrigin = frame_system::EnsureRoot<AccountId>;
-}
-
-// -------------------- Market (服务市场) --------------------
-
-impl pallet_divination_market::Config for Runtime {
-	type Currency = Balances;
-	type DivinationProvider = pallet_divination_common::NullDivinationProvider;
-	type ContentRegistry = pallet_storage_service::Pallet<Runtime>;
-	type MinDeposit = ConstU128<{ 10 * UNIT }>;  // 最低保证金 10 COS（兜底值）
-	type MinDepositUsd = ConstU64<100_000_000>;  // 最低保证金 100 USDT（精度10^6，使用pricing换算）
-	type Pricing = TradingPricingProvider;  // 定价接口
-	type MinServicePrice = ConstU128<{ UNIT / 10 }>;
-	type MaxServicePrice = ConstU128<{ 100_000_000 * UNIT }>;  // 修复 H-13: 最大服务价格 1亿 COS
-	type OrderTimeout = ConstU32<{ 24 * HOURS }>;
-	type AcceptTimeout = ConstU32<{ 1 * HOURS }>;
-	type ReviewPeriod = ConstU32<{ 7 * DAYS }>;
-	type WithdrawalCooldown = ConstU32<{ 1 * HOURS }>;
-	type MaxNameLength = ConstU32<64>;
-	type MaxBioLength = ConstU32<256>;
-	type MaxDescriptionLength = ConstU32<512>;
-	type MaxCidLength = ConstU32<64>;
-	type MaxPackagesPerProvider = ConstU32<10>;
-	type MaxFollowUpsPerOrder = ConstU32<5>;
-	type PlatformAccount = TreasuryAccountId;
-	type GovernanceOrigin = frame_system::EnsureRoot<AccountId>;
-	type TreasuryAccount = TreasuryAccountId;
-	// 🆕 联盟计酬集成 - Using stub until pallet_affiliate is integrated
-	type AffiliateDistributor = StubAffiliateDistributor;
-	// 🆕 解读修改窗口（2天 ≈ 28800 blocks，按6秒/块）
-	type InterpretationEditWindow = ConstU32<28800>;
-	// 🆕 聊天权限集成（订单创建时自动授权双方聊天）
-	type ChatPermission = pallet_chat_permission::Pallet<Runtime>;
-	// 🆕 订单聊天授权有效期（30天 ≈ 432000 blocks，按6秒/块）
-	type OrderChatDuration = ConstU32<{ 30 * DAYS }>;
-	// 🆕 悬赏强制结算宽限期（7天 ≈ 100800 blocks，按6秒/块）
-	type ForceSettleGracePeriod = ConstU32<{ 7 * DAYS }>;
-	// 🆕 悬赏奖励的联盟佣金比例（500 = 5%）
-	type BountyAffiliateRate = ConstU16<500>;
-	// 🆕 悬赏问答 L1 归档延迟（1年 ≈ 5256000 blocks）
-	type BountyArchiveL1Delay = ConstU32<{ 365 * DAYS }>;
-	// 🆕 悬赏问答 L2 归档延迟（2年 ≈ 10512000 blocks）
-	type BountyArchiveL2Delay = ConstU32<{ 730 * DAYS }>;
 }
 
 // Stub implementation for AffiliateDistributor until pallet_affiliate is integrated
@@ -324,237 +193,6 @@ impl pallet_affiliate::UserFundingProvider<AccountId> for StorageUserFundingProv
 	fn derive_user_funding_account(user: &AccountId) -> AccountId {
 		pallet_storage_service::Pallet::<Runtime>::derive_user_funding_account(user)
 	}
-}
-
-// -------------------- NFT 模块 --------------------
-
-impl pallet_divination_nft::Config for Runtime {
-	type NftCurrency = Balances;
-	type DivinationProvider = pallet_divination_common::NullDivinationProvider;
-	type ContentRegistry = pallet_storage_service::Pallet<Runtime>;
-	type MaxNameLength = ConstU32<64>;
-	type MaxCidLength = ConstU32<128>;
-	type MaxCollectionsPerUser = ConstU32<50>;
-	type MaxNftsPerCollection = ConstU32<1000>;
-	type MaxOffersPerNft = ConstU32<100>;
-	type BaseMintFee = ConstU128<UNIT>;
-	type PlatformFeeRate = ConstU16<250>; // 2.5%
-	type MaxRoyaltyRate = ConstU16<2500>; // 25%
-	type OfferValidityPeriod = ConstU32<{ 7 * DAYS }>;
-	type PlatformAccount = TreasuryAccountId;
-	type GovernanceOrigin = frame_system::EnsureRoot<AccountId>;
-}
-
-// -------------------- Meihua (梅花易数) --------------------
-
-/// 安全随机数生成器 - 基于 Collective Coin Flipping 机制
-/// 
-/// 原理：
-/// - 结合多个历史区块哈希（81个区块，对应九宫格 9x9）
-/// - 混合当前区块信息和用户提供的 subject
-/// - 使用 blake2_256 进行哈希混合
-/// 
-/// 安全性：
-/// - 单个验证者无法预测或操控结果
-/// - 需要控制连续 81 个区块才能完全操控（在 Aura 共识下极难实现）
-/// - 适用于占卜、抽签等非金融高价值场景
-/// 
-/// 注意：对于需要更高安全性的场景（如大额抽奖），建议使用 VRF 或 Commit-Reveal 机制
-pub struct CollectiveFlipRandomness;
-
-impl frame_support::traits::Randomness<Hash, BlockNumber> for CollectiveFlipRandomness {
-	fn random(subject: &[u8]) -> (Hash, BlockNumber) {
-		let block_number = System::block_number();
-		
-		// 收集最近 81 个区块的哈希（九宫格 9x9，占卜意义）
-		// 如果区块数不足，则使用可用的区块
-		let mut combined_entropy = alloc::vec::Vec::with_capacity(81 * 32 + subject.len() + 8);
-		
-		// 添加 subject 作为熵源
-		combined_entropy.extend_from_slice(subject);
-		
-		// 添加当前区块号
-		combined_entropy.extend_from_slice(&block_number.to_le_bytes());
-		
-		// 收集历史区块哈希
-		let blocks_to_collect = core::cmp::min(block_number.saturating_sub(1), 81);
-		for i in 1..=blocks_to_collect {
-			let hash = System::block_hash(block_number.saturating_sub(i as u32));
-			combined_entropy.extend_from_slice(hash.as_ref());
-		}
-		
-		// 添加父区块哈希作为额外熵源
-		let parent_hash = System::parent_hash();
-		combined_entropy.extend_from_slice(parent_hash.as_ref());
-		
-		// 使用 blake2_256 生成最终随机值
-		let final_hash = sp_core::hashing::blake2_256(&combined_entropy);
-		
-		(Hash::from_slice(&final_hash), block_number)
-	}
-}
-
-impl pallet_meihua::Config for Runtime {
-	type Currency = Balances;
-	type Randomness = CollectiveFlipRandomness;
-	type MaxUserHexagrams = ConstU32<1000>;
-	type MaxPublicHexagrams = ConstU32<10000>;
-	type DailyFreeDivinations = ConstU32<3>;
-	type MaxDailyDivinations = ConstU32<100>;
-	type AiInterpretationFee = ConstU128<UNIT>;
-	type TreasuryAccount = TreasuryAccountId;
-	type AiOracleOrigin = frame_system::EnsureRoot<AccountId>;
-}
-
-// -------------------- Bazi (八字) --------------------
-
-// Temporary placeholder for PrivacyProvider until full integration is complete
-pub struct BaziPrivacyProvider;
-
-impl pallet_divination_privacy::traits::EncryptedRecordManager<AccountId, BlockNumber> for BaziPrivacyProvider {
-	fn create_record(
-		_owner: &AccountId,
-		_divination_type: pallet_divination_common::DivinationType,
-		_result_id: u64,
-		_privacy_mode: pallet_divination_privacy::types::PrivacyMode,
-		_encrypted_data: alloc::vec::Vec<u8>,
-		_nonce: [u8; 24],
-		_auth_tag: [u8; 16],
-		_data_hash: [u8; 32],
-		_owner_encrypted_key: alloc::vec::Vec<u8>,
-	) -> frame_support::dispatch::DispatchResult {
-		Ok(())
-	}
-
-	fn delete_record(
-		_owner: &AccountId,
-		_divination_type: pallet_divination_common::DivinationType,
-		_result_id: u64,
-	) -> frame_support::dispatch::DispatchResult {
-		Ok(())
-	}
-
-	fn grant_access(
-		_grantor: &AccountId,
-		_divination_type: pallet_divination_common::DivinationType,
-		_result_id: u64,
-		_grantee: &AccountId,
-		_encrypted_key: alloc::vec::Vec<u8>,
-		_role: pallet_divination_privacy::types::AccessRole,
-		_scope: pallet_divination_privacy::types::AccessScope,
-		_expires_at: BlockNumber,
-		_bounty_id: Option<u64>,
-	) -> frame_support::dispatch::DispatchResult {
-		Ok(())
-	}
-
-	fn revoke_access(
-		_grantor: &AccountId,
-		_divination_type: pallet_divination_common::DivinationType,
-		_result_id: u64,
-		_grantee: &AccountId,
-	) -> frame_support::dispatch::DispatchResult {
-		Ok(())
-	}
-}
-
-impl pallet_bazi_chart::Config for Runtime {
-	type WeightInfo = ();
-	type MaxChartsPerAccount = ConstU32<100>;
-	type MaxDaYunSteps = ConstU32<12>;
-	type MaxCangGan = ConstU32<3>;
-	type PrivacyProvider = BaziPrivacyProvider;
-	type CascadeDeleter = crate::DivinationMarket;
-}
-
-// -------------------- Liuyao (六爻) --------------------
-
-impl pallet_liuyao::Config for Runtime {
-	type Currency = Balances;
-	type Randomness = CollectiveFlipRandomness;
-	type MaxUserGuas = ConstU32<1000>;
-	type MaxPublicGuas = ConstU32<10000>;
-	type DailyFreeGuas = ConstU32<3>;
-	type MaxDailyGuas = ConstU32<100>;
-	type MaxCidLen = ConstU32<64>;
-	type MaxEncryptedLen = ConstU32<512>;
-}
-
-// -------------------- Qimen (奇门遁甲) --------------------
-
-impl pallet_qimen::Config for Runtime {
-	type Currency = Balances;
-	type Randomness = CollectiveFlipRandomness;
-	type MaxUserCharts = ConstU32<1000>;
-	type MaxPublicCharts = ConstU32<10000>;
-	type DailyFreeCharts = ConstU32<3>;
-	type MaxDailyCharts = ConstU32<100>;
-	type AiInterpretationFee = ConstU128<UNIT>;
-	type TreasuryAccount = TreasuryAccountId;
-	type AiOracleOrigin = frame_system::EnsureRoot<AccountId>;
-	type MaxCidLen = ConstU32<64>;
-	type MaxEncryptedLen = ConstU32<512>;
-}
-
-// -------------------- Ziwei (紫微斗数) --------------------
-
-impl pallet_ziwei::Config for Runtime {
-	type Currency = Balances;
-	type Randomness = CollectiveFlipRandomness;
-	type MaxUserCharts = ConstU32<1000>;
-	type MaxPublicCharts = ConstU32<10000>;
-	type DailyFreeCharts = ConstU32<3>;
-	type MaxDailyCharts = ConstU32<100>;
-	type AiInterpretationFee = ConstU128<UNIT>;
-	type TreasuryAccount = TreasuryAccountId;
-	type AiOracleOrigin = frame_system::EnsureRoot<AccountId>;
-	type MaxCidLen = ConstU32<64>;
-	type MaxEncryptedLen = ConstU32<512>;
-}
-
-// -------------------- Xiaoliuren (小六壬) --------------------
-
-impl pallet_xiaoliuren::Config for Runtime {
-	type Currency = Balances;
-	type Randomness = CollectiveFlipRandomness;
-	type MaxUserPans = ConstU32<1000>;
-	type MaxPublicPans = ConstU32<10000>;
-	type MaxCidLen = ConstU32<64>;
-	type DailyFreeDivinations = ConstU32<10>;
-	type MaxDailyDivinations = ConstU32<100>;
-	type MaxEncryptedLen = ConstU32<512>;
-	type AiInterpretationFee = ConstU128<UNIT>;
-	type TreasuryAccount = TreasuryAccountId;
-	type AiOracleOrigin = frame_system::EnsureRoot<AccountId>;
-}
-
-// -------------------- Daliuren (大六壬) --------------------
-
-impl pallet_daliuren::Config for Runtime {
-	type Currency = Balances;
-	type Randomness = CollectiveFlipRandomness;
-	type MaxCidLen = ConstU32<64>;
-	type MaxDailyDivinations = ConstU32<50>;
-	type MaxEncryptedLen = ConstU32<512>;
-	type DivinationFee = ConstU128<UNIT>;
-	type AiInterpretationFee = ConstU128<UNIT>;
-	type AiSubmitter = frame_system::EnsureSigned<AccountId>;
-	type WeightInfo = ();
-}
-
-// -------------------- Tarot (塔罗牌) --------------------
-
-impl pallet_tarot::Config for Runtime {
-	type Currency = Balances;
-	type Randomness = CollectiveFlipRandomness;
-	type MaxCardsPerReading = ConstU32<12>;
-	type MaxUserReadings = ConstU32<1000>;
-	type MaxPublicReadings = ConstU32<10000>;
-	type DailyFreeDivinations = ConstU32<3>;
-	type MaxDailyDivinations = ConstU32<100>;
-	type AiInterpretationFee = ConstU128<UNIT>;
-	type TreasuryAccount = TreasuryAccountId;
-	type AiOracleOrigin = frame_system::EnsureRoot<AccountId>;
 }
 
 // ============================================================================
@@ -1085,14 +723,8 @@ impl pallet_arbitration::pallet::ArbitrationRouter<AccountId, Balance> for Unifi
 					.map(|order| order.taker == *who || order.maker == *who)
 					.unwrap_or(false)
 			},
-			d if d == domains::DIVINATION => {
-				pallet_divination_market::Orders::<Runtime>::get(id)
-					.map(|order| order.customer == *who)
-					.unwrap_or(false)
-			},
 			// 需要验证对象存在的域
 			d if d == domains::MAKER => pallet_trading_maker::MakerApplications::<Runtime>::get(id).is_some(),
-			d if d == domains::NFT_TRADE => pallet_divination_nft::Nfts::<Runtime>::get(id).is_some(),
 			d if d == domains::SWAP => pallet_trading_swap::MakerSwaps::<Runtime>::get(id).is_some(),
 			// 其他域：任何人可以投诉
 			_ => true,
@@ -1107,26 +739,6 @@ impl pallet_arbitration::pallet::ArbitrationRouter<AccountId, Balance> for Unifi
 			d if d == domains::OTC_ORDER => {
 				// OTC 裁决执行：正确路由到支持 Partial 的函数
 				pallet_trading_otc::Pallet::<Runtime>::apply_arbitration_decision(id, decision)
-			},
-			d if d == domains::DIVINATION => {
-				// 占卜服务裁决执行：扣除提供者保证金并退款
-				match decision {
-					Decision::Refund => {
-						// 客户胜诉：扣除提供者30%保证金赔付客户，全额退款
-						let _ = pallet_divination_market::Pallet::<Runtime>::slash_provider_deposit(id, 3000, true);
-						pallet_divination_market::Pallet::<Runtime>::refund_customer_on_complaint(id, 10000)
-					},
-					Decision::Release => {
-						// 提供者胜诉：不扣除保证金，不退款
-						Ok(())
-					},
-					Decision::Partial(bps) => {
-						// 部分胜诉：按比例扣除保证金和退款
-						let slash_bps = (bps / 2) as u16; // 扣除比例减半
-						let _ = pallet_divination_market::Pallet::<Runtime>::slash_provider_deposit(id, slash_bps, true);
-						pallet_divination_market::Pallet::<Runtime>::refund_customer_on_complaint(id, bps)
-					},
-				}
 			},
 			d if d == domains::CHAT_GROUP => {
 				// 群组投诉裁决执行
@@ -1158,15 +770,6 @@ impl pallet_arbitration::pallet::ArbitrationRouter<AccountId, Balance> for Unifi
 					Ok(order.taker)
 				}
 			},
-			d if d == domains::DIVINATION => {
-				let order = pallet_divination_market::Orders::<Runtime>::get(id)
-					.ok_or(DispatchError::Other("OrderNotFound"))?;
-				if order.customer == *initiator {
-					Ok(order.provider)
-				} else {
-					Ok(order.customer)
-				}
-			},
 			d if d == domains::CHAT_GROUP => {
 				let group = pallet_chat_group::Groups::<Runtime>::get(id)
 					.ok_or(DispatchError::Other("GroupNotFound"))?;
@@ -1192,11 +795,6 @@ impl pallet_arbitration::pallet::ArbitrationRouter<AccountId, Balance> for Unifi
 		match domain {
 			d if d == domains::OTC_ORDER => {
 				let order = pallet_trading_otc::Orders::<Runtime>::get(id)
-					.ok_or(DispatchError::Other("OrderNotFound"))?;
-				Ok(order.amount)
-			},
-			d if d == domains::DIVINATION => {
-				let order = pallet_divination_market::Orders::<Runtime>::get(id)
 					.ok_or(DispatchError::Other("OrderNotFound"))?;
 				Ok(order.amount)
 			},
@@ -1447,42 +1045,6 @@ impl pallet_collective_membership::Config<ContentMembershipInstance> for Runtime
 }
 
 // ============================================================================
-// Divination Membership Pallet Configuration
-// ============================================================================
-
-parameter_types! {
-	pub const DivinationMembershipPalletId: frame_support::PalletId = frame_support::PalletId(*b"div/memb");
-	pub const RewardPoolAllocation: u32 = 1000; // 10% 分配到奖励池
-	pub const NewAccountCooldown: BlockNumber = 7 * DAYS; // 7天冷却期
-	pub const MinBalanceForRewards: Balance = UNIT; // 最低 1 COS
-	pub const BlocksPerDay: BlockNumber = DAYS; // 每天区块数
-	pub const BlocksPerMonth: BlockNumber = 30 * DAYS; // 每月区块数
-	pub const MaxDisplayNameLength: u32 = 64;
-	pub const MaxEncryptedDataLength: u32 = 1024;
-	pub const MaxRewardHistorySize: u32 = 50;
-}
-
-impl pallet_divination_membership::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type Currency = Balances;
-	type WeightInfo = ();
-	type PalletId = DivinationMembershipPalletId;
-	type TreasuryAccount = TreasuryAccountId;
-	type BurnAccount = BurnAccountId;
-	type UserFundingProvider = StorageUserFundingProvider;
-	type AffiliateDistributor = StubAffiliateDistributor;
-	type RewardPoolAllocation = RewardPoolAllocation;
-	type NewAccountCooldown = NewAccountCooldown;
-	type MinBalanceForRewards = MinBalanceForRewards;
-	type BlocksPerDay = BlocksPerDay;
-	type BlocksPerMonth = BlocksPerMonth;
-	type MaxDisplayNameLength = MaxDisplayNameLength;
-	type MaxEncryptedDataLength = MaxEncryptedDataLength;
-	type MaxRewardHistorySize = MaxRewardHistorySize;
-	type Pricing = TradingPricingProvider;
-}
-
-// ============================================================================
 // Matchmaking Membership Pallet Configuration
 // ============================================================================
 
@@ -1562,121 +1124,6 @@ impl pallet_storage_lifecycle::Config for Runtime {
 	type PurgeDelay = ConstU32<{ 180 * DAYS }>;     // L2后180天可清除
 	type EnablePurge = ConstBool<false>;             // 默认不启用清除
 	type MaxBatchSize = ConstU32<100>;               // 每次最多处理100条
-}
-
-// ============================================================================
-// Divination OCW-TEE Pallet Configuration
-// ============================================================================
-
-impl pallet_divination_ocw_tee::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type OcwInterval = ConstU32<5>;              // 每5个区块处理一次
-	type MaxRetryCount = ConstU8<3>;             // 最大重试3次
-	type MaxRequestsPerBlock = ConstU32<10>;     // 每区块最多处理10个请求
-	type MaxInputDataLen = ConstU32<1024>;       // 最大输入数据1KB
-	type TeeClient = pallet_divination_ocw_tee::NullTeeClient;
-	type IpfsClient = pallet_divination_ocw_tee::NullIpfsClient;
-	type TeeNodeManager = pallet_divination_ocw_tee::NullTeeNodeManager<AccountId>;
-	type TeePrivacy = TeePrivacyIntegrationImpl;
-	type IpfsPinner = pallet_storage_service::Pallet<Runtime>;
-	type ModuleRegistry = pallet_divination_ocw_tee::DefaultModuleRegistry;
-}
-
-/// TEE Privacy 集成实现
-/// 
-/// 通过 pallet-tee-privacy 的存储 getter 实现集成接口
-pub struct TeePrivacyIntegrationImpl;
-
-impl pallet_divination_ocw_tee::TeePrivacyIntegration<AccountId, BlockNumber> for TeePrivacyIntegrationImpl {
-	fn submit_request(
-		_requester: AccountId,
-		_compute_type_id: u8,
-		_input_hash: [u8; 32],
-		_timeout_blocks: u32,
-	) -> Result<u64, sp_runtime::DispatchError> {
-		// 请求提交通过 extrinsic 完成，此处返回下一个 ID
-		Ok(pallet_tee_privacy::Pallet::<Runtime>::next_request_id())
-	}
-
-	fn get_request_status(request_id: u64) -> Option<pallet_divination_ocw_tee::RequestStatus> {
-		pallet_tee_privacy::Pallet::<Runtime>::compute_requests(request_id)
-			.map(|req| match req.status {
-				pallet_tee_privacy::types::RequestStatus::Pending => pallet_divination_ocw_tee::RequestStatus::Pending,
-				pallet_tee_privacy::types::RequestStatus::Processing => pallet_divination_ocw_tee::RequestStatus::Processing,
-				pallet_tee_privacy::types::RequestStatus::Completed => pallet_divination_ocw_tee::RequestStatus::Completed,
-				pallet_tee_privacy::types::RequestStatus::Failed => pallet_divination_ocw_tee::RequestStatus::Failed,
-				pallet_tee_privacy::types::RequestStatus::Timeout => pallet_divination_ocw_tee::RequestStatus::Timeout,
-			})
-	}
-
-	fn get_request(request_id: u64) -> Option<(AccountId, u8, [u8; 32], Option<AccountId>)> {
-		pallet_tee_privacy::Pallet::<Runtime>::compute_requests(request_id)
-			.map(|req| (req.requester, req.compute_type_id, req.input_hash, req.assigned_node))
-	}
-
-	fn get_pending_requests() -> alloc::vec::Vec<u64> {
-		pallet_tee_privacy::Pallet::<Runtime>::pending_requests().into_inner()
-	}
-
-	fn get_available_node() -> Option<AccountId> {
-		// 从已注册的 TEE 节点中选择一个可用的
-		// 简化实现：返回第一个在线节点
-		None // TODO: 实现节点选择逻辑
-	}
-
-	fn get_node_enclave_pubkey(node: &AccountId) -> Option<[u8; 32]> {
-		pallet_tee_privacy::Pallet::<Runtime>::tee_nodes(node)
-			.map(|info| info.enclave_pubkey)
-	}
-
-	fn get_node_endpoint(node: &AccountId) -> Option<alloc::vec::Vec<u8>> {
-		// TeeNode 没有 endpoint 字段，返回空
-		pallet_tee_privacy::Pallet::<Runtime>::tee_nodes(node)
-			.map(|_| alloc::vec::Vec::new())
-	}
-
-	fn assign_node(_request_id: u64, _node: AccountId) -> Result<(), sp_runtime::DispatchError> {
-		// 节点分配在 submit_compute_request 中完成
-		Ok(())
-	}
-
-	fn submit_result(
-		_request_id: u64,
-		_executor: AccountId,
-		_output_hash: [u8; 32],
-		_signature: [u8; 64],
-	) -> Result<(), sp_runtime::DispatchError> {
-		// 结果提交通过 extrinsic 完成
-		Ok(())
-	}
-
-	fn mark_request_failed(
-		_request_id: u64,
-		_reason: pallet_divination_ocw_tee::FailureReason,
-	) -> Result<(), sp_runtime::DispatchError> {
-		// 失败标记通过 extrinsic 完成
-		Ok(())
-	}
-
-	fn verify_enclave_signature(
-		_node: &AccountId,
-		_data: &[u8],
-		_signature: &[u8; 64],
-	) -> bool {
-		// TODO: 实现 SGX 签名验证
-		true
-	}
-
-	fn get_node_stats(node: &AccountId) -> Option<pallet_divination_ocw_tee::NodeStatistics> {
-		// NodeStatistics 是从 pallet-tee-privacy 重新导出的，直接返回
-		pallet_tee_privacy::Pallet::<Runtime>::node_stats(node)
-	}
-
-	fn is_node_active(node: &AccountId) -> bool {
-		pallet_tee_privacy::Pallet::<Runtime>::tee_nodes(node)
-			.map(|info| info.status == pallet_tee_privacy::types::TeeNodeStatus::Active)
-			.unwrap_or(false)
-	}
 }
 
 // ============================================================================

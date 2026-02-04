@@ -4,8 +4,31 @@
 
 use crate::types::*;
 use frame_support::pallet_prelude::*;
-use pallet_bazi_chart::types::SiZhuIndex;
-use pallet_bazi_chart::interpretation::{CoreInterpretation, CompactXingGe};
+
+// ============================================================================
+// 八字相关类型存根（divination 模块已移除）
+// ============================================================================
+
+/// 四柱索引存根
+#[derive(Clone, Copy, Default, codec::Encode, codec::Decode, scale_info::TypeInfo, frame_support::pallet_prelude::MaxEncodedLen, PartialEq, Eq, Debug)]
+pub struct SiZhuIndex {
+    pub year_gan: u8,
+    pub year_zhi: u8,
+    pub month_gan: u8,
+    pub month_zhi: u8,
+    pub day_gan: u8,
+    pub day_zhi: u8,
+    pub hour_gan: u8,
+    pub hour_zhi: u8,
+}
+
+/// 核心解盘结果存根
+#[derive(Clone, Default, codec::Encode, codec::Decode, scale_info::TypeInfo, frame_support::pallet_prelude::MaxEncodedLen, PartialEq, Eq, Debug)]
+pub struct CoreInterpretation;
+
+/// 性格分析存根
+#[derive(Clone, Default, codec::Encode, codec::Decode, scale_info::TypeInfo, frame_support::pallet_prelude::MaxEncodedLen, PartialEq, Eq, Debug)]
+pub struct CompactXingGe;
 
 /// 八字数据提供者 Trait
 pub trait BaziDataProvider<AccountId> {
