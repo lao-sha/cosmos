@@ -26,12 +26,12 @@ members = [
     "pallets/evidence",
     "pallets/arbitration",
     "pallets/storage-lifecycle",
-    "pallets/matchmaking/common",
-    "pallets/matchmaking/profile",
-    "pallets/matchmaking/matching",
-    "pallets/matchmaking/recommendation",
-    "pallets/matchmaking/interaction",
-    "pallets/matchmaking/membership",
+    "pallets/social/matchmaking/common",
+    "pallets/social/matchmaking/profile",
+    "pallets/social/matchmaking/matching",
+    "pallets/social/matchmaking/recommendation",
+    "pallets/social/matchmaking/interaction",
+    "pallets/social/matchmaking/membership",
 # Entity pallets (原 ShareMall，已重构为子模块)
     "pallets/entity/common",
     "pallets/entity/registry",
@@ -80,12 +80,12 @@ pallet-arbitration = { path = "./pallets/arbitration", default-features = false 
 # Storage lifecycle pallet
 pallet-storage-lifecycle = { path = "./pallets/storage-lifecycle", default-features = false }
 # Matchmaking pallets
-pallet-matchmaking-common = { path = "./pallets/matchmaking/common", default-features = false }
-pallet-matchmaking-profile = { path = "./pallets/matchmaking/profile", default-features = false }
-pallet-matchmaking-matching = { path = "./pallets/matchmaking/matching", default-features = false }
-pallet-matchmaking-recommendation = { path = "./pallets/matchmaking/recommendation", default-features = false }
-pallet-matchmaking-interaction = { path = "./pallets/matchmaking/interaction", default-features = false }
-pallet-matchmaking-membership = { path = "./pallets/matchmaking/membership", default-features = false }
+pallet-matchmaking-common = { path = "./pallets/social/matchmaking/common", default-features = false }
+pallet-matchmaking-profile = { path = "./pallets/social/matchmaking/profile", default-features = false }
+pallet-matchmaking-matching = { path = "./pallets/social/matchmaking/matching", default-features = false }
+pallet-matchmaking-recommendation = { path = "./pallets/social/matchmaking/recommendation", default-features = false }
+pallet-matchmaking-interaction = { path = "./pallets/social/matchmaking/interaction", default-features = false }
+pallet-matchmaking-membership = { path = "./pallets/social/matchmaking/membership", default-features = false }
 # Entity pallets (原 ShareMall，已重构为子模块)
 pallet-entity-common = { path = "./pallets/entity/common", default-features = false }
 pallet-entity-registry = { path = "./pallets/entity/registry", default-features = false }

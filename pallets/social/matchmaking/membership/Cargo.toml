@@ -25,8 +25,8 @@ log = { workspace = true }
 # 本地依赖
 pallet-matchmaking-common = { path = "../common", default-features = false }
 pallet-matchmaking-profile = { path = "../profile", default-features = false }
-pallet-trading-common = { path = "../../trading/common", default-features = false }
-pallet-affiliate = { path = "../../affiliate", default-features = false }
+pallet-trading-common = { path = "../../../trading/common", default-features = false }
+pallet-affiliate = { path = "../../../affiliate", default-features = false }
 
 [dev-dependencies]
 sp-io = { workspace = true, features = ["std"] }
