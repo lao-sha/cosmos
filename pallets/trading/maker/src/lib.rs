@@ -84,6 +84,12 @@ pub mod pallet {
             behavior_type: u8,
             evidence_cid: BoundedVec<u8, ConstU32<64>>,
         },
+        /// 🆕 Swap 严重少付（做市商少付 USDT 给用户）
+        SwapSeverelyUnderpaid {
+            swap_id: u64,
+            expected_usdt: u64,   // 预期 USDT（精度 10^6）
+            actual_usdt: u64,     // 实际 USDT（精度 10^6）
+        },
     }
 
     /// 函数级详细中文注释：押金扣除记录
@@ -133,6 +139,7 @@ pub mod pallet {
                 PenaltyType::ArbitrationLoss { .. } => 2,
                 PenaltyType::LowCreditScore { .. } => 3,
                 PenaltyType::MaliciousBehavior { .. } => 4,
+                PenaltyType::SwapSeverelyUnderpaid { .. } => 5,
             };
             let appeal_status = match (record.appealed, record.appeal_result) {
                 (false, _) => 0,
@@ -1590,6 +1597,16 @@ pub mod pallet {
                         _ => 50_000_000,   // 默认：50 USD
                     };
                     (penalty_usd, "恶意行为违规")
+                },
+                PenaltyType::SwapSeverelyUnderpaid { swap_id: _, expected_usdt, actual_usdt } => {
+                    // 🆕 Swap 严重少付：动态最低罚金
+                    // 罚金 = max(差额 × 10%, 预期金额 × 5%)
+                    // 这样小额交易罚金比例合理，大额交易保持威慑力
+                    let shortage = expected_usdt.saturating_sub(*actual_usdt);
+                    let base_penalty = shortage / 10;  // 差额的 10%
+                    let min_penalty = expected_usdt / 20;  // 预期金额的 5%
+                    let penalty_usd = core::cmp::max(base_penalty, min_penalty);
+                    (penalty_usd, "Swap严重少付违约")
                 },
             };
 

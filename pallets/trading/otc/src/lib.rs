@@ -408,25 +408,10 @@ pub mod pallet {
         #[pallet::constant]
         type MinDeposit: Get<BalanceOf<Self>>;
         
-        /// 低风险押金比例（bps，300 = 3%，信用分 50-69）
+        /// 统一押金比例（bps，1000 = 10%）
+        /// 首购用户免押金，其他用户统一此比例
         #[pallet::constant]
-        type DepositRateLow: Get<u16>;
-        
-        /// 中风险押金比例（bps，500 = 5%，信用分 30-49）
-        #[pallet::constant]
-        type DepositRateMedium: Get<u16>;
-        
-        /// 高风险押金比例（bps，1000 = 10%，信用分 < 30）
-        #[pallet::constant]
-        type DepositRateHigh: Get<u16>;
-        
-        /// 免押金信用分阈值（默认 70）
-        #[pallet::constant]
-        type CreditScoreExempt: Get<u16>;
-        
-        /// 免押金最少完成订单数（默认 5）
-        #[pallet::constant]
-        type MinOrdersForExempt: Get<u32>;
+        type DepositRate: Get<u16>;
         
         /// 取消订单押金扣除比例（bps，3000 = 30%）
         #[pallet::constant]
@@ -2310,6 +2295,10 @@ pub mod pallet {
         /// 
         /// ## 返回
         /// - 应缴押金金额（0 表示免押金）
+        /// 
+        /// ## 规则
+        /// - 首购用户：免押金
+        /// - 其他用户：统一 10% 押金
         pub fn calculate_buyer_deposit(
             buyer: &T::AccountId,
             order_amount: BalanceOf<T>,
@@ -2321,45 +2310,12 @@ pub mod pallet {
                 return Zero::zero();
             }
             
-            // 2. 获取买家完成订单数（作为信用评估依据）
-            let completed_orders = BuyerCompletedOrderCount::<T>::get(buyer);
-            
-            // 简化信用分计算：基于完成订单数
-            // 0单 = 30分, 1-2单 = 40分, 3-4单 = 50分, 5-9单 = 60分, 10+单 = 80分
-            let credit_score: u16 = if completed_orders >= 10 {
-                80
-            } else if completed_orders >= 5 {
-                60
-            } else if completed_orders >= 3 {
-                50
-            } else if completed_orders >= 1 {
-                40
-            } else {
-                30
-            };
-            
-            // 3. 信用用户免押金（≥70分 且 ≥5单）
-            if credit_score >= T::CreditScoreExempt::get() 
-                && completed_orders >= T::MinOrdersForExempt::get() 
-            {
-                return Zero::zero();
-            }
-            
-            // 4. 根据信用分计算押金比例（bps）
-            let deposit_rate_bps: u16 = if credit_score >= 50 {
-                T::DepositRateLow::get()      // 3% = 300 bps
-            } else if credit_score >= 30 {
-                T::DepositRateMedium::get()   // 5% = 500 bps
-            } else {
-                T::DepositRateHigh::get()     // 10% = 1000 bps
-            };
-            
-            // 5. 计算押金金额 = order_amount * rate / 10000
-            let deposit_rate_balance: BalanceOf<T> = deposit_rate_bps.into();
+            // 2. 非首购用户：统一 10% 押金
+            let deposit_rate_bps: BalanceOf<T> = T::DepositRate::get().into();
             let divisor: BalanceOf<T> = 10000u32.into();
-            let deposit = order_amount * deposit_rate_balance / divisor;
+            let deposit = order_amount * deposit_rate_bps / divisor;
             
-            // 6. 确保不低于最小押金
+            // 3. 确保不低于最小押金
             let min_deposit = T::MinDeposit::get();
             if deposit < min_deposit {
                 min_deposit

@@ -2,11 +2,11 @@
 
 ## 📋 模块概述
 
-`pallet-pricing` 是 Cosmos 区块链的 **动态定价与市场统计模块**，负责聚合 OTC 和 Bridge 两个市场的交易数据，计算 COS/USD 市场参考价格，并提供完整的市场统计信息。
+`pallet-pricing` 是 Cosmos 区块链的 **动态定价与市场统计模块**，负责聚合 OTC 和 Swap 两个市场的交易数据，计算 COS/USD 市场参考价格，并提供完整的市场统计信息。
 
 ### 核心特性
 
-- ✅ **双市场价格聚合**：同时聚合 OTC 和 Bridge 市场的价格数据
+- ✅ **双市场价格聚合**：同时聚合 OTC 和 Swap 市场的价格数据
 - ✅ **循环缓冲区设计**：最多存储 10,000 笔订单快照，自动滚动更新
 - ✅ **交易量限制**：维护最近累计 1,000,000 COS 的订单统计
 - ✅ **加权平均价格**：基于交易量的加权平均，更准确反映市场情况
@@ -14,10 +14,53 @@
 - ✅ **冷启动保护**：市场初期使用默认价格，达到阈值后自动退出
 - ✅ **价格偏离检查**：防止极端价格订单，保护买卖双方利益
 - ✅ **治理可调参数**：冷启动阈值、默认价格可通过治理调整
+- ✅ **CNY/USDT 汇率**：通过 OCW 每 24 小时自动获取
 
 ---
 
-## 🔑 主要功能
+## � 模块依赖关系
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                         Pricing 模块数据流向                                             │
+├─────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                         │
+│  ┌──────────────────┐                           ┌──────────────────┐                   │
+│  │   pallet-otc     │ ── add_otc_order ────────→│  pallet-pricing  │                   │
+│  │   (OTC 订单)     │                           │                  │                   │
+│  └──────────────────┘                           │  ┌────────────┐  │                   │
+│                                                 │  │ OTC 聚合   │  │                   │
+│  ┌──────────────────┐                           │  └────────────┘  │                   │
+│  │   pallet-swap    │ ── report_swap_order ───→│                  │←── get_cos_to_usd │
+│  │   (COS→USDT)     │                           │  ┌────────────┐  │      _rate()     │
+│  └──────────────────┘                           │  │ Swap 聚合  │  │                   │
+│         ↑                                       │  └────────────┘  │    pallet-swap   │
+│         │                                       │                  │    pallet-otc    │
+│         └────── get_cos_to_usd_rate() ──────────│                  │    pallet-maker  │
+│                                                 └──────────────────┘                   │
+│                                                                                         │
+│  ┌──────────────────┐                                                                  │
+│  │   Exchange API   │ ── OCW ── ocw_submit_exchange_rate ──→ CNY/USDT 汇率存储         │
+│  └──────────────────┘                                                                  │
+│                                                                                         │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### trait 接口 (PricingProvider)
+
+```rust
+pub trait PricingProvider<Balance> {
+    /// 获取 COS/USD 汇率（精度 10^6）
+    fn get_cos_to_usd_rate() -> Option<Balance>;
+    
+    /// 上报 Swap 交易到价格聚合
+    fn report_swap_order(timestamp: u64, price_usdt: u64, cos_qty: u128) -> DispatchResult;
+}
+```
+
+---
+
+## � 主要功能
 
 ### 1. 价格聚合管理
 
@@ -26,26 +69,35 @@
 将 OTC 订单添加到价格聚合数据。
 
 **流程：**
-1. 读取当前 OTC 聚合数据
+1. 输入验证（价格 > 0，数量 > 0，单笔 ≤ 1000万 COS）
 2. 如果累计超过 1,000,000 COS，删除最旧的订单直到满足限制
 3. 添加新订单到循环缓冲区（索引 0-9999）
 4. 更新聚合统计数据（总 COS、总 USDT、订单数）
 5. 发出 `OtcOrderAdded` 事件
 
-**调用者：** `pallet-otc-order`（内部调用）
+**调用者：** `pallet-otc`（内部调用）
 
 **参数：**
 - `timestamp`: 订单时间戳（Unix 毫秒）
 - `price_usdt`: USDT 单价（精度 10^6）
 - `cos_qty`: COS 数量（精度 10^12）
 
-#### 添加 Bridge 兑换（`add_bridge_swap`）
+#### 添加 Swap 兑换（`add_swap_order`）
 
-将 Bridge 兑换添加到价格聚合数据。
+将 Swap 兑换添加到价格聚合数据。
 
-**流程：** 与 `add_otc_order` 相同，但操作 Bridge 相关的存储。
+**流程：** 与 `add_otc_order` 相同，但操作 Swap 相关的存储。
 
-**调用者：** `pallet-bridge`（内部调用）
+**调用者：** `pallet-swap`（通过 `report_swap_order` trait 方法）
+
+**上报时机：**
+| 路径 | 函数 | 是否上报 |
+|------|------|---------|
+| COS→USDT 正常完成 | `do_confirm_verification` | ✅ 上报 `cos_amount` |
+| USDT→COS 正常完成 | `do_confirm_buy_verification` | ✅ 上报 `cos_amount` |
+| 部分付款接受 | `do_accept_partial_payment` | ⚠️ 应上报实际成交量 |
+| 部分付款接受 | `do_user_accept_partial_usdt` | ⚠️ 应上报实际成交量 |
+| 超时/取消/退款 | - | ❌ 不上报（未成交） |
 
 **参数：** 与 `add_otc_order` 相同
 
@@ -595,12 +647,52 @@ while new_total > limit && agg.order_count > 0 {
 
 ---
 
+## 🌐 CNY/USDT 汇率 (Offchain Worker)
+
+### 功能说明
+
+通过 Offchain Worker 每 24 小时自动从外部 API 获取 CNY/USD 汇率。
+
+**API 来源：** `https://api.exchangerate-api.com/v4/latest/USD`
+
+### 汇率存储结构
+
+```rust
+pub struct ExchangeRateData {
+    /// CNY/USD 汇率（精度 10^6，如 7.2345 → 7_234_500）
+    pub cny_rate: u64,
+    /// 更新时间戳（Unix 秒）
+    pub updated_at: u64,
+}
+```
+
+### 汇率验证
+
+- 汇率范围限制：5.0 ~ 10.0 CNY/USD
+- 超出范围的汇率将被拒绝
+
+### 相关事件
+
+```rust
+ExchangeRateUpdated {
+    cny_rate: u64,
+    updated_at: u64,
+    block_number: BlockNumberFor<T>,
+}
+```
+
+---
+
 ## 📚 相关模块
 
-- **pallet-otc-order**: OTC 订单管理（调用 `add_otc_order`）
-- **pallet-bridge**: COS ↔ USDT 桥接（调用 `add_bridge_swap`）
-- **pallet-trading**: 统一接口层
-- **pallet-trading-common**: 公共工具库
+| 模块 | 调用方向 | 接口 |
+|------|---------|------|
+| `pallet-otc` | → Pricing | `add_otc_order()` |
+| `pallet-swap` | → Pricing | `report_swap_order()` |
+| `pallet-swap` | ← Pricing | `get_cos_to_usd_rate()` |
+| `pallet-otc` | ← Pricing | `get_cos_to_usd_rate()` |
+| `pallet-maker` | ← Pricing | `get_cos_to_usd_rate()` |
+| `pallet-common` | 定义 | `PricingProvider` trait |
 
 ---
 
@@ -610,3 +702,22 @@ while new_total > limit && agg.order_count > 0 {
 |------|------|------|
 | v1.0.0 | 2025-11-04 | 初始版本，支持双市场价格聚合和冷启动保护 |
 | v1.1.0 | 2025-11-04 | 添加治理紧急重置冷启动功能（M-3 修复） |
+| v1.2.0 | 2026-01-18 | 添加 CNY/USDT 汇率 OCW 功能 |
+| v1.3.0 | 2026-02-04 | 优化冷启动检查，避免重复触发事件 |
+
+---
+
+## ⚠️ 已知问题 (待修复)
+
+### Swap 模块部分付款路径未上报
+
+**问题描述：**
+- `do_accept_partial_payment` (USDT→COS 部分付款接受) 完成交易但未上报 Pricing
+- `do_user_accept_partial_usdt` (COS→USDT 部分付款接受) 完成交易但未上报 Pricing
+
+**影响：**
+- 价格聚合数据可能缺少部分成交量
+- VWAP 计算可能存在偏差
+
+**建议修复：**
+在上述两个函数中添加 `T::Pricing::report_swap_order()` 调用，按实际成交的 COS 数量上报。

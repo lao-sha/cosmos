@@ -1700,11 +1700,6 @@ dependencies = [
  "pallet-matchmaking-profile",
  "pallet-meihua",
  "pallet-membership",
- "pallet-meowstar-battle",
- "pallet-meowstar-governance",
- "pallet-meowstar-marketplace",
- "pallet-meowstar-pet",
- "pallet-meowstar-staking",
  "pallet-qimen",
  "pallet-referral",
  "pallet-storage-lifecycle",
@@ -7519,85 +7514,6 @@ dependencies = [
  "sp-core 39.0.0",
  "sp-io 44.0.0",
  "sp-runtime 45.0.0",
-]
-
-[[package]]
-name = "pallet-meowstar-battle"
-version = "0.1.0"
-dependencies = [
- "frame-benchmarking 45.0.1",
- "frame-support 45.1.0",
- "frame-system 45.0.0",
- "pallet-meowstar-pet",
- "parity-scale-codec",
- "scale-info",
- "sp-core 39.0.0",
- "sp-io 44.0.0",
- "sp-runtime 45.0.0",
- "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "pallet-meowstar-governance"
-version = "0.1.0"
-dependencies = [
- "frame-benchmarking 45.0.1",
- "frame-support 45.1.0",
- "frame-system 45.0.0",
- "pallet-meowstar-staking",
- "parity-scale-codec",
- "scale-info",
- "sp-core 39.0.0",
- "sp-io 44.0.0",
- "sp-runtime 45.0.0",
- "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "pallet-meowstar-marketplace"
-version = "0.1.0"
-dependencies = [
- "frame-benchmarking 45.0.1",
- "frame-support 45.1.0",
- "frame-system 45.0.0",
- "pallet-meowstar-pet",
- "parity-scale-codec",
- "scale-info",
- "sp-core 39.0.0",
- "sp-io 44.0.0",
- "sp-runtime 45.0.0",
- "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "pallet-meowstar-pet"
-version = "0.1.0"
-dependencies = [
- "frame-benchmarking 45.0.1",
- "frame-support 45.1.0",
- "frame-system 45.0.0",
- "pallet-balances",
- "parity-scale-codec",
- "scale-info",
- "sp-core 39.0.0",
- "sp-io 44.0.0",
- "sp-runtime 45.0.0",
- "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "pallet-meowstar-staking"
-version = "0.1.0"
-dependencies = [
- "frame-benchmarking 45.0.1",
- "frame-support 45.1.0",
- "frame-system 45.0.0",
- "parity-scale-codec",
- "scale-info",
- "sp-core 39.0.0",
- "sp-io 44.0.0",
- "sp-runtime 45.0.0",
- "sp-std 14.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]

@@ -113,6 +113,30 @@ pub trait MakerInterface<AccountId, Balance> {
         }
         Ok(info)
     }
+
+    /// 🆕 罚没做市商保证金（Swap 严重少付场景）
+    ///
+    /// ## 说明
+    /// 当做市商在 COS → USDT 兑换中严重少付（< 50%）时，
+    /// 从其保证金中扣除 10% 作为惩罚，转入国库。
+    ///
+    /// ## 参数
+    /// - `maker_id`: 做市商ID
+    /// - `swap_id`: 兑换订单ID
+    /// - `expected_usdt`: 预期 USDT 金额（精度 10^6）
+    /// - `actual_usdt`: 实际 USDT 金额（精度 10^6）
+    /// - `penalty_rate_bps`: 罚金比例（基点，如 1000 = 10%）
+    ///
+    /// ## 返回
+    /// - `Ok(penalty_id)`: 惩罚记录ID
+    /// - `Err(...)`: 失败原因
+    fn slash_deposit_for_severely_underpaid(
+        maker_id: u64,
+        swap_id: u64,
+        expected_usdt: u64,
+        actual_usdt: u64,
+        penalty_rate_bps: u32,
+    ) -> Result<u64, DispatchError>;
 }
 
 /// 🆕 做市商验证错误类型
@@ -199,6 +223,16 @@ impl<AccountId, Balance> MakerInterface<AccountId, Balance> for () {
     }
     
     fn get_deposit_usd_value(_maker_id: u64) -> Result<u64, DispatchError> {
+        Err(sp_runtime::DispatchError::Other("NotImplemented"))
+    }
+
+    fn slash_deposit_for_severely_underpaid(
+        _maker_id: u64,
+        _swap_id: u64,
+        _expected_usdt: u64,
+        _actual_usdt: u64,
+        _penalty_rate_bps: u32,
+    ) -> Result<u64, DispatchError> {
         Err(sp_runtime::DispatchError::Other("NotImplemented"))
     }
 }

@@ -49,11 +49,6 @@ members = [
     "pallets/matchmaking/recommendation",
     "pallets/matchmaking/interaction",
     "pallets/matchmaking/membership",
-    "pallets/meowstar/pet",
-    "pallets/meowstar/battle",
-    "pallets/meowstar/staking",
-    "pallets/meowstar/governance",
-    "pallets/meowstar/marketplace",
 # Entity pallets (原 ShareMall，已重构为子模块)
     "pallets/entity/common",
     "pallets/entity/registry",
@@ -126,12 +121,6 @@ pallet-matchmaking-matching = { path = "./pallets/matchmaking/matching", default
 pallet-matchmaking-recommendation = { path = "./pallets/matchmaking/recommendation", default-features = false }
 pallet-matchmaking-interaction = { path = "./pallets/matchmaking/interaction", default-features = false }
 pallet-matchmaking-membership = { path = "./pallets/matchmaking/membership", default-features = false }
-# Meowstar Universe pallets
-pallet-meowstar-pet = { path = "./pallets/meowstar/pet", default-features = false }
-pallet-meowstar-battle = { path = "./pallets/meowstar/battle", default-features = false }
-pallet-meowstar-staking = { path = "./pallets/meowstar/staking", default-features = false }
-pallet-meowstar-governance = { path = "./pallets/meowstar/governance", default-features = false }
-pallet-meowstar-marketplace = { path = "./pallets/meowstar/marketplace", default-features = false }
 # Entity pallets (原 ShareMall，已重构为子模块)
 pallet-entity-common = { path = "./pallets/entity/common", default-features = false }
 pallet-entity-registry = { path = "./pallets/entity/registry", default-features = false }

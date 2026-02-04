@@ -81,12 +81,6 @@ pallet-storage-lifecycle = { workspace = true }
 pallet-matchmaking-membership = { workspace = true }
 pallet-matchmaking-profile = { workspace = true }
 pallet-matchmaking-common = { workspace = true }
-# Meowstar Universe pallets
-pallet-meowstar-pet = { workspace = true }
-pallet-meowstar-battle = { workspace = true }
-pallet-meowstar-staking = { workspace = true }
-pallet-meowstar-governance = { workspace = true }
-pallet-meowstar-marketplace = { workspace = true }
 # Assets pallet
 pallet-assets = { workspace = true }
 # Entity pallets (原 ShareMall，已重构)
@@ -191,12 +185,6 @@ std = [
 	# Storage lifecycle pallet std
 	"pallet-storage-lifecycle/std",
 	"pallet-matchmaking-membership/std",
-	# Meowstar Universe pallets std
-	"pallet-meowstar-pet/std",
-	"pallet-meowstar-battle/std",
-	"pallet-meowstar-staking/std",
-	"pallet-meowstar-governance/std",
-	"pallet-meowstar-marketplace/std",
 	# Assets pallet std
 	"pallet-assets/std",
 	# Entity pallets std

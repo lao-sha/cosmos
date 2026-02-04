@@ -729,6 +729,21 @@ impl pallet_trading_common::MakerInterface<AccountId, Balance> for BridgeMakerAd
 	fn get_deposit_usd_value(maker_id: u64) -> Result<u64, sp_runtime::DispatchError> {
 		pallet_trading_maker::Pallet::<Runtime>::get_deposit_usd_value(maker_id)
 	}
+
+	fn slash_deposit_for_severely_underpaid(
+		maker_id: u64,
+		swap_id: u64,
+		expected_usdt: u64,
+		actual_usdt: u64,
+		_penalty_rate_bps: u32,
+	) -> Result<u64, sp_runtime::DispatchError> {
+		let penalty_type = pallet_trading_maker::pallet::PenaltyType::SwapSeverelyUnderpaid {
+			swap_id,
+			expected_usdt,
+			actual_usdt,
+		};
+		pallet_trading_maker::Pallet::<Runtime>::deduct_maker_deposit(maker_id, penalty_type, None)
+	}
 }
 
 /// Bridge Credit 接口适配器
@@ -765,6 +780,13 @@ impl pallet_trading_swap::Config for Runtime {
 	type MinSwapAmount = ConstU128<{ 10 * UNIT }>; // 最小兑换10 COS
 	// 🆕 存储膨胀防护：TRON 交易哈希 TTL（30天 = 432000 区块 @6秒/块）
 	type TxHashTtlBlocks = ConstU32<{ 30 * DAYS }>;
+	// 🆕 2026-02-04: 验证确认奖励（激励任何人调用 claim_verification_reward）
+	// 0.1 COS = 100_000_000_000 单位 (12位精度)
+	type VerificationReward = ConstU128<{ UNIT / 10 }>;
+	// 🆕 2026-02-04: Swap 手续费率 10 基点 = 0.1%
+	type SwapFeeRateBps = ConstU32<10>;
+	// 🆕 2026-02-04: 最低手续费 0.1 COS，确保小额交易也能覆盖验证奖励
+	type MinSwapFee = ConstU128<{ UNIT / 10 }>;
 	type WeightInfo = ();
 	// 🆕 P3: 仲裁证据 CID 锁定管理器（预留，待 submit_evidence 函数实现后启用）
 	type CidLockManager = pallet_storage_service::Pallet<Runtime>;
@@ -797,6 +819,21 @@ impl pallet_trading_common::MakerInterface<AccountId, Balance> for OtcMakerAdapt
 
 	fn get_deposit_usd_value(maker_id: u64) -> Result<u64, sp_runtime::DispatchError> {
 		pallet_trading_maker::Pallet::<Runtime>::get_deposit_usd_value(maker_id)
+	}
+
+	fn slash_deposit_for_severely_underpaid(
+		maker_id: u64,
+		swap_id: u64,
+		expected_usdt: u64,
+		actual_usdt: u64,
+		_penalty_rate_bps: u32,
+	) -> Result<u64, sp_runtime::DispatchError> {
+		let penalty_type = pallet_trading_maker::pallet::PenaltyType::SwapSeverelyUnderpaid {
+			swap_id,
+			expected_usdt,
+			actual_usdt,
+		};
+		pallet_trading_maker::Pallet::<Runtime>::deduct_maker_deposit(maker_id, penalty_type, None)
 	}
 }
 
@@ -852,13 +889,10 @@ impl pallet_trading_otc::Config for Runtime {
 	type FirstPurchaseUsdAmount = ConstU64<10_000_000>; // 10 USD
 	type AmountValidationTolerance = ConstU16<100>; // 1% 容差
 	type MaxFirstPurchaseOrdersPerMaker = ConstU32<5>;
-	// 🆕 2026-01-18: 买家押金机制配置
-	type MinDeposit = ConstU128<{ UNIT / 10 }>; // 最小押金 0.1 COS
-	type DepositRateLow = ConstU16<300>; // 3% (信用分 50-69)
-	type DepositRateMedium = ConstU16<500>; // 5% (信用分 30-49)
-	type DepositRateHigh = ConstU16<1000>; // 10% (信用分 < 30)
-	type CreditScoreExempt = ConstU16<70>; // 信用分 >= 70 免押金
-	type MinOrdersForExempt = ConstU32<5>; // 至少完成 5 单才能免押金
+	// 🆕 2026-01-18: 买家押金机制配置（简化版）
+	// 规则：首购免押金，其他用户统一 10%
+	type MinDeposit = ConstU128<{ UNIT }>; // 最小押金 1 COS
+	type DepositRate = ConstU16<1000>; // 统一 10% 押金
 	type CancelPenaltyRate = ConstU16<3000>; // 取消订单扣除 30% 押金
 	type MinMakerDepositUsd = ConstU64<500_000_000>; // 做市商最低押金 500 USDT（精度10^6）
 	type DisputeResponseTimeout = ConstU64<86400>; // 24小时（秒）
@@ -1740,136 +1774,6 @@ impl pallet_contracts::Config for Runtime {
 
 	/// 最大瞬态存储大小
 	type MaxTransientStorageSize = ConstU32<{ 1024 * 1024 }>;
-}
-
-// ============================================================================
-// Meowstar Universe Pallets Configuration
-// ============================================================================
-
-parameter_types! {
-	/// 孵化费用: 10 COS
-	pub const MeowstarHatchingFee: Balance = 10 * UNIT;
-	/// 升级基础费用: 0.1 COS
-	pub const MeowstarLevelUpBaseFee: Balance = UNIT / 10;
-	/// 进化费用倍数
-	pub const MeowstarEvolutionFeeMultiplier: u32 = 50;
-	/// 每个账户最大宠物数量
-	pub const MeowstarMaxPetsPerAccount: u32 = 100;
-	/// 战斗入场费: 0.5 COS
-	pub const MeowstarBattleEntryFee: Balance = UNIT / 2;
-	/// 最大回合数
-	pub const MeowstarMaxTurns: u32 = 50;
-	/// 战斗超时区块数
-	pub const MeowstarBattleTimeout: BlockNumber = 100;
-}
-
-impl pallet_meowstar_pet::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type Currency = Balances;
-	type Randomness = CollectiveFlipRandomness;
-	type MaxPetsPerAccount = MeowstarMaxPetsPerAccount;
-	type HatchingFee = MeowstarHatchingFee;
-	type LevelUpBaseFee = MeowstarLevelUpBaseFee;
-	type EvolutionFeeMultiplier = MeowstarEvolutionFeeMultiplier;
-	type WeightInfo = pallet_meowstar_pet::weights::SubstrateWeight<Runtime>;
-}
-
-impl pallet_meowstar_battle::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type Currency = Balances;
-	type BattleRandomness = CollectiveFlipRandomness;
-	type BattleEntryFee = MeowstarBattleEntryFee;
-	type MaxTurns = MeowstarMaxTurns;
-	type BattleTimeout = MeowstarBattleTimeout;
-	type BattleWeightInfo = pallet_meowstar_battle::weights::SubstrateWeight<Runtime>;
-}
-
-// ============================================================================
-// Meowstar Staking Configuration
-// ============================================================================
-
-parameter_types! {
-	/// 最小质押金额: 100 COS
-	pub const MeowstarMinStakeAmount: Balance = 100 * UNIT;
-	/// 每个账户最大质押数量
-	pub const MeowstarMaxStakesPerAccount: u32 = 10;
-	/// 奖励发放间隔 (约 1 天)
-	pub const MeowstarRewardInterval: BlockNumber = 14400;
-}
-
-impl pallet_meowstar_staking::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type Currency = Balances;
-	type MinStakeAmount = MeowstarMinStakeAmount;
-	type MaxStakesPerAccount = MeowstarMaxStakesPerAccount;
-	type RewardInterval = MeowstarRewardInterval;
-	type WeightInfo = pallet_meowstar_staking::weights::SubstrateWeight<Runtime>;
-}
-
-// ============================================================================
-// Meowstar Governance Configuration
-// ============================================================================
-
-parameter_types! {
-	/// 创建提案所需最小质押权重
-	pub const MeowstarMinProposalWeight: u128 = 10000;
-	/// 提案押金: 100 COS
-	pub const MeowstarProposalDeposit: Balance = 100 * UNIT;
-	/// 投票期: 约 7 天
-	pub const MeowstarVotingPeriod: BlockNumber = 100800;
-	/// 执行延迟: 约 2 天
-	pub const MeowstarExecutionDelay: BlockNumber = 28800;
-	/// 通过阈值: 60%
-	pub const MeowstarPassThreshold: u32 = 6000;
-	/// 最低参与率: 10%
-	pub const MeowstarQuorumThreshold: u32 = 1000;
-}
-
-impl pallet_meowstar_governance::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type Currency = Balances;
-	type MinProposalWeight = MeowstarMinProposalWeight;
-	type ProposalDeposit = MeowstarProposalDeposit;
-	type VotingPeriod = MeowstarVotingPeriod;
-	type ExecutionDelay = MeowstarExecutionDelay;
-	type PassThreshold = MeowstarPassThreshold;
-	type QuorumThreshold = MeowstarQuorumThreshold;
-	type GovWeightInfo = pallet_meowstar_governance::weights::SubstrateWeight<Runtime>;
-}
-
-// ============================================================================
-// Meowstar Marketplace Configuration
-// ============================================================================
-
-parameter_types! {
-	/// 交易手续费率: 2.5%
-	pub const MeowstarTradeFeeRate: u32 = 250;
-	/// 最小挂单价格: 1 COS
-	pub const MeowstarMinListingPrice: Balance = UNIT;
-	/// 默认挂单有效期: 约 7 天
-	pub const MeowstarDefaultListingDuration: BlockNumber = 100800;
-	/// 拍卖最小加价比例: 5%
-	pub const MeowstarMinBidIncrement: u32 = 500;
-}
-
-pub struct MeowstarFeeReceiver;
-impl frame_support::traits::Get<AccountId> for MeowstarFeeReceiver {
-	fn get() -> AccountId {
-		// 使用国库账户作为手续费接收者
-		// 实际部署时应配置为专门的账户
-		sp_runtime::AccountId32::new([0u8; 32])
-	}
-}
-
-impl pallet_meowstar_marketplace::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type Currency = Balances;
-	type TradeFeeRate = MeowstarTradeFeeRate;
-	type MinListingPrice = MeowstarMinListingPrice;
-	type DefaultListingDuration = MeowstarDefaultListingDuration;
-	type MinBidIncrement = MeowstarMinBidIncrement;
-	type FeeReceiver = MeowstarFeeReceiver;
-	type MarketWeightInfo = pallet_meowstar_marketplace::weights::SubstrateWeight<Runtime>;
 }
 
 // ============================================================================

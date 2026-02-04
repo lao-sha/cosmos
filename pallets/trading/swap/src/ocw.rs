@@ -14,7 +14,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::format;
 use sp_runtime::offchain::{http, Duration};
 use sp_core::offchain::StorageKind;

@@ -383,25 +383,6 @@ mod runtime {
 	pub type Contracts = pallet_contracts;
 
 	// ============================================================================
-	// Meowstar Universe Pallets
-	// ============================================================================
-
-	#[runtime::pallet_index(100)]
-	pub type MeowstarPet = pallet_meowstar_pet;
-
-	#[runtime::pallet_index(101)]
-	pub type MeowstarBattle = pallet_meowstar_battle;
-
-	#[runtime::pallet_index(102)]
-	pub type MeowstarStaking = pallet_meowstar_staking;
-
-	#[runtime::pallet_index(103)]
-	pub type MeowstarGovernance = pallet_meowstar_governance;
-
-	#[runtime::pallet_index(104)]
-	pub type MeowstarMarketplace = pallet_meowstar_marketplace;
-
-	// ============================================================================
 	// Assets Pallet (for ShareMall Token)
 	// ============================================================================
 

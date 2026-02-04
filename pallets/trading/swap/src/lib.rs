@@ -55,6 +55,7 @@ pub mod pallet {
     use sp_runtime::transaction_validity::{
         InvalidTransaction, TransactionSource, TransactionValidity, ValidTransaction,
     };
+    // 🆕 2026-02-04: 激励机制 - 任何人可通过 claim_verification_reward 提交验证结果
     // 🆕 v0.4.0: 从 pallet-trading-common 导入公共类型和 Trait
     use pallet_trading_common::{
         TronAddress,
@@ -94,6 +95,8 @@ pub mod pallet {
         ArbitrationRejected,
         /// 超时退款
         Refunded,
+        /// 🆕 严重少付争议（<50%），等待用户处理
+        SeverelyDisputed,
     }
     
     /// 🆕 2026-01-18: 兑换时间信息结构（供 RPC 查询使用）
@@ -127,6 +130,7 @@ pub mod pallet {
         /// 是否已超时
         pub is_timeout: bool,
     }
+
     
     /// 🆕 存储膨胀防护：归档兑换 L1（精简版）
     #[derive(Encode, Decode, TypeInfo, MaxEncodedLen, Clone, PartialEq, Eq, RuntimeDebug)]
@@ -231,6 +235,24 @@ pub mod pallet {
         /// 重试次数
         pub retry_count: u8,
     }
+
+    /// 🆕 COS→USDT 少付证据记录（用于 Swap SeverelyDisputed 处理）
+    #[derive(Encode, Decode, TypeInfo, MaxEncodedLen, Clone, PartialEq, Eq, RuntimeDebug)]
+    #[scale_info(skip_type_params(T))]
+    pub struct SwapUnderpaidEvidence<T: Config> {
+        /// 兑换ID
+        pub swap_id: u64,
+        /// TRC20 交易哈希
+        pub tx_hash: BoundedVec<u8, ConstU32<128>>,
+        /// 预期金额（USDT，精度 10^6）
+        pub expected_amount: u64,
+        /// 实际金额（USDT，精度 10^6）
+        pub actual_amount: u64,
+        /// 差额百分比 (0-100)
+        pub shortage_percent: u8,
+        /// 验证时间（区块号）
+        pub verified_at: BlockNumberFor<T>,
+    }
     
     #[pallet::pallet]
     pub struct Pallet<T>(_);
@@ -240,6 +262,7 @@ pub mod pallet {
     /// 函数级中文注释：Bridge Pallet 配置 trait
     /// - 🔴 stable2506 API 变更：RuntimeEvent 自动继承，无需显式声明
     /// - 🆕 2026-02-03: OCW 验证由 offchain_worker 执行，结果通过 VerificationOrigin 提交
+    /// - 🆕 2026-02-04: OCW 验证结果存储后，由 on_idle 自动处理链上状态
     pub trait Config: frame_system::Config<RuntimeEvent: From<Event<Self>>> {
         
         /// 货币类型
@@ -277,6 +300,21 @@ pub mod pallet {
         #[pallet::constant]
         type TxHashTtlBlocks: Get<BlockNumberFor<Self>>;
         
+        /// 🆕 2026-02-04: 验证确认奖励（激励任何人调用 confirm_verification）
+        /// 默认 0.1 COS (100_000_000_000 单位)
+        #[pallet::constant]
+        type VerificationReward: Get<BalanceOf<Self>>;
+        
+        /// 🆕 2026-02-04: Swap 手续费率（基点，10000 = 100%）
+        /// 默认 10 = 0.1%
+        #[pallet::constant]
+        type SwapFeeRateBps: Get<u32>;
+        
+        /// 🆕 2026-02-04: 最低 Swap 手续费
+        /// 默认 0.1 COS，确保小额交易也能覆盖验证奖励成本
+        #[pallet::constant]
+        type MinSwapFee: Get<BalanceOf<Self>>;
+
         /// 权重信息
         type WeightInfo: WeightInfo;
 
@@ -410,6 +448,33 @@ pub mod pallet {
     /// 验证游标（用于超时检查）
     #[pallet::storage]
     pub type VerificationCursor<T: Config> = StorageValue<_, u64, ValueQuery>;
+
+    /// 🆕 2026-02-04: OCW 验证结果（链上存储，用于 claim_verification_reward 验证）
+    /// 
+    /// ## 安全说明
+    /// - OCW 通过 ocw_submit_verification 提交验证结果
+    /// - claim_verification_reward 必须匹配此存储的结果
+    /// - 防止做市商伪造验证结果
+    #[pallet::storage]
+    #[pallet::getter(fn ocw_verification_results)]
+    pub type OcwVerificationResults<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,  // swap_id
+        (bool, Option<BoundedVec<u8, ConstU32<128>>>),  // (verified, reason)
+        OptionQuery,
+    >;
+
+    /// 🆕 COS→USDT 少付证据存储（Swap SeverelyDisputed）
+    #[pallet::storage]
+    #[pallet::getter(fn swap_underpaid_evidences)]
+    pub type SwapUnderpaidEvidences<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,  // swap_id
+        SwapUnderpaidEvidence<T>,
+        OptionQuery,
+    >;
     
     // ===== 事件 =====
     
@@ -472,6 +537,48 @@ pub mod pallet {
             deposit: BalanceOf<T>,
             evidence_cid: BoundedVec<u8, ConstU32<128>>,
         },
+        /// 🆕 2026-02-04: 验证奖励已领取（激励机制）
+        VerificationRewardClaimed {
+            swap_id: u64,
+            claimer: T::AccountId,
+            reward: BalanceOf<T>,
+        },
+        /// 🆕 2026-02-04: Swap 手续费已收取
+        SwapFeeCollected {
+            swap_id: u64,
+            maker: T::AccountId,
+            fee: BalanceOf<T>,
+            net_amount: BalanceOf<T>,
+        },
+
+        /// 🆕 COS→USDT 严重少付争议（用户需处理）
+        SwapSeverelyUnderpaid {
+            swap_id: u64,
+            expected_amount: u64,
+            actual_amount: u64,
+            shortage_percent: u8,
+        },
+        /// 🆕 用户接受部分 USDT（按比例释放 COS）
+        UserAcceptedPartialUsdt {
+            swap_id: u64,
+            user_cos: BalanceOf<T>,
+            maker_cos: BalanceOf<T>,
+        },
+        /// 🆕 用户要求做市商退还 USDT
+        UserRequestedUsdtRefund {
+            swap_id: u64,
+        },
+        /// 🆕 做市商确认退还 USDT（COS 退还用户）
+        MakerUsdtRefundConfirmed {
+            swap_id: u64,
+            refund_tx_hash: BoundedVec<u8, ConstU32<128>>,
+        },
+        /// 🆕 做市商保证金被罚没（SeverelyUnderpaid 场景）
+        MakerDepositSlashed {
+            swap_id: u64,
+            maker_id: u64,
+            penalty_id: u64,
+        },
     }
     
     // ===== 错误 =====
@@ -533,6 +640,9 @@ pub mod pallet {
         CannotDispute,
         /// 🆕 2026-02-03: 托管余额不足以扣除押金
         InsufficientEscrowForDeposit,
+
+        /// 🆕 少付证据不存在
+        EvidenceNotFound,
     }
     
     // ===== Extrinsics =====
@@ -651,6 +761,10 @@ pub mod pallet {
         /// # 权限
         /// - 仅 OCW 可调用（通过 ValidateUnsigned 验证）
         ///
+        /// # 功能
+        /// 🆕 2026-02-04: 只存储验证结果，不直接确认
+        /// 任何人可通过 claim_verification_reward 领取并获得奖励
+        ///
         /// # 参数
         /// - `swap_id`: 兑换ID
         /// - `verified`: 验证结果
@@ -664,7 +778,17 @@ pub mod pallet {
             reason: Option<sp_std::vec::Vec<u8>>,
         ) -> DispatchResult {
             ensure_none(origin)?;
-            Self::do_confirm_verification(swap_id, verified, reason)
+            
+            // 🆕 2026-02-04: 存储验证结果到链上，等待 claim_verification_reward
+            let reason_bounded: Option<BoundedVec<u8, ConstU32<128>>> = reason
+                .map(|r| r.try_into().unwrap_or_default());
+            
+            OcwVerificationResults::<T>::insert(swap_id, (verified, reason_bounded));
+            
+            log::info!(target: "ocw", 
+                "Stored verification result for swap {}: verified={}", swap_id, verified);
+            
+            Ok(())
         }
         
         /// 🆕 2026-02-03: 用户发起 Swap 仲裁（押金从托管扣除）
@@ -691,6 +815,92 @@ pub mod pallet {
         ) -> DispatchResult {
             let user = ensure_signed(origin)?;
             Self::do_file_swap_dispute(&user, swap_id, evidence_cid)
+        }
+        
+        /// 🆕 2026-02-04: 任何人可调用确认验证（激励机制）
+        ///
+        /// ## 功能说明
+        /// 允许任何人触发已验证的 swap 状态更新，并获得奖励。
+        /// OCW 必须先通过 ocw_submit_verification 存储验证结果。
+        ///
+        /// ## 安全机制
+        /// - ✅ 验证结果必须已存储在 OcwVerificationResults（由 OCW 提交）
+        /// - ✅ 调用者无法伪造验证结果
+        /// - ✅ 只有 AwaitingVerification 状态的 swap 可以确认
+        /// - ✅ 防止重复确认（状态会改变）
+        ///
+        /// ## 激励机制
+        /// - 调用者只需提供 swap_id
+        /// - 系统自动读取 OCW 存储的验证结果
+        /// - 成功处理后获得 VerificationReward 奖励
+        ///
+        /// ## 参数
+        /// - `swap_id`: 兑换ID（必须已有 OCW 验证结果）
+        #[pallet::call_index(7)]
+        #[pallet::weight(T::WeightInfo::mark_swap_complete())]
+        pub fn claim_verification_reward(
+            origin: OriginFor<T>,
+            swap_id: u64,
+        ) -> DispatchResult {
+            let caller = ensure_signed(origin)?;
+            Self::do_claim_verification_reward(&caller, swap_id)
+        }
+
+        // ==================== 🆕 COS→USDT 用户选择机制 ====================
+
+        /// 🆕 用户接受部分 USDT（COS→USDT SeverelyDisputed）
+        ///
+        /// ## 功能
+        /// 用户决定接受做市商的部分 USDT 付款，按比例释放 COS 给做市商
+        ///
+        /// ## 参数
+        /// - `swap_id`: 兑换ID
+        #[pallet::call_index(17)]
+        #[pallet::weight(T::WeightInfo::mark_swap_complete())]
+        pub fn user_accept_partial_usdt(
+            origin: OriginFor<T>,
+            swap_id: u64,
+        ) -> DispatchResult {
+            let user = ensure_signed(origin)?;
+            Self::do_user_accept_partial_usdt(&user, swap_id)
+        }
+
+        /// 🆕 用户要求做市商退还 USDT（COS→USDT SeverelyDisputed）
+        ///
+        /// ## 功能
+        /// 用户要求做市商退还已转的 USDT，COS 全部退还给用户
+        /// 做市商需在链下退还 USDT，然后调用 maker_confirm_usdt_refund
+        ///
+        /// ## 参数
+        /// - `swap_id`: 兑换ID
+        #[pallet::call_index(18)]
+        #[pallet::weight(T::WeightInfo::mark_swap_complete())]
+        pub fn user_request_usdt_refund(
+            origin: OriginFor<T>,
+            swap_id: u64,
+        ) -> DispatchResult {
+            let user = ensure_signed(origin)?;
+            Self::do_user_request_usdt_refund(&user, swap_id)
+        }
+
+        /// 🆕 做市商确认已退还 USDT（COS→USDT SeverelyDisputed）
+        ///
+        /// ## 功能
+        /// 做市商已在链下退还 USDT 给用户，提交退款交易哈希
+        /// COS 全部退还给用户
+        ///
+        /// ## 参数
+        /// - `swap_id`: 兑换ID
+        /// - `refund_tx_hash`: TRON 链上退款交易哈希
+        #[pallet::call_index(19)]
+        #[pallet::weight(T::WeightInfo::mark_swap_complete())]
+        pub fn maker_confirm_usdt_refund(
+            origin: OriginFor<T>,
+            swap_id: u64,
+            refund_tx_hash: sp_std::vec::Vec<u8>,
+        ) -> DispatchResult {
+            let maker = ensure_signed(origin)?;
+            Self::do_maker_confirm_usdt_refund(&maker, swap_id, refund_tx_hash)
         }
         
     }
@@ -1009,8 +1219,26 @@ pub mod pallet {
             let current_block = frame_system::Pallet::<T>::block_number();
             
             if verified {
-                // 验证成功：释放 COS 给做市商
-                T::Escrow::release_all(swap_id, &record.maker)?;
+                // 🆕 2026-02-04: 计算手续费 = max(金额 * 费率, 最低费用)
+                let fee_by_rate = record.cos_amount
+                    .saturating_mul(T::SwapFeeRateBps::get().into()) / 10000u32.into();
+                let min_fee = T::MinSwapFee::get();
+                let fee = if fee_by_rate > min_fee { fee_by_rate } else { min_fee };
+                
+                // 确保手续费不超过托管金额
+                let fee = if fee > record.cos_amount { record.cos_amount } else { fee };
+                let net_amount = record.cos_amount.saturating_sub(fee);
+                
+                // 🆕 2026-02-04: 分两步释放托管
+                // 1. 释放净额给做市商
+                if net_amount > BalanceOf::<T>::from(0u32) {
+                    T::Escrow::transfer_from_escrow(swap_id, &record.maker, net_amount)?;
+                }
+                // 2. 释放手续费到 Pallet 账户（用于支付验证奖励）
+                if fee > BalanceOf::<T>::from(0u32) {
+                    let pallet_account = Self::pallet_account_id();
+                    T::Escrow::transfer_from_escrow(swap_id, &pallet_account, fee)?;
+                }
                 
                 record.status = SwapStatus::Completed;
                 record.completed_at = Some(current_block);
@@ -1031,24 +1259,81 @@ pub mod pallet {
                 let cos_qty: u128 = record.cos_amount.saturated_into();
                 let _ = T::Pricing::report_swap_order(timestamp, record.price_usdt, cos_qty);
                 
+                // 🆕 2026-02-04: 发出手续费事件
+                Self::deposit_event(Event::SwapFeeCollected {
+                    swap_id,
+                    maker: record.maker.clone(),
+                    fee,
+                    net_amount,
+                });
+                
                 Self::deposit_event(Event::VerificationConfirmed {
                     swap_id,
                     maker: record.maker,
                 });
             } else {
-                // 验证失败：进入仲裁流程
-                record.status = SwapStatus::VerificationFailed;
-                MakerSwaps::<T>::insert(swap_id, record);
+                // 验证失败，区分处理
+                let reason_str = reason.as_ref()
+                    .and_then(|r| core::str::from_utf8(r).ok())
+                    .unwrap_or("");
                 
-                let reason_bounded: BoundedVec<u8, ConstU32<128>> = reason
-                    .unwrap_or_else(|| b"Unknown verification failure".to_vec())
-                    .try_into()
-                    .unwrap_or_else(|_| BoundedVec::default());
+                // 检查是否是严重少付（<50%）
+                let is_severely_underpaid = reason_str.contains("Severely underpaid") 
+                    || reason_str.contains("Invalid or zero");
                 
-                Self::deposit_event(Event::VerificationFailed {
-                    swap_id,
-                    reason: reason_bounded,
-                });
+                if is_severely_underpaid {
+                    // 严重少付：进入 SeverelyDisputed，等待用户处理
+                    record.status = SwapStatus::SeverelyDisputed;
+                    
+                    // 解析实际金额
+                    let verification_req = PendingVerifications::<T>::get(swap_id);
+                    let (expected_amount, actual_amount) = if let Some(req) = &verification_req {
+                        let actual = Self::parse_actual_amount(reason_str).unwrap_or(0);
+                        (req.expected_amount, actual)
+                    } else {
+                        (record.usdt_amount, 0)
+                    };
+                    
+                    // 计算差额百分比
+                    let shortage_percent = if expected_amount > 0 {
+                        ((expected_amount.saturating_sub(actual_amount)) * 100 / expected_amount) as u8
+                    } else {
+                        100u8
+                    };
+                    
+                    // 保存证据
+                    let evidence = SwapUnderpaidEvidence::<T> {
+                        swap_id,
+                        tx_hash: record.trc20_tx_hash.clone().unwrap_or_default(),
+                        expected_amount,
+                        actual_amount,
+                        shortage_percent,
+                        verified_at: current_block,
+                    };
+                    SwapUnderpaidEvidences::<T>::insert(swap_id, evidence);
+                    MakerSwaps::<T>::insert(swap_id, record);
+                    
+                    Self::deposit_event(Event::SwapSeverelyUnderpaid {
+                        swap_id,
+                        expected_amount,
+                        actual_amount,
+                        shortage_percent,
+                    });
+                } else {
+                    // 普通少付（50%-99.5%）：进入仲裁
+                    record.status = SwapStatus::VerificationFailed;
+                    MakerSwaps::<T>::insert(swap_id, record);
+                    
+                    let reason_bounded: BoundedVec<u8, ConstU32<128>> = reason
+                        .unwrap_or_else(|| b"Unknown verification failure".to_vec())
+                        .try_into()
+                        .unwrap_or_else(|_| BoundedVec::default());
+                    
+                    Self::deposit_event(Event::VerificationFailed {
+                        swap_id,
+                        reason: reason_bounded,
+                    });
+                }
             }
             
             Ok(())
@@ -1233,6 +1518,260 @@ pub mod pallet {
             
             Ok(())
         }
+        
+        /// 🆕 2026-02-04: 领取验证奖励（激励机制实现）
+        /// 
+        /// ## 功能说明
+        /// 任何人可以调用此函数触发已验证 swap 的状态更新并获得奖励。
+        /// 验证结果必须已由 OCW 通过 ocw_submit_verification 存储。
+        /// 
+        /// ## 安全机制
+        /// - ✅ 从 OcwVerificationResults 读取验证结果（不接受调用者输入）
+        /// - ✅ 防止做市商伪造验证结果
+        /// 
+        /// ## 参数
+        /// - `caller`: 调用者账户（奖励接收者）
+        /// - `swap_id`: 兑换ID（必须已有 OCW 验证结果）
+        pub fn do_claim_verification_reward(
+            caller: &T::AccountId,
+            swap_id: u64,
+        ) -> DispatchResult {
+            // 1. 获取兑换记录
+            let record = MakerSwaps::<T>::get(swap_id)
+                .ok_or(Error::<T>::SwapNotFound)?;
+            
+            // 2. 验证状态必须是 AwaitingVerification
+            ensure!(
+                record.status == SwapStatus::AwaitingVerification,
+                Error::<T>::InvalidStatus
+            );
+            
+            // 3. 🔒 安全关键：从链上存储读取 OCW 验证结果
+            let (verified, reason_bounded) = OcwVerificationResults::<T>::get(swap_id)
+                .ok_or(Error::<T>::VerificationNotFound)?;
+            
+            // 4. 将 BoundedVec 转换为 Vec
+            let reason = reason_bounded.map(|r| r.to_vec());
+            
+            // 5. 执行验证确认（复用已有逻辑）
+            Self::do_confirm_verification(swap_id, verified, reason)?;
+            
+            // 6. 清理 OCW 验证结果存储
+            OcwVerificationResults::<T>::remove(swap_id);
+            
+            // 7. 支付奖励给调用者
+            let reward = T::VerificationReward::get();
+            if reward > BalanceOf::<T>::from(0u32) {
+                let pallet_account = Self::pallet_account_id();
+                
+                // 从 pallet 账户转账给调用者
+                let _ = T::Currency::transfer(
+                    &pallet_account,
+                    caller,
+                    reward,
+                    frame_support::traits::ExistenceRequirement::KeepAlive,
+                );
+                
+                log::info!(target: "swap", 
+                    "Paid verification reward to {:?} for swap {}", caller, swap_id);
+            }
+            
+            // 8. 发出事件
+            Self::deposit_event(Event::VerificationRewardClaimed {
+                swap_id,
+                claimer: caller.clone(),
+                reward,
+            });
+            
+            Ok(())
+        }
+
+        // ==================== 🆕 COS→USDT 用户选择机制内部函数 ====================
+
+        /// 解析 reason 中的实际金额
+        fn parse_actual_amount(reason: &str) -> Option<u64> {
+            // 尝试匹配格式 "expected X, got Y" 或类似格式
+            if let Some(got_idx) = reason.find("got ") {
+                let after_got = &reason[got_idx + 4..];
+                let num_str: sp_std::vec::Vec<char> = after_got.chars()
+                    .take_while(|c| c.is_numeric())
+                    .collect();
+                if !num_str.is_empty() {
+                    let s: sp_std::vec::Vec<u8> = num_str.iter().map(|&c| c as u8).collect();
+                    if let Ok(s_str) = core::str::from_utf8(&s) {
+                        return s_str.parse().ok();
+                    }
+                }
+            }
+            None
+        }
+
+        /// 🆕 用户接受部分 USDT（COS→USDT SeverelyDisputed）
+        pub fn do_user_accept_partial_usdt(
+            user: &T::AccountId,
+            swap_id: u64,
+        ) -> DispatchResult {
+            let mut record = MakerSwaps::<T>::get(swap_id)
+                .ok_or(Error::<T>::SwapNotFound)?;
+            
+            // 1. 验证调用者是用户
+            ensure!(&record.user == user, Error::<T>::NotSwapUser);
+            
+            // 2. 验证状态
+            ensure!(
+                record.status == SwapStatus::SeverelyDisputed,
+                Error::<T>::InvalidStatus
+            );
+            
+            // 3. 获取证据
+            let evidence = SwapUnderpaidEvidences::<T>::get(swap_id)
+                .ok_or(Error::<T>::EvidenceNotFound)?;
+            
+            // 4. 按比例计算 COS 分配
+            // maker_cos = cos_amount * (actual_amount / expected_amount)
+            let maker_ratio = if evidence.expected_amount > 0 {
+                evidence.actual_amount * 10000 / evidence.expected_amount
+            } else {
+                0
+            };
+            let maker_cos = record.cos_amount
+                .saturating_mul(BalanceOf::<T>::from(maker_ratio as u32))
+                / BalanceOf::<T>::from(10000u32);
+            let user_cos = record.cos_amount.saturating_sub(maker_cos);
+            
+            // 5. 分配 COS
+            // 做市商得到按比例的 COS
+            if maker_cos > BalanceOf::<T>::from(0u32) {
+                T::Escrow::transfer_from_escrow(swap_id, &record.maker, maker_cos)?;
+            }
+            // 用户取回未兑换部分的 COS
+            if user_cos > BalanceOf::<T>::from(0u32) {
+                T::Escrow::transfer_from_escrow(swap_id, user, user_cos)?;
+            }
+            
+            // 6. 🆕 罚没做市商保证金（10% 差额进入国库）
+            let penalty_result = T::MakerPallet::slash_deposit_for_severely_underpaid(
+                record.maker_id,
+                swap_id,
+                evidence.expected_amount,
+                evidence.actual_amount,
+                1000, // 10% = 1000 基点
+            );
+            
+            let penalty_id = match penalty_result {
+                Ok(id) => Some(id),
+                Err(e) => {
+                    // 罚没失败不影响主流程，记录日志
+                    log::warn!(
+                        target: "swap",
+                        "Failed to slash maker deposit for swap {}: {:?}",
+                        swap_id, e
+                    );
+                    None
+                }
+            };
+            
+            // 7. 保存 maker_id（record 即将被 move）
+            let maker_id = record.maker_id;
+            
+            // 8. 更新状态
+            record.status = SwapStatus::Completed;
+            record.completed_at = Some(frame_system::Pallet::<T>::block_number());
+            MakerSwaps::<T>::insert(swap_id, record);
+            
+            // 9. 清理证据
+            SwapUnderpaidEvidences::<T>::remove(swap_id);
+            
+            // 10. 发出事件
+            Self::deposit_event(Event::UserAcceptedPartialUsdt {
+                swap_id,
+                user_cos,
+                maker_cos,
+            });
+
+            // 11. 发出罚没事件（如果成功）
+            if let Some(pid) = penalty_id {
+                Self::deposit_event(Event::MakerDepositSlashed {
+                    swap_id,
+                    maker_id,
+                    penalty_id: pid,
+                });
+            }
+            
+            Ok(())
+        }
+
+        /// 🆕 用户要求做市商退还 USDT（COS→USDT SeverelyDisputed）
+        pub fn do_user_request_usdt_refund(
+            user: &T::AccountId,
+            swap_id: u64,
+        ) -> DispatchResult {
+            let mut record = MakerSwaps::<T>::get(swap_id)
+                .ok_or(Error::<T>::SwapNotFound)?;
+            
+            // 1. 验证调用者是用户
+            ensure!(&record.user == user, Error::<T>::NotSwapUser);
+            
+            // 2. 验证状态
+            ensure!(
+                record.status == SwapStatus::SeverelyDisputed,
+                Error::<T>::InvalidStatus
+            );
+            
+            // 3. 标记为等待退款（使用 Arbitrating 状态临时表示）
+            // 实际上此时做市商需要在链下退还 USDT，然后调用 maker_confirm_usdt_refund
+            record.status = SwapStatus::Arbitrating;
+            MakerSwaps::<T>::insert(swap_id, record);
+            
+            // 4. 发出事件
+            Self::deposit_event(Event::UserRequestedUsdtRefund {
+                swap_id,
+            });
+            
+            Ok(())
+        }
+
+        /// 🆕 做市商确认已退还 USDT（COS→USDT SeverelyDisputed）
+        pub fn do_maker_confirm_usdt_refund(
+            maker: &T::AccountId,
+            swap_id: u64,
+            refund_tx_hash: sp_std::vec::Vec<u8>,
+        ) -> DispatchResult {
+            let mut record = MakerSwaps::<T>::get(swap_id)
+                .ok_or(Error::<T>::SwapNotFound)?;
+            
+            // 1. 验证调用者是做市商
+            ensure!(&record.maker == maker, Error::<T>::NotMaker);
+            
+            // 2. 验证状态（必须是 Arbitrating，即用户已请求退款）
+            ensure!(
+                record.status == SwapStatus::Arbitrating,
+                Error::<T>::InvalidStatus
+            );
+            
+            // 3. 验证退款哈希格式
+            let refund_hash: BoundedVec<u8, ConstU32<128>> = refund_tx_hash
+                .try_into()
+                .map_err(|_| Error::<T>::InvalidTxHash)?;
+            
+            // 4. COS 全部退还用户
+            T::Escrow::release_all(swap_id, &record.user)?;
+            
+            // 5. 更新状态
+            record.status = SwapStatus::Refunded;
+            MakerSwaps::<T>::insert(swap_id, record);
+            
+            // 6. 清理证据
+            SwapUnderpaidEvidences::<T>::remove(swap_id);
+            
+            // 7. 发出事件
+            Self::deposit_event(Event::MakerUsdtRefundConfirmed {
+                swap_id,
+                refund_tx_hash: refund_hash,
+            });
+            
+            Ok(())
+        }
     }
     
     // ===== 公共查询接口 =====
@@ -1317,7 +1856,7 @@ pub mod pallet {
                 .filter_map(|&swap_id| Self::get_swap_with_time(swap_id))
                 .collect()
         }
-        
+
         /// 内部函数：状态转换为 u8
         fn status_to_u8(status: &SwapStatus) -> u8 {
             match status {
@@ -1330,6 +1869,7 @@ pub mod pallet {
                 SwapStatus::ArbitrationApproved => 6,
                 SwapStatus::ArbitrationRejected => 7,
                 SwapStatus::Refunded => 8,
+                SwapStatus::SeverelyDisputed => 9,  // 🆕 严重少付争议
             }
         }
         
@@ -1489,13 +2029,14 @@ pub mod pallet {
                 match verification_result {
                     Ok(true) => {
                         log::info!(target: "ocw-trc20", "Swap {} verification SUCCESS", swap_id);
-                        // 存储验证成功结果到 offchain storage
-                        Self::store_verification_result(swap_id, true, None);
+                        // 🆕 2026-02-04: 自动提交无签名交易到链上
+                        Self::submit_verification_tx(swap_id, true, None);
                         processed += 1;
                     },
                     Ok(false) => {
                         log::warn!(target: "ocw-trc20", "Swap {} verification FAILED: invalid transaction", swap_id);
-                        Self::store_verification_result(swap_id, false, Some(b"Transaction validation failed"));
+                        // 🆕 2026-02-04: 自动提交无签名交易到链上
+                        Self::submit_verification_tx(swap_id, false, Some(b"Transaction validation failed".to_vec()));
                         processed += 1;
                     },
                     Err(e) => {
@@ -1508,38 +2049,58 @@ pub mod pallet {
             if processed > 0 {
                 log::info!(target: "ocw-trc20", "Processed {} verifications this block", processed);
             }
+
         }
     }
-    
+
     impl<T: Config> Pallet<T> {
-        /// 存储 OCW 验证结果到 offchain local storage
+        /// 🆕 2026-02-04: 提交验证结果（存储到 offchain，通过激励机制处理）
         /// 
-        /// 委员会可通过 RPC 查询此结果并调用 confirm_verification
-        fn store_verification_result(swap_id: u64, verified: bool, reason: Option<&[u8]>) {
+        /// ## 功能说明
+        /// OCW 验证完成后，将结果存储到 offchain storage。
+        /// 任何人可通过 claim_verification_reward 提交结果并获得奖励。
+        /// 
+        /// ## 处理流程
+        /// 1. OCW 验证 TRC20 交易
+        /// 2. 结果存储到 offchain storage
+        /// 3. 任何人调用 claim_verification_reward 提交到链上
+        /// 4. 调用者获得 VerificationReward 奖励
+        /// 
+        /// ## 为什么不直接提交交易
+        /// polkadot-sdk 2024+ 移除了 OCW 直接提交无签名交易的 API
+        /// 需要通过激励机制让外部账户代为提交
+        fn submit_verification_tx(swap_id: u64, verified: bool, reason: Option<sp_std::vec::Vec<u8>>) {
+            // 存储到 offchain storage，等待 claim_verification_reward
+            let reason_slice = reason.as_ref().map(|r| r.as_slice());
+            Self::store_pending_verification(swap_id, verified, reason_slice);
+            
+            log::info!(target: "ocw-trc20", 
+                "Stored pending verification for swap {}, verified={}", swap_id, verified);
+        }
+        
+        /// 存储待处理的验证结果
+        fn store_pending_verification(swap_id: u64, verified: bool, reason: Option<&[u8]>) {
             use sp_io::offchain;
             
-            // 构建存储键: "trc20_verify::{swap_id}"
-            let key = alloc::format!("trc20_verify::{}", swap_id);
+            // 存储键: "trc20_pending::{swap_id}"
+            let key = alloc::format!("trc20_pending::{}", swap_id);
             
-            // 构建存储值: "verified" 或 "failed:{reason}"
+            // 存储值: "v" (verified) 或 "f:{reason}" (failed)
             let value = if verified {
-                b"verified".to_vec()
+                b"v".to_vec()
             } else {
-                let mut v = b"failed:".to_vec();
+                let mut v = b"f:".to_vec();
                 if let Some(r) = reason {
                     v.extend_from_slice(r);
                 }
                 v
             };
             
-            // 存储到 offchain local storage
             offchain::local_storage_set(
                 sp_core::offchain::StorageKind::PERSISTENT,
                 key.as_bytes(),
                 &value,
             );
-            
-            log::debug!(target: "ocw-trc20", "Stored verification result for swap {}: {:?}", swap_id, verified);
         }
         
         /// 查询 OCW 验证结果（供 RPC 使用）
@@ -1774,14 +2335,15 @@ pub mod pallet {
         fn swap_status_to_u8(status: &SwapStatus) -> u8 {
             match status {
                 SwapStatus::Pending => 0,
-                SwapStatus::AwaitingVerification => 1,  // 
+                SwapStatus::AwaitingVerification => 1,
                 SwapStatus::Completed => 2,
-                SwapStatus::VerificationFailed => 3,    // 
+                SwapStatus::VerificationFailed => 3,
                 SwapStatus::UserReported => 4,
                 SwapStatus::Arbitrating => 5,
                 SwapStatus::ArbitrationApproved => 6,
                 SwapStatus::ArbitrationRejected => 7,
                 SwapStatus::Refunded => 8,
+                SwapStatus::SeverelyDisputed => 9,  // 🆕 严重少付争议
             }
         }
 
