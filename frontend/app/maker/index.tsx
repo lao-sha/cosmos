@@ -1,563 +1,500 @@
-import { useMaker, useMakerConstants } from '@/src/hooks/useMaker';
-import { makerService, ApplicationStatus } from '@/src/services/maker';
-import { useAuthStore } from '@/src/stores/auth';
-import { useChainStore } from '@/src/stores/chain';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  ActivityIndicator,
-  Platform,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
+  View,
   Text,
-  View
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
+  Switch,
 } from 'react-native';
+import { useRouter } from 'expo-router';
+import {
+  TrendingUp,
+  Wallet,
+  Settings,
+  Plus,
+  Minus,
+  Power,
+  FileText,
+} from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
+import { useColors } from '@/hooks/useColors';
+import { useWalletStore } from '@/stores/wallet';
+import {
+  getMakerProfile,
+  toggleStatus,
+  type MakerProfile,
+} from '@/services/maker';
+import { Button, Card, Input } from '@/components/ui';
+import { Colors, Shadows } from '@/constants/colors';
 
 export default function MakerScreen() {
+  const colors = useColors();
   const router = useRouter();
-  const { isLoggedIn } = useAuthStore();
-  const { isConnected } = useChainStore();
-  const { makerInfo, loading, refresh, isMaker, isActiveMaker } = useMaker();
-  const { depositAmountFormatted, cooldownDays } = useMakerConstants();
-  const [refreshing, setRefreshing] = useState(false);
+  const { address, mnemonic, isConnected } = useWalletStore();
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await refresh();
-    setRefreshing(false);
+  const [profile, setProfile] = useState<MakerProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [toggling, setToggling] = useState(false);
+
+  useEffect(() => {
+    loadProfile();
+  }, [address]);
+
+  const loadProfile = async () => {
+    if (!address) return;
+    setLoading(true);
+    try {
+      const data = await getMakerProfile(address);
+      setProfile(data);
+    } catch (error) {
+      console.error('Failed to load maker profile:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  if (!isLoggedIn) {
+  const handleToggleStatus = async () => {
+    if (!profile || !mnemonic) return;
+
+    const newActive = profile.status !== 'active';
+    setToggling(true);
+    try {
+      await toggleStatus(newActive, mnemonic);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setProfile({ ...profile, status: newActive ? 'active' : 'paused' });
+    } catch (error: any) {
+      Alert.alert('操作失败', error.message);
+    } finally {
+      setToggling(false);
+    }
+  };
+
+  if (loading) {
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Text style={styles.backText}>‹ 返回</Text>
-          </Pressable>
-          <Text style={styles.headerTitle}>做市商</Text>
-          <View style={styles.headerRight} />
-        </View>
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyIcon}>🏦</Text>
-          <Text style={styles.emptyTitle}>请先登录</Text>
-          <Text style={styles.emptySubtitle}>登录后查看做市商功能</Text>
-        </View>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 100 }}>
+          加载中...
+        </Text>
       </View>
     );
   }
 
-  if (!isConnected) {
+  if (!profile) {
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Text style={styles.backText}>‹ 返回</Text>
-          </Pressable>
-          <Text style={styles.headerTitle}>做市商</Text>
-          <View style={styles.headerRight} />
+      <ScrollView
+        style={[styles.container, { backgroundColor: colors.background }]}
+        contentContainerStyle={styles.emptyContent}
+      >
+        <View style={[styles.emptyIcon, { backgroundColor: Colors.primary + '15' }]}>
+          <TrendingUp size={48} color={Colors.primary} />
         </View>
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyIcon}>🔌</Text>
-          <Text style={styles.emptyTitle}>未连接网络</Text>
-          <Text style={styles.emptySubtitle}>请先连接区块链网络</Text>
-        </View>
-      </View>
+        <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>
+          成为做市商
+        </Text>
+        <Text style={[styles.emptySubtitle, { color: colors.textSecondary }]}>
+          为平台提供流动性，赚取交易差价
+        </Text>
+
+        <Card style={styles.benefitsCard}>
+          <Text style={[styles.benefitsTitle, { color: colors.textPrimary }]}>
+            做市商权益
+          </Text>
+          <View style={styles.benefitItem}>
+            <Text style={[styles.benefitDot, { color: Colors.success }]}>•</Text>
+            <Text style={[styles.benefitText, { color: colors.textSecondary }]}>
+              自定义买卖价格，赚取差价
+            </Text>
+          </View>
+          <View style={styles.benefitItem}>
+            <Text style={[styles.benefitDot, { color: Colors.success }]}>•</Text>
+            <Text style={[styles.benefitText, { color: colors.textSecondary }]}>
+              OTC 交易优先匹配
+            </Text>
+          </View>
+          <View style={styles.benefitItem}>
+            <Text style={[styles.benefitDot, { color: Colors.success }]}>•</Text>
+            <Text style={[styles.benefitText, { color: colors.textSecondary }]}>
+              专属做市商标识
+            </Text>
+          </View>
+          <View style={styles.benefitItem}>
+            <Text style={[styles.benefitDot, { color: Colors.success }]}>•</Text>
+            <Text style={[styles.benefitText, { color: colors.textSecondary }]}>
+              数据统计与分析
+            </Text>
+          </View>
+        </Card>
+
+        <Card style={styles.requireCard}>
+          <Text style={[styles.requireTitle, { color: colors.textPrimary }]}>
+            申请条件
+          </Text>
+          <View style={styles.requireItem}>
+            <Text style={[styles.requireLabel, { color: colors.textSecondary }]}>
+              KYC 等级
+            </Text>
+            <Text style={[styles.requireValue, { color: colors.textPrimary }]}>
+              高级认证及以上
+            </Text>
+          </View>
+          <View style={styles.requireItem}>
+            <Text style={[styles.requireLabel, { color: colors.textSecondary }]}>
+              保证金
+            </Text>
+            <Text style={[styles.requireValue, { color: colors.textPrimary }]}>
+              ≥ 10,000 COS
+            </Text>
+          </View>
+        </Card>
+
+        <Button
+          title="申请成为做市商"
+          onPress={() => router.push('/maker/apply')}
+          style={styles.applyButton}
+        />
+      </ScrollView>
     );
   }
+
+  const isActive = profile.status === 'active';
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backText}>‹ 返回</Text>
-        </Pressable>
-        <Text style={styles.headerTitle}>做市商</Text>
-        <View style={styles.headerRight} />
+    <ScrollView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      contentContainerStyle={styles.content}
+    >
+      {/* Status Header */}
+      <Card style={[styles.statusCard, { backgroundColor: isActive ? Colors.success + '15' : colors.surface }]}>
+        <View style={styles.statusRow}>
+          <View>
+            <Text style={[styles.statusLabel, { color: colors.textSecondary }]}>
+              当前状态
+            </Text>
+            <Text style={[styles.statusValue, { color: isActive ? Colors.success : Colors.warning }]}>
+              {isActive ? '营业中' : '已暂停'}
+            </Text>
+          </View>
+          <Switch
+            value={isActive}
+            onValueChange={handleToggleStatus}
+            disabled={toggling}
+            trackColor={{ false: colors.border, true: Colors.success }}
+            thumbColor="#FFFFFF"
+          />
+        </View>
+      </Card>
+
+      {/* Stats */}
+      <View style={styles.statsGrid}>
+        <Card style={styles.statCard}>
+          <Text style={[styles.statValue, { color: colors.textPrimary }]}>
+            {profile.completedOrders}
+          </Text>
+          <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
+            完成订单
+          </Text>
+        </Card>
+        <Card style={styles.statCard}>
+          <Text style={[styles.statValue, { color: Colors.success }]}>
+            {profile.completionRate}%
+          </Text>
+          <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
+            完成率
+          </Text>
+        </Card>
       </View>
 
-      <ScrollView
-        style={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-        }
-      >
-        {loading && !makerInfo ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#6D28D9" />
-            <Text style={styles.loadingText}>加载中...</Text>
+      {/* Balances */}
+      <Card style={styles.balanceCard}>
+        <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>
+          资金池
+        </Text>
+        <View style={styles.balanceRow}>
+          <View style={styles.balanceItem}>
+            <Text style={[styles.balanceLabel, { color: colors.textSecondary }]}>
+              COS 余额
+            </Text>
+            <Text style={[styles.balanceValue, { color: colors.textPrimary }]}>
+              {formatAmount(profile.availableCos, 12)}
+            </Text>
           </View>
-        ) : isMaker && makerInfo?.application ? (
-          <>
-            <View style={styles.statusCard}>
-              <View style={styles.statusHeader}>
-                <Text style={styles.statusTitle}>做市商状态</Text>
-                <View style={[
-                  styles.statusBadge,
-                  { backgroundColor: makerService.getStatusColor(makerInfo.application.status) }
-                ]}>
-                  <Text style={styles.statusBadgeText}>
-                    {makerService.getStatusText(makerInfo.application.status)}
-                  </Text>
-                </View>
-              </View>
-              
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>做市商 ID</Text>
-                <Text style={styles.infoValue}>#{makerInfo.makerId}</Text>
-              </View>
-              
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>业务方向</Text>
-                <Text style={styles.infoValue}>
-                  {makerService.getDirectionText(makerInfo.application.direction)}
-                </Text>
-              </View>
-              
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>押金</Text>
-                <Text style={styles.infoValue}>
-                  {makerService.formatDeposit(makerInfo.application.deposit)}
-                </Text>
-              </View>
+          <View style={styles.balanceItem}>
+            <Text style={[styles.balanceLabel, { color: colors.textSecondary }]}>
+              USDT 余额
+            </Text>
+            <Text style={[styles.balanceValue, { color: colors.textPrimary }]}>
+              {formatAmount(profile.availableUsdt, 6)}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.balanceActions}>
+          <TouchableOpacity
+            style={[styles.balanceBtn, { backgroundColor: Colors.success + '15' }]}
+            onPress={() => router.push('/maker/deposit')}
+          >
+            <Plus size={18} color={Colors.success} />
+            <Text style={[styles.balanceBtnText, { color: Colors.success }]}>
+              充值
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.balanceBtn, { backgroundColor: Colors.warning + '15' }]}
+            onPress={() => router.push('/maker/withdraw')}
+          >
+            <Minus size={18} color={Colors.warning} />
+            <Text style={[styles.balanceBtnText, { color: Colors.warning }]}>
+              提现
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </Card>
 
-              {makerInfo.application.depositWarning && (
-                <View style={styles.warningBox}>
-                  <Text style={styles.warningText}>⚠️ 押金不足，请及时补充</Text>
-                </View>
-              )}
-              
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>已服务用户</Text>
-                <Text style={styles.infoValue}>{makerInfo.application.usersServed} 人</Text>
-              </View>
+      {/* Price Settings */}
+      <Card style={styles.priceCard}>
+        <View style={styles.priceHeader}>
+          <Text style={[styles.cardTitle, { color: colors.textPrimary }]}>
+            价格设置
+          </Text>
+          <TouchableOpacity onPress={() => router.push('/maker/settings')}>
+            <Settings size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.priceRow}>
+          <Text style={[styles.priceLabel, { color: colors.textSecondary }]}>
+            当前报价
+          </Text>
+          <Text style={[styles.priceValue, { color: Colors.primary }]}>
+            {(Number(profile.price) / 10000).toFixed(4)} USDT/COS
+          </Text>
+        </View>
+        <View style={styles.priceRow}>
+          <Text style={[styles.priceLabel, { color: colors.textSecondary }]}>
+            限额范围
+          </Text>
+          <Text style={[styles.priceValue, { color: colors.textPrimary }]}>
+            {formatAmount(profile.minAmount, 12)} - {formatAmount(profile.maxAmount, 12)} COS
+          </Text>
+        </View>
+      </Card>
 
-              {makerInfo.application.servicePaused && (
-                <View style={styles.pausedBox}>
-                  <Text style={styles.pausedText}>🔴 服务已暂停</Text>
-                </View>
-              )}
-            </View>
-
-            {isActiveMaker && (
-              <View style={styles.actionCard}>
-                <Text style={styles.cardTitle}>快捷操作</Text>
-                <View style={styles.actionButtons}>
-                  <Pressable
-                    style={styles.actionButton}
-                    onPress={() => router.push('/maker/manage')}
-                  >
-                    <Text style={styles.actionIcon}>⚙️</Text>
-                    <Text style={styles.actionText}>管理</Text>
-                  </Pressable>
-                  <Pressable
-                    style={styles.actionButton}
-                    onPress={() => router.push('/maker/withdraw')}
-                  >
-                    <Text style={styles.actionIcon}>💰</Text>
-                    <Text style={styles.actionText}>提现</Text>
-                  </Pressable>
-                  <Pressable
-                    style={styles.actionButton}
-                    onPress={() => router.push('/maker/penalties')}
-                  >
-                    <Text style={styles.actionIcon}>📋</Text>
-                    <Text style={styles.actionText}>记录</Text>
-                  </Pressable>
-                </View>
-              </View>
-            )}
-
-            {makerInfo.application.status === ApplicationStatus.DepositLocked && (
-              <View style={styles.actionCard}>
-                <Text style={styles.cardTitle}>下一步</Text>
-                <Text style={styles.hintText}>
-                  押金已锁定，请在 1 小时内提交资料完成申请
-                </Text>
-                <Pressable
-                  style={styles.primaryButton}
-                  onPress={() => router.push('/maker/apply')}
-                >
-                  <Text style={styles.primaryButtonText}>提交资料</Text>
-                </Pressable>
-              </View>
-            )}
-
-            {makerInfo.application.status === ApplicationStatus.PendingReview && (
-              <View style={styles.infoCard}>
-                <Text style={styles.cardTitle}>审核中</Text>
-                <Text style={styles.hintText}>
-                  您的申请正在审核中，请耐心等待治理委员会审批
-                </Text>
-              </View>
-            )}
-
-            {makerInfo.application.status === ApplicationStatus.Rejected && (
-              <View style={styles.errorCard}>
-                <Text style={styles.cardTitle}>申请被驳回</Text>
-                <Text style={styles.hintText}>
-                  您的做市商申请已被驳回，押金已退还
-                </Text>
-              </View>
-            )}
-          </>
-        ) : (
-          <>
-            <View style={styles.welcomeCard}>
-              <Text style={styles.welcomeIcon}>🏦</Text>
-              <Text style={styles.welcomeTitle}>成为做市商</Text>
-              <Text style={styles.welcomeSubtitle}>
-                为 Cosmos 平台提供 OTC 和 Bridge 服务，赚取交易手续费
-              </Text>
-            </View>
-
-            <View style={styles.benefitsCard}>
-              <Text style={styles.cardTitle}>💎 做市商权益</Text>
-              <View style={styles.benefitItem}>
-                <Text style={styles.benefitIcon}>💰</Text>
-                <View style={styles.benefitContent}>
-                  <Text style={styles.benefitTitle}>交易手续费收入</Text>
-                  <Text style={styles.benefitDesc}>每笔交易可获得溢价收益</Text>
-                </View>
-              </View>
-              <View style={styles.benefitItem}>
-                <Text style={styles.benefitIcon}>⭐</Text>
-                <View style={styles.benefitContent}>
-                  <Text style={styles.benefitTitle}>信用等级体系</Text>
-                  <Text style={styles.benefitDesc}>优质服务可提升信用等级，降低押金要求</Text>
-                </View>
-              </View>
-              <View style={styles.benefitItem}>
-                <Text style={styles.benefitIcon}>🛡️</Text>
-                <View style={styles.benefitContent}>
-                  <Text style={styles.benefitTitle}>争议保护机制</Text>
-                  <Text style={styles.benefitDesc}>完善的仲裁和申诉流程保障权益</Text>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.requirementsCard}>
-              <Text style={styles.cardTitle}>📋 申请要求</Text>
-              <View style={styles.requirementItem}>
-                <Text style={styles.requirementDot}>•</Text>
-                <Text style={styles.requirementText}>
-                  锁定押金 {depositAmountFormatted}（约 1000 USD）
-                </Text>
-              </View>
-              <View style={styles.requirementItem}>
-                <Text style={styles.requirementDot}>•</Text>
-                <Text style={styles.requirementText}>提供真实身份信息（脱敏展示）</Text>
-              </View>
-              <View style={styles.requirementItem}>
-                <Text style={styles.requirementDot}>•</Text>
-                <Text style={styles.requirementText}>提供 TRON 收款地址</Text>
-              </View>
-              <View style={styles.requirementItem}>
-                <Text style={styles.requirementDot}>•</Text>
-                <Text style={styles.requirementText}>通过治理委员会审核</Text>
-              </View>
-              <View style={styles.requirementItem}>
-                <Text style={styles.requirementDot}>•</Text>
-                <Text style={styles.requirementText}>
-                  提现冷却期 {cooldownDays} 天
-                </Text>
-              </View>
-            </View>
-
-            <Pressable
-              style={styles.applyButton}
-              onPress={() => router.push('/maker/apply')}
-            >
-              <Text style={styles.applyButtonText}>立即申请</Text>
-            </Pressable>
-          </>
-        )}
-
-        <View style={styles.bottomPadding} />
-      </ScrollView>
-    </View>
+      {/* Quick Actions */}
+      <View style={styles.actions}>
+        <TouchableOpacity
+          style={[styles.actionItem, { backgroundColor: colors.surface }]}
+          onPress={() => router.push('/maker/orders')}
+        >
+          <FileText size={24} color={Colors.primary} />
+          <Text style={[styles.actionText, { color: colors.textPrimary }]}>
+            订单管理
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.actionItem, { backgroundColor: colors.surface }]}
+          onPress={() => router.push('/maker/stats')}
+        >
+          <TrendingUp size={24} color={Colors.primary} />
+          <Text style={[styles.actionText, { color: colors.textPrimary }]}>
+            数据统计
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
   );
+}
+
+function formatAmount(value: string, decimals: number): string {
+  const bigValue = BigInt(value || '0');
+  const divisor = BigInt(10 ** decimals);
+  const whole = bigValue / divisor;
+  const fraction = bigValue % divisor;
+  const fractionStr = fraction.toString().padStart(decimals, '0').slice(0, 2);
+  return `${whole}.${fractionStr}`;
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  header: {
-    backgroundColor: '#6D28D9',
-    paddingTop: 50,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  backButton: {
-    padding: 4,
-  },
-  backText: {
-    color: '#fff',
-    fontSize: 18,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  headerRight: {
-    width: 40,
   },
   content: {
-    flex: 1,
+    padding: 16,
   },
-  loadingContainer: {
-    flex: 1,
+  emptyContent: {
+    padding: 16,
+    paddingTop: 40,
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 100,
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: '#6b7280',
-  },
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
   },
   emptyIcon: {
-    fontSize: 64,
-    marginBottom: 16,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
   },
   emptyTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1f2937',
+    fontSize: 24,
+    fontWeight: '700',
     marginBottom: 8,
   },
   emptySubtitle: {
-    fontSize: 14,
-    color: '#9ca3af',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 24,
   },
-  statusCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginTop: 16,
-    padding: 16,
-    borderRadius: 12,
-  },
-  statusHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  benefitsCard: {
+    width: '100%',
     marginBottom: 16,
   },
-  statusTitle: {
-    fontSize: 18,
+  benefitsTitle: {
+    fontSize: 16,
     fontWeight: '600',
-    color: '#1f2937',
+    marginBottom: 12,
   },
-  statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
+  benefitItem: {
+    flexDirection: 'row',
+    marginBottom: 8,
   },
-  statusBadgeText: {
-    color: '#fff',
-    fontSize: 12,
+  benefitDot: {
+    fontSize: 16,
+    marginRight: 8,
+  },
+  benefitText: {
+    fontSize: 14,
+    flex: 1,
+  },
+  requireCard: {
+    width: '100%',
+    marginBottom: 24,
+  },
+  requireTitle: {
+    fontSize: 16,
     fontWeight: '600',
+    marginBottom: 12,
   },
-  infoRow: {
+  requireItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    marginBottom: 8,
   },
-  infoLabel: {
+  requireLabel: {
     fontSize: 14,
-    color: '#6b7280',
   },
-  infoValue: {
+  requireValue: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#1f2937',
   },
-  warningBox: {
-    backgroundColor: '#fef3c7',
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 12,
+  applyButton: {
+    width: '100%',
   },
-  warningText: {
-    color: '#92400e',
+  statusCard: {
+    marginBottom: 16,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  statusLabel: {
     fontSize: 14,
+    marginBottom: 4,
   },
-  pausedBox: {
-    backgroundColor: '#fee2e2',
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 12,
+  statusValue: {
+    fontSize: 20,
+    fontWeight: '700',
   },
-  pausedText: {
-    color: '#991b1b',
-    fontSize: 14,
+  statsGrid: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 16,
   },
-  actionCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginTop: 16,
-    padding: 16,
-    borderRadius: 12,
+  statCard: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  statValue: {
+    fontSize: 24,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 13,
+  },
+  balanceCard: {
+    marginBottom: 16,
   },
   cardTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1f2937',
     marginBottom: 12,
   },
-  actionButtons: {
+  balanceRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    marginBottom: 16,
   },
-  actionButton: {
-    alignItems: 'center',
-    padding: 12,
+  balanceItem: {
+    flex: 1,
   },
-  actionIcon: {
-    fontSize: 28,
+  balanceLabel: {
+    fontSize: 13,
     marginBottom: 4,
   },
-  actionText: {
-    fontSize: 12,
-    color: '#6b7280',
+  balanceValue: {
+    fontSize: 20,
+    fontWeight: '700',
   },
-  hintText: {
-    fontSize: 14,
-    color: '#6b7280',
-    marginBottom: 16,
-    lineHeight: 20,
+  balanceActions: {
+    flexDirection: 'row',
+    gap: 12,
   },
-  primaryButton: {
-    backgroundColor: '#6D28D9',
-    paddingVertical: 14,
-    borderRadius: 10,
+  balanceBtn: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    gap: 6,
   },
-  primaryButtonText: {
-    color: '#fff',
-    fontSize: 16,
+  balanceBtnText: {
+    fontSize: 15,
     fontWeight: '600',
   },
-  infoCard: {
-    backgroundColor: '#eff6ff',
-    marginHorizontal: 16,
-    marginTop: 16,
-    padding: 16,
-    borderRadius: 12,
-  },
-  errorCard: {
-    backgroundColor: '#fef2f2',
-    marginHorizontal: 16,
-    marginTop: 16,
-    padding: 16,
-    borderRadius: 12,
-  },
-  welcomeCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginTop: 16,
-    padding: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  welcomeIcon: {
-    fontSize: 64,
+  priceCard: {
     marginBottom: 16,
   },
-  welcomeTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1f2937',
+  priceHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     marginBottom: 8,
   },
-  welcomeSubtitle: {
+  priceLabel: {
     fontSize: 14,
-    color: '#6b7280',
-    textAlign: 'center',
-    lineHeight: 20,
   },
-  benefitsCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginTop: 16,
-    padding: 16,
-    borderRadius: 12,
-  },
-  benefitItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingVertical: 10,
-  },
-  benefitIcon: {
-    fontSize: 24,
-    marginRight: 12,
-  },
-  benefitContent: {
-    flex: 1,
-  },
-  benefitTitle: {
+  priceValue: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#1f2937',
-    marginBottom: 2,
   },
-  benefitDesc: {
-    fontSize: 12,
-    color: '#6b7280',
-  },
-  requirementsCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginTop: 16,
-    padding: 16,
-    borderRadius: 12,
-  },
-  requirementItem: {
+  actions: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingVertical: 6,
+    gap: 12,
   },
-  requirementDot: {
-    fontSize: 14,
-    color: '#6D28D9',
-    marginRight: 8,
-    fontWeight: 'bold',
-  },
-  requirementText: {
+  actionItem: {
     flex: 1,
-    fontSize: 14,
-    color: '#374151',
-    lineHeight: 20,
-  },
-  applyButton: {
-    backgroundColor: '#6D28D9',
-    marginHorizontal: 16,
-    marginTop: 24,
-    paddingVertical: 16,
-    borderRadius: 12,
     alignItems: 'center',
+    paddingVertical: 20,
+    borderRadius: 16,
   },
-  applyButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  bottomPadding: {
-    height: 40,
+  actionText: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginTop: 8,
   },
 });

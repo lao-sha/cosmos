@@ -1,466 +1,412 @@
-import { useSwapMakers } from '@/src/hooks/useSwap';
-import { useCosPrice } from '@/src/hooks/usePricing';
-import { swapService, MakerInfo } from '@/src/services/swap';
-import { useAuthStore } from '@/src/stores/auth';
-import { useChainStore } from '@/src/stores/chain';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
-  ActivityIndicator,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
+  View,
   Text,
-  View
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
 } from 'react-native';
+import { useRouter } from 'expo-router';
+import { ArrowDownUp, ChevronDown, Clock, Info } from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
+import { useColors } from '@/hooks/useColors';
+import { useWalletStore } from '@/stores/wallet';
+import { useBalance, formatBalance } from '@/hooks/useBalance';
+import { getSwapQuotes, executeSwap, type SwapDirection, type SwapQuote } from '@/services/swap';
+import { Button, Input, Card } from '@/components/ui';
+import { Colors, Gradients } from '@/constants/colors';
 
 export default function SwapScreen() {
+  const colors = useColors();
   const router = useRouter();
-  const { isLoggedIn } = useAuthStore();
-  const { isConnected } = useChainStore();
-  const { makers, loading, refresh } = useSwapMakers();
-  const { priceFormatted } = useCosPrice();
-  const [refreshing, setRefreshing] = useState(false);
+  const { address, mnemonic, isConnected } = useWalletStore();
+  const { data: balance } = useBalance();
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await refresh();
-    setRefreshing(false);
+  const [direction, setDirection] = useState<SwapDirection>('usdt_to_cos');
+  const [inputAmount, setInputAmount] = useState('');
+  const [quotes, setQuotes] = useState<SwapQuote[]>([]);
+  const [selectedQuote, setSelectedQuote] = useState<SwapQuote | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [swapping, setSwapping] = useState(false);
+
+  const inputToken = direction === 'usdt_to_cos' ? 'USDT' : 'COS';
+  const outputToken = direction === 'usdt_to_cos' ? 'COS' : 'USDT';
+
+  useEffect(() => {
+    const fetchQuotes = async () => {
+      if (!inputAmount || parseFloat(inputAmount) <= 0) {
+        setQuotes([]);
+        setSelectedQuote(null);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const decimals = direction === 'usdt_to_cos' ? 6 : 12;
+        const amount = parseAmount(inputAmount, decimals);
+        const result = await getSwapQuotes(direction, amount);
+        setQuotes(result);
+        if (result.length > 0) {
+          setSelectedQuote(result[0]);
+        }
+      } catch (error) {
+        console.error('Failed to get quotes:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const timer = setTimeout(fetchQuotes, 500);
+    return () => clearTimeout(timer);
+  }, [inputAmount, direction]);
+
+  const handleSwitch = () => {
+    setDirection(d => d === 'usdt_to_cos' ? 'cos_to_usdt' : 'usdt_to_cos');
+    setInputAmount('');
+    setQuotes([]);
+    setSelectedQuote(null);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
-  const handleSelectMaker = (maker: MakerInfo) => {
-    router.push({
-      pathname: '/swap/create',
-      params: { makerId: maker.makerId.toString() },
-    });
-  };
+  const handleSwap = async () => {
+    if (!isConnected || !mnemonic) {
+      Alert.alert('提示', '请先解锁钱包');
+      return;
+    }
+    if (!selectedQuote) {
+      Alert.alert('提示', '请输入兑换金额');
+      return;
+    }
 
-  if (!isConnected) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Text style={styles.backText}>‹ 返回</Text>
-          </Pressable>
-          <Text style={styles.headerTitle}>COS 兑换</Text>
-          <View style={styles.headerRight} />
-        </View>
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyIcon}>🔌</Text>
-          <Text style={styles.emptyTitle}>未连接网络</Text>
-          <Text style={styles.emptySubtitle}>请先连接区块链网络</Text>
-        </View>
-      </View>
+    Alert.alert(
+      '确认兑换',
+      `支付 ${formatAmount(selectedQuote.inputAmount, direction === 'usdt_to_cos' ? 6 : 12)} ${inputToken}\n获得 ≈${formatAmount(selectedQuote.outputAmount, direction === 'usdt_to_cos' ? 12 : 6)} ${outputToken}`,
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '确认',
+          onPress: async () => {
+            setSwapping(true);
+            try {
+              await executeSwap(
+                selectedQuote.makerId,
+                direction,
+                selectedQuote.inputAmount,
+                mnemonic
+              );
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              Alert.alert('兑换成功', '资产已到账');
+              setInputAmount('');
+              setQuotes([]);
+              setSelectedQuote(null);
+            } catch (error: any) {
+              Alert.alert('兑换失败', error.message);
+            } finally {
+              setSwapping(false);
+            }
+          },
+        },
+      ]
     );
-  }
+  };
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      contentContainerStyle={styles.content}
+    >
       <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backText}>‹ 返回</Text>
-        </Pressable>
-        <Text style={styles.headerTitle}>COS 兑换</Text>
-        <Pressable 
-          style={styles.ordersButton}
+        <Text style={[styles.title, { color: colors.textPrimary }]}>兑换</Text>
+        <TouchableOpacity
+          style={styles.historyButton}
           onPress={() => router.push('/swap/history')}
         >
-          <Text style={styles.ordersButtonText}>兑换记录</Text>
-        </Pressable>
+          <Clock size={20} color={Colors.primary} />
+        </TouchableOpacity>
       </View>
 
-      <ScrollView
-        style={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-        }
-      >
-        <View style={styles.infoCard}>
-          <View style={styles.infoHeader}>
-            <Text style={styles.infoIcon}>💱</Text>
-            <Text style={styles.infoTitle}>COS → USDT</Text>
+      {/* Swap Card */}
+      <Card style={styles.swapCard}>
+        {/* Input */}
+        <View style={styles.tokenSection}>
+          <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
+            支付
+          </Text>
+          <View style={styles.inputRow}>
+            <Input
+              placeholder="0.00"
+              value={inputAmount}
+              onChangeText={setInputAmount}
+              keyboardType="decimal-pad"
+              containerStyle={styles.amountInput}
+            />
+            <View style={[styles.tokenBadge, { backgroundColor: colors.surface }]}>
+              <Text style={[styles.tokenText, { color: colors.textPrimary }]}>
+                {inputToken}
+              </Text>
+            </View>
           </View>
-          <Text style={styles.infoDesc}>
-            将您的 COS 代币兑换为 TRC20 USDT，由做市商提供服务
+          <Text style={[styles.balanceText, { color: colors.textTertiary }]}>
+            余额: {balance ? formatBalance(balance) : '0'} COS
           </Text>
         </View>
 
-        <View style={styles.priceCard}>
-          <Text style={styles.priceLabel}>当前 COS 价格</Text>
-          <Text style={styles.priceValue}>{priceFormatted}</Text>
-        </View>
+        {/* Switch Button */}
+        <TouchableOpacity
+          style={[styles.switchButton, { backgroundColor: Colors.primary }]}
+          onPress={handleSwitch}
+        >
+          <ArrowDownUp size={20} color="#FFFFFF" />
+        </TouchableOpacity>
 
-        <View style={styles.flowCard}>
-          <Text style={styles.flowTitle}>兑换流程</Text>
-          <View style={styles.flowSteps}>
-            <View style={styles.flowStep}>
-              <Text style={styles.flowStepNum}>1</Text>
-              <Text style={styles.flowStepText}>选择做市商</Text>
-            </View>
-            <Text style={styles.flowArrow}>→</Text>
-            <View style={styles.flowStep}>
-              <Text style={styles.flowStepNum}>2</Text>
-              <Text style={styles.flowStepText}>锁定 COS</Text>
-            </View>
-            <Text style={styles.flowArrow}>→</Text>
-            <View style={styles.flowStep}>
-              <Text style={styles.flowStepNum}>3</Text>
-              <Text style={styles.flowStepText}>收取 USDT</Text>
+        {/* Output */}
+        <View style={styles.tokenSection}>
+          <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
+            获得
+          </Text>
+          <View style={styles.outputRow}>
+            <Text style={[styles.outputAmount, { color: colors.textPrimary }]}>
+              {selectedQuote
+                ? formatAmount(selectedQuote.outputAmount, direction === 'usdt_to_cos' ? 12 : 6)
+                : '0.00'}
+            </Text>
+            <View style={[styles.tokenBadge, { backgroundColor: colors.surface }]}>
+              <Text style={[styles.tokenText, { color: colors.textPrimary }]}>
+                {outputToken}
+              </Text>
             </View>
           </View>
         </View>
+      </Card>
 
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>选择做市商</Text>
-          <Text style={styles.sectionCount}>{makers.length} 位在线</Text>
-        </View>
-
-        {loading && makers.length === 0 ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#10b981" />
-            <Text style={styles.loadingText}>加载中...</Text>
-          </View>
-        ) : makers.length === 0 ? (
-          <View style={styles.emptyMakers}>
-            <Text style={styles.emptyMakersIcon}>😔</Text>
-            <Text style={styles.emptyMakersText}>暂无在线做市商</Text>
-          </View>
-        ) : (
-          makers.map((maker) => (
-            <Pressable
-              key={maker.makerId}
-              style={({ pressed }) => [
-                styles.makerCard,
-                pressed && styles.makerCardPressed,
+      {/* Quote Selection */}
+      {quotes.length > 0 && (
+        <Card style={styles.quotesCard}>
+          <Text style={[styles.quotesTitle, { color: colors.textPrimary }]}>
+            选择商家
+          </Text>
+          {quotes.map((quote) => (
+            <TouchableOpacity
+              key={quote.makerId}
+              style={[
+                styles.quoteItem,
+                {
+                  borderColor:
+                    selectedQuote?.makerId === quote.makerId
+                      ? Colors.primary
+                      : colors.border,
+                  backgroundColor:
+                    selectedQuote?.makerId === quote.makerId
+                      ? Colors.primary + '10'
+                      : 'transparent',
+                },
               ]}
-              onPress={() => handleSelectMaker(maker)}
+              onPress={() => setSelectedQuote(quote)}
             >
-              <View style={styles.makerHeader}>
-                <View style={styles.makerInfo}>
-                  <Text style={styles.makerName}>{maker.maskedFullName || `做市商 #${maker.makerId}`}</Text>
-                  <Text style={styles.makerStats}>
-                    已服务 {maker.usersServed} 人
-                  </Text>
-                </View>
-                <View style={styles.makerBadge}>
-                  <Text style={styles.makerBadgeText}>在线</Text>
-                </View>
-              </View>
-              
-              <View style={styles.makerDetails}>
-                <View style={styles.detailItem}>
-                  <Text style={styles.detailLabel}>卖出溢价</Text>
-                  <Text style={styles.detailValue}>
-                    {(maker.sellPremiumBps / 100).toFixed(2)}%
-                  </Text>
-                </View>
-                <View style={styles.detailItem}>
-                  <Text style={styles.detailLabel}>微信</Text>
-                  <Text style={styles.detailValue}>{maker.wechatId || '-'}</Text>
-                </View>
-              </View>
-
-              <View style={styles.makerFooter}>
-                <Text style={styles.tronAddress} numberOfLines={1}>
-                  TRON: {maker.tronAddress}
+              <View style={styles.quoteInfo}>
+                <Text style={[styles.quoteMaker, { color: colors.textPrimary }]}>
+                  {quote.makerName}
+                </Text>
+                <Text style={[styles.quotePrice, { color: colors.textSecondary }]}>
+                  价格: {(Number(quote.price) / 10000).toFixed(4)} USDT
                 </Text>
               </View>
-            </Pressable>
-          ))
-        )}
+              <View style={styles.quoteOutput}>
+                <Text style={[styles.quoteAmount, { color: Colors.success }]}>
+                  {formatAmount(quote.outputAmount, direction === 'usdt_to_cos' ? 12 : 6)}
+                </Text>
+                <Text style={[styles.quoteToken, { color: colors.textSecondary }]}>
+                  {outputToken}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </Card>
+      )}
 
-        <View style={styles.noticeCard}>
-          <Text style={styles.noticeTitle}>⚠️ 兑换须知</Text>
-          <Text style={styles.noticeText}>
-            1. 最小兑换金额：100 COS{'\n'}
-            2. 做市商需在 24 小时内完成 USDT 转账{'\n'}
-            3. 系统自动验证 TRC20 交易{'\n'}
-            4. 如有问题可发起举报
-          </Text>
-        </View>
+      {/* Info */}
+      {selectedQuote && (
+        <Card style={styles.infoCard}>
+          <View style={styles.infoRow}>
+            <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>
+              汇率
+            </Text>
+            <Text style={[styles.infoValue, { color: colors.textPrimary }]}>
+              1 COS = {(Number(selectedQuote.price) / 10000).toFixed(4)} USDT
+            </Text>
+          </View>
+          <View style={styles.infoRow}>
+            <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>
+              手续费
+            </Text>
+            <Text style={[styles.infoValue, { color: colors.textPrimary }]}>
+              0.3%
+            </Text>
+          </View>
+          <View style={styles.infoRow}>
+            <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>
+              滑点保护
+            </Text>
+            <Text style={[styles.infoValue, { color: colors.textPrimary }]}>
+              {selectedQuote.slippage}%
+            </Text>
+          </View>
+        </Card>
+      )}
 
-        <View style={styles.bottomPadding} />
-      </ScrollView>
-    </View>
+      {/* Submit */}
+      <Button
+        title={swapping ? '兑换中...' : '兑换'}
+        onPress={handleSwap}
+        loading={swapping}
+        disabled={!selectedQuote || loading}
+        style={styles.submitButton}
+      />
+    </ScrollView>
   );
+}
+
+function parseAmount(value: string, decimals: number): string {
+  const [whole, fraction = ''] = value.split('.');
+  const paddedFraction = fraction.padEnd(decimals, '0').slice(0, decimals);
+  return BigInt(whole + paddedFraction).toString();
+}
+
+function formatAmount(value: string, decimals: number): string {
+  const bigValue = BigInt(value);
+  const divisor = BigInt(10 ** decimals);
+  const whole = bigValue / divisor;
+  const fraction = bigValue % divisor;
+  const fractionStr = fraction.toString().padStart(decimals, '0').slice(0, 4);
+  return `${whole}.${fractionStr}`;
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  header: {
-    backgroundColor: '#10b981',
-    paddingTop: 50,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  backButton: {
-    padding: 4,
-  },
-  backText: {
-    color: '#fff',
-    fontSize: 18,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  headerRight: {
-    width: 70,
-  },
-  ordersButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 16,
-  },
-  ordersButtonText: {
-    color: '#fff',
-    fontSize: 13,
   },
   content: {
-    flex: 1,
+    padding: 16,
   },
-  emptyContainer: {
-    flex: 1,
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  emptyIcon: {
-    fontSize: 64,
     marginBottom: 16,
   },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1f2937',
+  title: {
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  historyButton: {
+    padding: 8,
+  },
+  swapCard: {
+    marginBottom: 16,
+    position: 'relative',
+  },
+  tokenSection: {
     marginBottom: 8,
   },
-  emptySubtitle: {
+  sectionLabel: {
     fontSize: 14,
-    color: '#9ca3af',
+    marginBottom: 8,
   },
-  infoCard: {
-    backgroundColor: '#ecfdf5',
-    marginHorizontal: 16,
-    marginTop: 16,
-    padding: 16,
-    borderRadius: 12,
-  },
-  infoHeader: {
+  inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
   },
-  infoIcon: {
-    fontSize: 24,
+  amountInput: {
+    flex: 1,
+    marginBottom: 0,
     marginRight: 8,
   },
-  infoTitle: {
-    fontSize: 18,
+  tokenBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  tokenText: {
+    fontSize: 16,
     fontWeight: '600',
-    color: '#065f46',
   },
-  infoDesc: {
-    fontSize: 14,
-    color: '#047857',
-    lineHeight: 20,
-  },
-  priceCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginTop: 16,
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  priceLabel: {
+  balanceText: {
     fontSize: 12,
-    color: '#6b7280',
-    marginBottom: 4,
+    marginTop: 8,
   },
-  priceValue: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#10b981',
-  },
-  flowCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginTop: 16,
-    padding: 16,
-    borderRadius: 12,
-  },
-  flowTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1f2937',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  flowSteps: {
-    flexDirection: 'row',
+  switchButton: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    marginLeft: -20,
+    marginTop: -20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 1,
   },
-  flowStep: {
+  outputRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  flowStepNum: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#10b981',
-    color: '#fff',
-    textAlign: 'center',
-    lineHeight: 24,
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 4,
+  outputAmount: {
+    fontSize: 28,
+    fontWeight: '700',
   },
-  flowStepText: {
-    fontSize: 12,
-    color: '#6b7280',
+  quotesCard: {
+    marginBottom: 16,
   },
-  flowArrow: {
+  quotesTitle: {
     fontSize: 16,
-    color: '#9ca3af',
-    marginHorizontal: 12,
+    fontWeight: '600',
+    marginBottom: 12,
   },
-  sectionHeader: {
+  quoteItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginHorizontal: 16,
-    marginTop: 20,
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1f2937',
-  },
-  sectionCount: {
-    fontSize: 13,
-    color: '#6b7280',
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: '#6b7280',
-  },
-  emptyMakers: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  emptyMakersIcon: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
-  emptyMakersText: {
-    fontSize: 14,
-    color: '#6b7280',
-  },
-  makerCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    padding: 16,
+    padding: 12,
     borderRadius: 12,
-  },
-  makerCardPressed: {
-    backgroundColor: '#f9fafb',
-  },
-  makerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  makerInfo: {
-    flex: 1,
-  },
-  makerName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1f2937',
-    marginBottom: 4,
-  },
-  makerStats: {
-    fontSize: 12,
-    color: '#6b7280',
-  },
-  makerBadge: {
-    backgroundColor: '#d1fae5',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  makerBadgeText: {
-    fontSize: 12,
-    color: '#059669',
-    fontWeight: '500',
-  },
-  makerDetails: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: '#f3f4f6',
-  },
-  detailItem: {
-    alignItems: 'center',
-  },
-  detailLabel: {
-    fontSize: 11,
-    color: '#9ca3af',
-    marginBottom: 4,
-  },
-  detailValue: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#1f2937',
-  },
-  makerFooter: {
-    marginTop: 12,
-  },
-  tronAddress: {
-    fontSize: 12,
-    color: '#6b7280',
-    fontFamily: 'monospace',
-  },
-  noticeCard: {
-    backgroundColor: '#fef3c7',
-    marginHorizontal: 16,
-    marginTop: 16,
-    padding: 16,
-    borderRadius: 12,
-  },
-  noticeTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#92400e',
+    borderWidth: 1.5,
     marginBottom: 8,
   },
-  noticeText: {
+  quoteInfo: {},
+  quoteMaker: {
+    fontSize: 15,
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  quotePrice: {
     fontSize: 13,
-    color: '#92400e',
-    lineHeight: 20,
   },
-  bottomPadding: {
-    height: 40,
+  quoteOutput: {
+    alignItems: 'flex-end',
   },
+  quoteAmount: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  quoteToken: {
+    fontSize: 12,
+  },
+  infoCard: {
+    marginBottom: 24,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  infoLabel: {
+    fontSize: 14,
+  },
+  infoValue: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  submitButton: {},
 });

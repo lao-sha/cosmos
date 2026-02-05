@@ -1,351 +1,415 @@
-import { CheckInCard } from '@/src/components/CheckInCard';
-import { MembershipCard, MemberTier, SubscriptionDuration } from '@/src/components/MembershipCard';
-import { TransactionModal } from '@/src/components/TransactionModal';
-import { useTransaction } from '@/src/hooks/useTransaction';
-import { useAuthStore } from '@/src/stores/auth';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-    Alert,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
 } from 'react-native';
-
-const MOCK_MEMBER_INFO = {
-  tier: 'basic' as MemberTier,
-  expiresAt: '2025-03-15',
-  cosBalance: 1250,
-  streak: 5,
-  lastCheckIn: new Date().toISOString().split('T')[0],
-  totalRewards: 8500,
-};
+import { useRouter } from 'expo-router';
+import { Crown, Gift, Star, ChevronRight, Check } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useColors } from '@/hooks/useColors';
+import { useWalletStore } from '@/stores/wallet';
+import {
+  getMembershipInfo,
+  MEMBERSHIP_LEVELS,
+  getLevelConfig,
+  getNextLevel,
+  type MembershipInfo,
+  type MembershipLevel,
+} from '@/services/membership';
+import { Card } from '@/components/ui';
+import { Colors, Shadows } from '@/constants/colors';
 
 export default function MembershipScreen() {
+  const colors = useColors();
   const router = useRouter();
-  const { isLoggedIn } = useAuthStore();
-  const { status, isLoading, transfer, reset } = useTransaction();
+  const { address } = useWalletStore();
 
-  const [duration, setDuration] = useState<SubscriptionDuration>('monthly');
-  const [selectedTier, setSelectedTier] = useState<MemberTier | null>(null);
-  const [modalVisible, setModalVisible] = useState(false);
+  const [info, setInfo] = useState<MembershipInfo | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const memberInfo = MOCK_MEMBER_INFO;
+  useEffect(() => {
+    loadData();
+  }, [address]);
 
-  const handleSelectTier = (tier: MemberTier) => {
-    if (!isLoggedIn) {
-      if (Platform.OS === 'web') {
-        alert('请先登录');
-      } else {
-        Alert.alert('提示', '请先登录');
-      }
-      return;
+  const loadData = async () => {
+    if (!address) return;
+    setLoading(true);
+    try {
+      const data = await getMembershipInfo(address);
+      setInfo(data);
+    } catch (error) {
+      console.error('Failed to load membership:', error);
+    } finally {
+      setLoading(false);
     }
-    setSelectedTier(tier);
-    setModalVisible(true);
-    reset();
   };
 
-  const handleConfirmSubscription = async () => {
-    if (!selectedTier) return;
-    // TODO: 实现会员订阅交易
-    // 目前使用 transfer 模拟
-    await transfer('5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY', '0.1');
-  };
+  if (loading || !info) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 100 }}>
+          加载中...
+        </Text>
+      </View>
+    );
+  }
 
-  const handleCheckIn = async () => {
-    // TODO: 实现签到交易
-  };
+  const levelConfig = getLevelConfig(info.level);
+  const nextLevel = getNextLevel(info.level);
+  const progress = nextLevel 
+    ? ((info.points - levelConfig.minPoints) / (nextLevel.minPoints - levelConfig.minPoints)) * 100
+    : 100;
 
-  const getMultiplier = (tier: MemberTier): number => {
-    const multipliers: Record<MemberTier, number> = {
-      free: 1,
-      basic: 2,
-      premium: 3,
-      vip: 5,
-    };
-    return multipliers[tier];
+  const getGradientColors = (level: MembershipLevel): [string, string] => {
+    switch (level) {
+      case 'bronze': return ['#CD7F32', '#8B4513'];
+      case 'silver': return ['#C0C0C0', '#808080'];
+      case 'gold': return ['#FFD700', '#DAA520'];
+      case 'platinum': return ['#E5E4E2', '#A9A9A9'];
+      case 'diamond': return ['#B9F2FF', '#87CEEB'];
+      case 'supreme': return ['#FFD700', '#FF6B6B'];
+      default: return ['#6B7280', '#4B5563'];
+    }
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backText}>‹ 返回</Text>
-        </Pressable>
-        <Text style={styles.headerTitle}>会员中心</Text>
-        <Pressable onPress={() => router.push('/membership/rewards')}>
-          <Text style={styles.rewardsLink}>奖励记录</Text>
-        </Pressable>
-      </View>
+    <ScrollView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      contentContainerStyle={styles.content}
+    >
+      {/* Level Card */}
+      <LinearGradient
+        colors={getGradientColors(info.level)}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.levelCard, Shadows.lg]}
+      >
+        <View style={styles.levelHeader}>
+          <Crown size={32} color="#FFFFFF" />
+          <Text style={styles.levelName}>{levelConfig.name}</Text>
+        </View>
+        
+        <View style={styles.pointsSection}>
+          <Text style={styles.pointsLabel}>当前积分</Text>
+          <Text style={styles.pointsValue}>{info.points.toLocaleString()}</Text>
+        </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {isLoggedIn && (
-          <>
-            <View style={styles.statusCard}>
-              <View style={styles.statusHeader}>
+        {nextLevel && (
+          <View style={styles.progressSection}>
+            <View style={styles.progressHeader}>
+              <Text style={styles.progressText}>
+                距离 {nextLevel.name}
+              </Text>
+              <Text style={styles.progressText}>
+                还需 {(nextLevel.minPoints - info.points).toLocaleString()} 积分
+              </Text>
+            </View>
+            <View style={styles.progressBar}>
+              <View style={[styles.progressFill, { width: `${Math.min(progress, 100)}%` }]} />
+            </View>
+          </View>
+        )}
+      </LinearGradient>
+
+      {/* Current Benefits */}
+      <Card style={styles.benefitsCard}>
+        <View style={styles.sectionHeader}>
+          <Gift size={20} color={Colors.primary} />
+          <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
+            当前权益
+          </Text>
+        </View>
+        {info.benefits.map((benefit, index) => (
+          <View key={index} style={styles.benefitItem}>
+            <Check size={18} color={Colors.success} />
+            <Text style={[styles.benefitText, { color: colors.textPrimary }]}>
+              {benefit}
+            </Text>
+          </View>
+        ))}
+        <View style={styles.discountRow}>
+          <Text style={[styles.discountLabel, { color: colors.textSecondary }]}>
+            手续费折扣
+          </Text>
+          <Text style={[styles.discountValue, { color: Colors.success }]}>
+            {levelConfig.discountRate}% OFF
+          </Text>
+        </View>
+        <View style={styles.discountRow}>
+          <Text style={[styles.discountLabel, { color: colors.textSecondary }]}>
+            日交易限额
+          </Text>
+          <Text style={[styles.discountValue, { color: colors.textPrimary }]}>
+            {levelConfig.dailyLimit === 0 ? '无限制' : `${levelConfig.dailyLimit.toLocaleString()} USDT`}
+          </Text>
+        </View>
+      </Card>
+
+      {/* All Levels */}
+      <Card style={styles.levelsCard}>
+        <Text style={[styles.sectionTitle, { color: colors.textPrimary, marginBottom: 16 }]}>
+          等级说明
+        </Text>
+        {MEMBERSHIP_LEVELS.map((level, index) => {
+          const isCurrent = level.level === info.level;
+          const isUnlocked = info.points >= level.minPoints;
+          
+          return (
+            <TouchableOpacity
+              key={level.level}
+              style={[
+                styles.levelItem,
+                index < MEMBERSHIP_LEVELS.length - 1 && {
+                  borderBottomWidth: 1,
+                  borderBottomColor: colors.border,
+                },
+              ]}
+              activeOpacity={0.7}
+            >
+              <View style={styles.levelItemLeft}>
+                <View
+                  style={[
+                    styles.levelIcon,
+                    { backgroundColor: level.color + '20' },
+                  ]}
+                >
+                  <Star
+                    size={18}
+                    color={level.color}
+                    fill={isUnlocked ? level.color : 'transparent'}
+                  />
+                </View>
                 <View>
-                  <Text style={styles.currentTierLabel}>当前会员</Text>
-                  <Text style={styles.currentTier}>
-                    {memberInfo.tier === 'free' ? '免费版' :
-                     memberInfo.tier === 'basic' ? '基础版' :
-                     memberInfo.tier === 'premium' ? '高级版' : 'VIP版'}
+                  <View style={styles.levelNameRow}>
+                    <Text style={[styles.levelItemName, { color: colors.textPrimary }]}>
+                      {level.name}
+                    </Text>
+                    {isCurrent && (
+                      <View style={[styles.currentBadge, { backgroundColor: Colors.primary }]}>
+                        <Text style={styles.currentBadgeText}>当前</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={[styles.levelItemPoints, { color: colors.textTertiary }]}>
+                    {level.minPoints.toLocaleString()} 积分
                   </Text>
                 </View>
-                <View style={styles.cosBadge}>
-                  <Text style={styles.cosAmount}>{memberInfo.cosBalance}</Text>
-                  <Text style={styles.cosLabel}>COS</Text>
-                </View>
               </View>
-              {memberInfo.tier !== 'free' && (
-                <Text style={styles.expiresText}>
-                  有效期至 {memberInfo.expiresAt}
+              <View style={styles.levelItemRight}>
+                <Text style={[styles.levelDiscount, { color: level.color }]}>
+                  {level.discountRate}% OFF
                 </Text>
-              )}
-            </View>
+                <ChevronRight size={18} color={colors.textTertiary} />
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+      </Card>
 
-            <CheckInCard
-              streak={memberInfo.streak}
-              lastCheckIn={memberInfo.lastCheckIn}
-              reward={10}
-              multiplier={getMultiplier(memberInfo.tier)}
-              onCheckIn={handleCheckIn}
-            />
-          </>
-        )}
-
-        <View style={styles.durationToggle}>
-          <Pressable
-            style={[styles.durationButton, duration === 'monthly' && styles.durationActive]}
-            onPress={() => setDuration('monthly')}
-          >
-            <Text style={[styles.durationText, duration === 'monthly' && styles.durationTextActive]}>
-              按月订阅
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.durationButton, duration === 'yearly' && styles.durationActive]}
-            onPress={() => setDuration('yearly')}
-          >
-            <Text style={[styles.durationText, duration === 'yearly' && styles.durationTextActive]}>
-              按年订阅
-            </Text>
-            <View style={styles.saveBadge}>
-              <Text style={styles.saveText}>省17%</Text>
-            </View>
-          </Pressable>
+      {/* How to Earn */}
+      <Card style={styles.earnCard}>
+        <Text style={[styles.sectionTitle, { color: colors.textPrimary, marginBottom: 16 }]}>
+          如何获取积分
+        </Text>
+        <View style={styles.earnItem}>
+          <Text style={[styles.earnAction, { color: colors.textPrimary }]}>
+            完成交易
+          </Text>
+          <Text style={[styles.earnPoints, { color: Colors.success }]}>
+            +10~50 积分
+          </Text>
         </View>
-
-        <View style={styles.tiersSection}>
-          <MembershipCard
-            tier="free"
-            duration={duration}
-            currentTier={memberInfo.tier}
-            onSelect={handleSelectTier}
-          />
-          <MembershipCard
-            tier="basic"
-            duration={duration}
-            currentTier={memberInfo.tier}
-            onSelect={handleSelectTier}
-          />
-          <MembershipCard
-            tier="premium"
-            duration={duration}
-            currentTier={memberInfo.tier}
-            onSelect={handleSelectTier}
-          />
-          <MembershipCard
-            tier="vip"
-            duration={duration}
-            currentTier={memberInfo.tier}
-            onSelect={handleSelectTier}
-          />
+        <View style={styles.earnItem}>
+          <Text style={[styles.earnAction, { color: colors.textPrimary }]}>
+            邀请好友
+          </Text>
+          <Text style={[styles.earnPoints, { color: Colors.success }]}>
+            +100 积分/人
+          </Text>
         </View>
-
-        <View style={styles.faq}>
-          <Text style={styles.faqTitle}>常见问题</Text>
-          <View style={styles.faqItem}>
-            <Text style={styles.faqQuestion}>如何获取 COS 奖励？</Text>
-            <Text style={styles.faqAnswer}>
-              每日签到、邀请好友、完成任务等方式均可获得 COS 奖励。会员可享受签到奖励倍数加成。
-            </Text>
-          </View>
-          <View style={styles.faqItem}>
-            <Text style={styles.faqQuestion}>可以随时取消订阅吗？</Text>
-            <Text style={styles.faqAnswer}>
-              可以随时取消自动续费，取消后当前订阅期内仍可正常使用会员权益。
-            </Text>
-          </View>
-          <View style={styles.faqItem}>
-            <Text style={styles.faqQuestion}>如何升级会员？</Text>
-            <Text style={styles.faqAnswer}>
-              选择更高级别的套餐即可升级，系统将自动计算差价并延长有效期。
-            </Text>
-          </View>
+        <View style={styles.earnItem}>
+          <Text style={[styles.earnAction, { color: colors.textPrimary }]}>
+            完成 KYC
+          </Text>
+          <Text style={[styles.earnPoints, { color: Colors.success }]}>
+            +200 积分
+          </Text>
         </View>
-      </ScrollView>
-
-      <TransactionModal
-        visible={modalVisible}
-        status={status}
-        isLoading={isLoading}
-        title={`订阅${selectedTier === 'basic' ? '基础版' : selectedTier === 'premium' ? '高级版' : 'VIP版'}`}
-        description={`确认订阅${duration === 'monthly' ? '月度' : '年度'}会员？`}
-        onConfirm={handleConfirmSubscription}
-        onClose={() => {
-          setModalVisible(false);
-          reset();
-        }}
-      />
-    </View>
+        <View style={styles.earnItem}>
+          <Text style={[styles.earnAction, { color: colors.textPrimary }]}>
+            每日签到
+          </Text>
+          <Text style={[styles.earnPoints, { color: Colors.success }]}>
+            +5 积分
+          </Text>
+        </View>
+      </Card>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#6D28D9',
-    paddingTop: 50,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-  },
-  backButton: {
-    padding: 4,
-  },
-  backText: {
-    fontSize: 17,
-    color: '#fff',
-  },
-  headerTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  rewardsLink: {
-    fontSize: 15,
-    color: 'rgba(255,255,255,0.9)',
   },
   content: {
-    flex: 1,
     padding: 16,
+    paddingBottom: 40,
   },
-  statusCard: {
-    backgroundColor: '#6D28D9',
-    borderRadius: 16,
-    padding: 20,
+  levelCard: {
+    borderRadius: 20,
+    padding: 24,
     marginBottom: 16,
   },
-  statusHeader: {
+  levelHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    marginBottom: 20,
   },
-  currentTierLabel: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.8)',
-  },
-  currentTier: {
+  levelName: {
+    color: '#FFFFFF',
     fontSize: 24,
     fontWeight: '700',
-    color: '#fff',
-    marginTop: 4,
+    marginLeft: 12,
   },
-  cosBadge: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    alignItems: 'center',
+  pointsSection: {
+    marginBottom: 20,
   },
-  cosAmount: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  cosLabel: {
-    fontSize: 11,
+  pointsLabel: {
     color: 'rgba(255,255,255,0.8)',
+    fontSize: 14,
   },
-  expiresText: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.7)',
-    marginTop: 12,
+  pointsValue: {
+    color: '#FFFFFF',
+    fontSize: 36,
+    fontWeight: '700',
   },
-  durationToggle: {
+  progressSection: {},
+  progressHeader: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 4,
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  progressText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 13,
+  },
+  progressBar: {
+    height: 8,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 4,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 4,
+  },
+  benefitsCard: {
     marginBottom: 16,
   },
-  durationButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
+  sectionHeader: {
     flexDirection: 'row',
-    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
   },
-  durationActive: {
-    backgroundColor: '#6D28D9',
-  },
-  durationText: {
-    fontSize: 15,
+  sectionTitle: {
+    fontSize: 16,
     fontWeight: '600',
-    color: '#6b7280',
+    marginLeft: 8,
   },
-  durationTextActive: {
-    color: '#fff',
+  benefitItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
   },
-  saveBadge: {
-    backgroundColor: '#22c55e',
+  benefitText: {
+    fontSize: 14,
+    marginLeft: 10,
+  },
+  discountRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.05)',
+  },
+  discountLabel: {
+    fontSize: 14,
+  },
+  discountValue: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  levelsCard: {
+    marginBottom: 16,
+  },
+  levelItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 14,
+  },
+  levelItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  levelIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  levelNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  levelItemName: {
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  currentBadge: {
+    marginLeft: 8,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
-    marginLeft: 6,
   },
-  saveText: {
+  currentBadgeText: {
+    color: '#FFFFFF',
     fontSize: 10,
     fontWeight: '600',
-    color: '#fff',
   },
-  tiersSection: {
-    marginBottom: 24,
+  levelItemPoints: {
+    fontSize: 12,
+    marginTop: 2,
   },
-  faq: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 32,
+  levelItemRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  faqTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1f2937',
-    marginBottom: 16,
-  },
-  faqItem: {
-    marginBottom: 16,
-  },
-  faqQuestion: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1f2937',
-    marginBottom: 4,
-  },
-  faqAnswer: {
+  levelDiscount: {
     fontSize: 14,
-    color: '#6b7280',
-    lineHeight: 20,
+    fontWeight: '600',
+    marginRight: 8,
+  },
+  earnCard: {
+    marginBottom: 16,
+  },
+  earnItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  earnAction: {
+    fontSize: 14,
+  },
+  earnPoints: {
+    fontSize: 14,
+    fontWeight: '500',
   },
 });

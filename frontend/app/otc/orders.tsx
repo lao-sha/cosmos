@@ -1,178 +1,128 @@
-import { useBuyerOrders } from '@/src/hooks/useOtc';
-import { otcService, OtcOrder, OrderState } from '@/src/services/otc';
-import { useAuthStore } from '@/src/stores/auth';
-import { useChainStore } from '@/src/stores/chain';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import React from 'react';
 import {
-  ActivityIndicator,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
+  View,
   Text,
-  View
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  RefreshControl,
 } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Clock, CheckCircle, XCircle, AlertTriangle } from 'lucide-react-native';
+import { useColors } from '@/hooks/useColors';
+import { useOrders, formatCos, formatUsdt } from '@/hooks/useOtc';
+import { Card } from '@/components/ui';
+import { Colors } from '@/constants/colors';
+import type { OtcOrder, OrderStatus } from '@/services/otc';
 
-export default function OtcOrdersScreen() {
+const STATUS_CONFIG: Record<OrderStatus, { label: string; color: string; icon: any }> = {
+  pending: { label: '待支付', color: Colors.warning, icon: Clock },
+  paid: { label: '已支付', color: Colors.info, icon: Clock },
+  released: { label: '已完成', color: Colors.success, icon: CheckCircle },
+  cancelled: { label: '已取消', color: Colors.trading.cancelled, icon: XCircle },
+  disputed: { label: '争议中', color: Colors.error, icon: AlertTriangle },
+};
+
+export default function OrdersScreen() {
+  const colors = useColors();
   const router = useRouter();
-  const { isLoggedIn } = useAuthStore();
-  const { isConnected } = useChainStore();
-  const { orders, loading, refresh } = useBuyerOrders();
-  const [refreshing, setRefreshing] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
+  const { data: orders, isLoading, refetch } = useOrders();
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await refresh();
-    setRefreshing(false);
+  const renderOrder = ({ item }: { item: OtcOrder }) => {
+    const config = STATUS_CONFIG[item.status];
+    const StatusIcon = config.icon;
+
+    return (
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => router.push(`/otc/order/${item.id}`)}
+      >
+        <Card style={styles.orderCard}>
+          <View style={styles.orderHeader}>
+            <View style={styles.orderInfo}>
+              <Text style={[styles.orderType, { color: colors.textPrimary }]}>
+                {item.orderType === 'buy' ? '购买' : '出售'} COS
+              </Text>
+              <Text style={[styles.orderId, { color: colors.textTertiary }]}>
+                #{item.id.slice(0, 8)}
+              </Text>
+            </View>
+            <View style={[styles.statusBadge, { backgroundColor: config.color + '20' }]}>
+              <StatusIcon size={14} color={config.color} />
+              <Text style={[styles.statusText, { color: config.color }]}>
+                {config.label}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.orderBody}>
+            <View style={styles.amountItem}>
+              <Text style={[styles.amountLabel, { color: colors.textSecondary }]}>
+                数量
+              </Text>
+              <Text style={[styles.amountValue, { color: colors.textPrimary }]}>
+                {formatCos(item.cosAmount)} COS
+              </Text>
+            </View>
+            <View style={styles.amountItem}>
+              <Text style={[styles.amountLabel, { color: colors.textSecondary }]}>
+                金额
+              </Text>
+              <Text style={[styles.amountValue, { color: colors.textPrimary }]}>
+                {formatUsdt(item.usdtAmount)} USDT
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.orderFooter}>
+            <Text style={[styles.makerName, { color: colors.textSecondary }]}>
+              商家: {item.makerName}
+            </Text>
+            <Text style={[styles.orderTime, { color: colors.textTertiary }]}>
+              {new Date(item.createdAt).toLocaleDateString()}
+            </Text>
+          </View>
+        </Card>
+      </TouchableOpacity>
+    );
   };
 
-  const filteredOrders = orders.filter(order => {
-    if (filter === 'all') return true;
-    if (filter === 'active') {
-      return [OrderState.Created, OrderState.PaidOrCommitted, OrderState.Disputed].includes(order.state);
-    }
-    if (filter === 'completed') {
-      return [OrderState.Released, OrderState.Canceled, OrderState.Refunded, OrderState.Expired].includes(order.state);
-    }
-    return true;
-  });
-
-  if (!isLoggedIn || !isConnected) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Text style={styles.backText}>‹ 返回</Text>
-          </Pressable>
-          <Text style={styles.headerTitle}>我的订单</Text>
-          <View style={styles.headerRight} />
-        </View>
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyIcon}>🔌</Text>
-          <Text style={styles.emptyTitle}>请先登录并连接网络</Text>
-        </View>
-      </View>
-    );
-  }
+  const pendingOrders = orders?.filter(o => o.status === 'pending' || o.status === 'paid') || [];
+  const completedOrders = orders?.filter(o => o.status !== 'pending' && o.status !== 'paid') || [];
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backText}>‹ 返回</Text>
-        </Pressable>
-        <Text style={styles.headerTitle}>我的订单</Text>
-        <View style={styles.headerRight} />
-      </View>
-
-      <View style={styles.filterBar}>
-        <Pressable
-          style={[styles.filterButton, filter === 'all' && styles.filterButtonActive]}
-          onPress={() => setFilter('all')}
-        >
-          <Text style={[styles.filterText, filter === 'all' && styles.filterTextActive]}>
-            全部
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.filterButton, filter === 'active' && styles.filterButtonActive]}
-          onPress={() => setFilter('active')}
-        >
-          <Text style={[styles.filterText, filter === 'active' && styles.filterTextActive]}>
-            进行中
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.filterButton, filter === 'completed' && styles.filterButtonActive]}
-          onPress={() => setFilter('completed')}
-        >
-          <Text style={[styles.filterText, filter === 'completed' && styles.filterTextActive]}>
-            已完成
-          </Text>
-        </Pressable>
-      </View>
-
-      <ScrollView
-        style={styles.content}
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <FlatList
+        data={orders}
+        renderItem={renderOrder}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.list}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+          <RefreshControl refreshing={isLoading} onRefresh={refetch} />
         }
-      >
-        {loading && orders.length === 0 ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#6D28D9" />
-            <Text style={styles.loadingText}>加载中...</Text>
-          </View>
-        ) : filteredOrders.length === 0 ? (
-          <View style={styles.emptyOrders}>
-            <Text style={styles.emptyOrdersIcon}>📭</Text>
-            <Text style={styles.emptyOrdersText}>暂无订单</Text>
-            <Pressable
-              style={styles.createButton}
+        ListHeaderComponent={
+          pendingOrders.length > 0 ? (
+            <View style={styles.sectionHeader}>
+              <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>
+                进行中 ({pendingOrders.length})
+              </Text>
+            </View>
+          ) : null
+        }
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+              暂无订单
+            </Text>
+            <TouchableOpacity
+              style={[styles.createButton, { backgroundColor: Colors.primary }]}
               onPress={() => router.push('/otc')}
             >
               <Text style={styles.createButtonText}>去购买</Text>
-            </Pressable>
+            </TouchableOpacity>
           </View>
-        ) : (
-          filteredOrders.map((order) => (
-            <Pressable
-              key={order.orderId}
-              style={({ pressed }) => [
-                styles.orderCard,
-                pressed && styles.orderCardPressed,
-              ]}
-              onPress={() => router.push(`/otc/${order.orderId}`)}
-            >
-              <View style={styles.orderHeader}>
-                <Text style={styles.orderId}>订单 #{order.orderId}</Text>
-                <View style={[
-                  styles.statusBadge,
-                  { backgroundColor: otcService.getStateColor(order.state) }
-                ]}>
-                  <Text style={styles.statusText}>
-                    {otcService.getStateText(order.state)}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.orderInfo}>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>数量</Text>
-                  <Text style={styles.infoValue}>{otcService.formatCos(order.qty)}</Text>
-                </View>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>金额</Text>
-                  <Text style={styles.infoValue}>{otcService.formatUsdt(order.amount)}</Text>
-                </View>
-              </View>
-
-              <View style={styles.orderFooter}>
-                <Text style={styles.orderTime}>
-                  {otcService.formatTime(order.createdAt)}
-                </Text>
-                {order.isFirstPurchase && (
-                  <View style={styles.firstPurchaseBadge}>
-                    <Text style={styles.firstPurchaseText}>首购</Text>
-                  </View>
-                )}
-              </View>
-
-              {order.state === OrderState.Created && !otcService.isExpired(order.expireAt) && (
-                <View style={styles.countdownBar}>
-                  <Text style={styles.countdownText}>
-                    ⏱️ 剩余 {otcService.getRemainingTime(order.expireAt)}
-                  </Text>
-                </View>
-              )}
-            </Pressable>
-          ))
-        )}
-
-        <View style={styles.bottomPadding} />
-      </ScrollView>
+        }
+      />
     </View>
   );
 }
@@ -180,193 +130,93 @@ export default function OtcOrdersScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
-  header: {
-    backgroundColor: '#6D28D9',
-    paddingTop: 50,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  backButton: {
-    padding: 4,
-  },
-  backText: {
-    color: '#fff',
-    fontSize: 18,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  headerRight: {
-    width: 40,
-  },
-  filterBar: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  list: {
+    padding: 16,
     gap: 12,
   },
-  filterButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    backgroundColor: '#f3f4f6',
+  sectionHeader: {
+    marginBottom: 8,
   },
-  filterButtonActive: {
-    backgroundColor: '#6D28D9',
-  },
-  filterText: {
-    fontSize: 14,
-    color: '#6b7280',
-  },
-  filterTextActive: {
-    color: '#fff',
-    fontWeight: '500',
-  },
-  content: {
-    flex: 1,
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    paddingVertical: 60,
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: '#6b7280',
-  },
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1f2937',
-  },
-  emptyOrders: {
-    alignItems: 'center',
-    paddingVertical: 60,
-  },
-  emptyOrdersIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  emptyOrdersText: {
-    fontSize: 16,
-    color: '#6b7280',
-    marginBottom: 20,
-  },
-  createButton: {
-    backgroundColor: '#6D28D9',
-    paddingVertical: 12,
-    paddingHorizontal: 32,
-    borderRadius: 24,
-  },
-  createButtonText: {
-    color: '#fff',
+  sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
   },
   orderCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginTop: 12,
-    padding: 16,
-    borderRadius: 12,
-  },
-  orderCardPressed: {
-    backgroundColor: '#f9fafb',
+    marginBottom: 0,
   },
   orderHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 12,
   },
-  orderId: {
+  orderInfo: {},
+  orderType: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1f2937',
+    marginBottom: 2,
+  },
+  orderId: {
+    fontSize: 12,
   },
   statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
   },
   statusText: {
     fontSize: 12,
-    color: '#fff',
     fontWeight: '500',
   },
-  orderInfo: {
+  orderBody: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: '#f3f4f6',
+    marginBottom: 12,
   },
-  infoRow: {
-    alignItems: 'center',
+  amountItem: {
+    flex: 1,
   },
-  infoLabel: {
+  amountLabel: {
     fontSize: 12,
-    color: '#9ca3af',
     marginBottom: 4,
   },
-  infoValue: {
+  amountValue: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1f2937',
   },
   orderFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.05)',
+  },
+  makerName: {
+    fontSize: 13,
   },
   orderTime: {
     fontSize: 12,
-    color: '#9ca3af',
   },
-  firstPurchaseBadge: {
-    backgroundColor: '#fef3c7',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  firstPurchaseText: {
-    fontSize: 11,
-    color: '#92400e',
-    fontWeight: '500',
-  },
-  countdownBar: {
-    backgroundColor: '#fef3c7',
-    marginTop: 12,
-    padding: 8,
-    borderRadius: 8,
+  empty: {
     alignItems: 'center',
+    paddingTop: 80,
   },
-  countdownText: {
-    fontSize: 13,
-    color: '#92400e',
-    fontWeight: '500',
+  emptyText: {
+    fontSize: 16,
+    marginBottom: 16,
   },
-  bottomPadding: {
-    height: 40,
+  createButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  createButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

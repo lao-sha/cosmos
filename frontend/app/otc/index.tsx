@@ -1,166 +1,165 @@
-import { useActiveMakers, useFirstPurchaseStatus } from '@/src/hooks/useOtc';
-import { useCosPrice } from '@/src/hooks/usePricing';
-import { otcService, MakerInfo } from '@/src/services/otc';
-import { useAuthStore } from '@/src/stores/auth';
-import { useChainStore } from '@/src/stores/chain';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import React from 'react';
 import {
-  ActivityIndicator,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
+  View,
   Text,
-  View
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  RefreshControl,
 } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Star, Clock, CheckCircle, Circle } from 'lucide-react-native';
+import { useColors } from '@/hooks/useColors';
+import { useMakers, formatCos, formatPrice } from '@/hooks/useOtc';
+import { Card } from '@/components/ui';
+import { Colors } from '@/constants/colors';
+import type { Maker } from '@/services/otc';
 
 export default function OtcScreen() {
+  const colors = useColors();
   const router = useRouter();
-  const { isLoggedIn } = useAuthStore();
-  const { isConnected } = useChainStore();
-  const { makers, loading, refresh } = useActiveMakers();
-  const { canFirstPurchase } = useFirstPurchaseStatus();
-  const { priceFormatted } = useCosPrice();
-  const [refreshing, setRefreshing] = useState(false);
+  const { data: makers, isLoading, refetch } = useMakers();
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await refresh();
-    setRefreshing(false);
-  };
-
-  const handleSelectMaker = (maker: MakerInfo) => {
-    router.push({
-      pathname: '/otc/create',
-      params: { makerId: maker.makerId.toString() },
-    });
-  };
-
-  if (!isConnected) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Text style={styles.backText}>‹ 返回</Text>
-          </Pressable>
-          <Text style={styles.headerTitle}>OTC 交易</Text>
-          <View style={styles.headerRight} />
-        </View>
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyIcon}>🔌</Text>
-          <Text style={styles.emptyTitle}>未连接网络</Text>
-          <Text style={styles.emptySubtitle}>请先连接区块链网络</Text>
-        </View>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backText}>‹ 返回</Text>
-        </Pressable>
-        <Text style={styles.headerTitle}>OTC 交易</Text>
-        <Pressable 
-          style={styles.ordersButton}
-          onPress={() => router.push('/otc/orders')}
-        >
-          <Text style={styles.ordersButtonText}>我的订单</Text>
-        </Pressable>
-      </View>
-
-      <ScrollView
-        style={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-        }
-      >
-        <View style={styles.priceCard}>
-          <Text style={styles.priceLabel}>当前 COS 价格</Text>
-          <Text style={styles.priceValue}>{priceFormatted}</Text>
-        </View>
-
-        {canFirstPurchase && isLoggedIn && (
-          <View style={styles.firstPurchaseCard}>
-            <Text style={styles.firstPurchaseIcon}>🎁</Text>
-            <View style={styles.firstPurchaseContent}>
-              <Text style={styles.firstPurchaseTitle}>首购优惠</Text>
-              <Text style={styles.firstPurchaseDesc}>
-                新用户首次购买享受固定 $10 USD 价值的 COS，免押金
+  const renderMaker = ({ item }: { item: Maker }) => (
+    <TouchableOpacity
+      activeOpacity={0.8}
+      onPress={() => router.push(`/otc/buy?makerId=${item.id}`)}
+    >
+      <Card style={styles.makerCard}>
+        <View style={styles.makerHeader}>
+          <View style={styles.makerInfo}>
+            <View style={styles.nameRow}>
+              <View
+                style={[
+                  styles.avatar,
+                  { backgroundColor: Colors.primary + '20' },
+                ]}
+              >
+                <Text style={[styles.avatarText, { color: Colors.primary }]}>
+                  {item.name.charAt(0)}
+                </Text>
+              </View>
+              <View>
+                <Text style={[styles.makerName, { color: colors.textPrimary }]}>
+                  {item.name}
+                </Text>
+                <View style={styles.statsRow}>
+                  <Text style={[styles.statText, { color: colors.textSecondary }]}>
+                    {item.completedOrders} 单
+                  </Text>
+                  <Text style={[styles.statDot, { color: colors.textTertiary }]}>
+                    •
+                  </Text>
+                  <Text style={[styles.statText, { color: Colors.success }]}>
+                    {item.completionRate}%
+                  </Text>
+                </View>
+              </View>
+            </View>
+            <View style={styles.onlineStatus}>
+              {item.isOnline ? (
+                <CheckCircle size={16} color={Colors.success} />
+              ) : (
+                <Circle size={16} color={colors.textTertiary} />
+              )}
+              <Text
+                style={[
+                  styles.onlineText,
+                  { color: item.isOnline ? Colors.success : colors.textTertiary },
+                ]}
+              >
+                {item.isOnline ? '在线' : '离线'}
               </Text>
             </View>
           </View>
-        )}
-
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>选择做市商</Text>
-          <Text style={styles.sectionCount}>{makers.length} 位在线</Text>
         </View>
 
-        {loading && makers.length === 0 ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#6D28D9" />
-            <Text style={styles.loadingText}>加载中...</Text>
+        <View style={styles.makerBody}>
+          <View style={styles.priceSection}>
+            <Text style={[styles.priceLabel, { color: colors.textSecondary }]}>
+              价格
+            </Text>
+            <Text style={[styles.priceValue, { color: colors.textPrimary }]}>
+              {formatPrice(item.price)}{' '}
+              <Text style={styles.priceUnit}>USDT</Text>
+            </Text>
           </View>
-        ) : makers.length === 0 ? (
-          <View style={styles.emptyMakers}>
-            <Text style={styles.emptyMakersIcon}>😔</Text>
-            <Text style={styles.emptyMakersText}>暂无在线做市商</Text>
-          </View>
-        ) : (
-          makers.map((maker) => (
-            <Pressable
-              key={maker.makerId}
-              style={({ pressed }) => [
-                styles.makerCard,
-                pressed && styles.makerCardPressed,
-              ]}
-              onPress={() => handleSelectMaker(maker)}
-            >
-              <View style={styles.makerHeader}>
-                <View style={styles.makerInfo}>
-                  <Text style={styles.makerName}>{maker.maskedFullName || `做市商 #${maker.makerId}`}</Text>
-                  <Text style={styles.makerStats}>
-                    已服务 {maker.usersServed} 人
-                  </Text>
-                </View>
-                <View style={styles.makerBadge}>
-                  <Text style={styles.makerBadgeText}>在线</Text>
-                </View>
-              </View>
-              
-              <View style={styles.makerDetails}>
-                <View style={styles.detailItem}>
-                  <Text style={styles.detailLabel}>买入溢价</Text>
-                  <Text style={styles.detailValue}>
-                    {(maker.buyPremiumBps / 100).toFixed(2)}%
-                  </Text>
-                </View>
-                <View style={styles.detailItem}>
-                  <Text style={styles.detailLabel}>卖出溢价</Text>
-                  <Text style={styles.detailValue}>
-                    {(maker.sellPremiumBps / 100).toFixed(2)}%
-                  </Text>
-                </View>
-                <View style={styles.detailItem}>
-                  <Text style={styles.detailLabel}>微信</Text>
-                  <Text style={styles.detailValue}>{maker.wechatId || '-'}</Text>
-                </View>
-              </View>
 
-              <View style={styles.makerFooter}>
-                <Text style={styles.tronAddress} numberOfLines={1}>
-                  TRON: {maker.tronAddress}
+          <View style={styles.limitSection}>
+            <Text style={[styles.limitLabel, { color: colors.textSecondary }]}>
+              限额
+            </Text>
+            <Text style={[styles.limitValue, { color: colors.textPrimary }]}>
+              {formatCos(item.minAmount)} - {formatCos(item.maxAmount)} COS
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.makerFooter}>
+          <View style={styles.paymentMethods}>
+            {item.paymentMethods.includes('bank') && (
+              <View style={[styles.paymentTag, { backgroundColor: '#3B82F620' }]}>
+                <Text style={[styles.paymentText, { color: '#3B82F6' }]}>
+                  银行卡
                 </Text>
               </View>
-            </Pressable>
-          ))
-        )}
+            )}
+            {item.paymentMethods.includes('alipay') && (
+              <View style={[styles.paymentTag, { backgroundColor: '#1677FF20' }]}>
+                <Text style={[styles.paymentText, { color: '#1677FF' }]}>
+                  支付宝
+                </Text>
+              </View>
+            )}
+            {item.paymentMethods.includes('wechat') && (
+              <View style={[styles.paymentTag, { backgroundColor: '#07C16020' }]}>
+                <Text style={[styles.paymentText, { color: '#07C160' }]}>
+                  微信
+                </Text>
+              </View>
+            )}
+          </View>
+          <Text style={[styles.availableText, { color: colors.textSecondary }]}>
+            可用: {formatCos(item.availableCos)} COS
+          </Text>
+        </View>
+      </Card>
+    </TouchableOpacity>
+  );
 
-        <View style={styles.bottomPadding} />
-      </ScrollView>
+  return (
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={styles.header}>
+        <Text style={[styles.title, { color: colors.textPrimary }]}>
+          购买 COS
+        </Text>
+        <TouchableOpacity
+          style={styles.ordersButton}
+          onPress={() => router.push('/otc/orders')}
+        >
+          <Clock size={20} color={Colors.primary} />
+          <Text style={[styles.ordersText, { color: Colors.primary }]}>
+            我的订单
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <FlatList
+        data={makers}
+        renderItem={renderMaker}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.list}
+        refreshControl={
+          <RefreshControl refreshing={isLoading} onRefresh={refetch} />
+        }
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+              暂无做市商
+            </Text>
+          </View>
+        }
+      />
     </View>
   );
 }
@@ -168,219 +167,138 @@ export default function OtcScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
   header: {
-    backgroundColor: '#6D28D9',
-    paddingTop: 50,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    paddingBottom: 8,
   },
-  backButton: {
-    padding: 4,
-  },
-  backText: {
-    color: '#fff',
-    fontSize: 18,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  headerRight: {
-    width: 70,
+  title: {
+    fontSize: 24,
+    fontWeight: '700',
   },
   ordersButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 16,
-  },
-  ordersButtonText: {
-    color: '#fff',
-    fontSize: 13,
-  },
-  content: {
-    flex: 1,
-  },
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  emptyIcon: {
-    fontSize: 64,
-    marginBottom: 16,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1f2937',
-    marginBottom: 8,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    color: '#9ca3af',
-  },
-  priceCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginTop: 16,
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  priceLabel: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginBottom: 4,
-  },
-  priceValue: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#10b981',
-  },
-  firstPurchaseCard: {
-    backgroundColor: '#fef3c7',
-    marginHorizontal: 16,
-    marginTop: 16,
-    padding: 16,
-    borderRadius: 12,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
   },
-  firstPurchaseIcon: {
-    fontSize: 32,
-    marginRight: 12,
-  },
-  firstPurchaseContent: {
-    flex: 1,
-  },
-  firstPurchaseTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#92400e',
-    marginBottom: 4,
-  },
-  firstPurchaseDesc: {
-    fontSize: 13,
-    color: '#92400e',
-    lineHeight: 18,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginHorizontal: 16,
-    marginTop: 20,
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1f2937',
-  },
-  sectionCount: {
-    fontSize: 13,
-    color: '#6b7280',
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  loadingText: {
-    marginTop: 12,
+  ordersText: {
     fontSize: 14,
-    color: '#6b7280',
+    fontWeight: '500',
   },
-  emptyMakers: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  emptyMakersIcon: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
-  emptyMakersText: {
-    fontSize: 14,
-    color: '#6b7280',
+  list: {
+    padding: 16,
+    paddingTop: 8,
+    gap: 12,
   },
   makerCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    padding: 16,
-    borderRadius: 12,
-  },
-  makerCardPressed: {
-    backgroundColor: '#f9fafb',
+    marginBottom: 0,
   },
   makerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
     marginBottom: 12,
   },
   makerInfo: {
-    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  avatarText: {
+    fontSize: 18,
+    fontWeight: '700',
   },
   makerName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1f2937',
-    marginBottom: 4,
+    marginBottom: 2,
   },
-  makerStats: {
-    fontSize: 12,
-    color: '#6b7280',
-  },
-  makerBadge: {
-    backgroundColor: '#d1fae5',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  makerBadgeText: {
-    fontSize: 12,
-    color: '#059669',
-    fontWeight: '500',
-  },
-  makerDetails: {
+  statsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: '#f3f4f6',
-  },
-  detailItem: {
     alignItems: 'center',
+  },
+  statText: {
+    fontSize: 13,
+  },
+  statDot: {
+    marginHorizontal: 6,
+  },
+  onlineStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  onlineText: {
+    fontSize: 12,
+  },
+  makerBody: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  priceSection: {
     flex: 1,
   },
-  detailLabel: {
-    fontSize: 11,
-    color: '#9ca3af',
+  priceLabel: {
+    fontSize: 12,
     marginBottom: 4,
   },
-  detailValue: {
+  priceValue: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  priceUnit: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#1f2937',
+    fontWeight: '400',
+  },
+  limitSection: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  limitLabel: {
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  limitValue: {
+    fontSize: 14,
   },
   makerFooter: {
-    marginTop: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  tronAddress: {
+  paymentMethods: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  paymentTag: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  paymentText: {
     fontSize: 12,
-    color: '#6b7280',
-    fontFamily: 'monospace',
+    fontWeight: '500',
   },
-  bottomPadding: {
-    height: 40,
+  availableText: {
+    fontSize: 12,
+  },
+  empty: {
+    alignItems: 'center',
+    paddingTop: 60,
+  },
+  emptyText: {
+    fontSize: 16,
   },
 });

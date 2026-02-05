@@ -1,426 +1,478 @@
-import { UserAvatar } from '@/src/components/UserAvatar';
-import { useAuthStore } from '@/src/stores/auth';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-    Alert,
-    FlatList,
-    Platform,
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  Alert,
+  TextInput,
 } from 'react-native';
+import { useRouter } from 'expo-router';
+import {
+  Search,
+  UserPlus,
+  MessageCircle,
+  MoreHorizontal,
+  Circle,
+  Bell,
+} from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
+import { useColors } from '@/hooks/useColors';
+import { useWalletStore } from '@/stores/wallet';
+import {
+  getFriends,
+  getFriendRequests,
+  acceptFriendRequest,
+  rejectFriendRequest,
+  removeFriend,
+  type Friend,
+  type FriendRequest,
+} from '@/services/friends';
+import { Card, Button } from '@/components/ui';
+import { Colors } from '@/constants/colors';
 
-type TabType = 'friends' | 'blocked' | 'whitelist';
-
-interface User {
-  address: string;
-  name: string;
-  addedAt: string;
-}
-
-const MOCK_FRIENDS: User[] = [
-  { address: '5Grw...utQY', name: '张三', addedAt: '2025-01-20' },
-  { address: '5DAn...kQrB', name: '李四', addedAt: '2025-01-18' },
-  { address: '5Ck8...mNpC', name: '王五', addedAt: '2025-01-15' },
-];
-
-const MOCK_BLOCKED: User[] = [
-  { address: '5HpG...xYzA', name: '黑名单用户1', addedAt: '2025-01-22' },
-];
-
-const MOCK_WHITELIST: User[] = [
-  { address: '5Grw...utQY', name: '张三', addedAt: '2025-01-20' },
-];
+type Tab = 'friends' | 'requests';
 
 export default function FriendsScreen() {
+  const colors = useColors();
   const router = useRouter();
-  const { tab } = useLocalSearchParams<{ tab?: string }>();
-  const { isLoggedIn } = useAuthStore();
+  const { address, mnemonic } = useWalletStore();
 
-  const [activeTab, setActiveTab] = useState<TabType>((tab as TabType) || 'friends');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [addAddress, setAddAddress] = useState('');
+  const [activeTab, setActiveTab] = useState<Tab>('friends');
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [requests, setRequests] = useState<FriendRequest[]>([]);
+  const [searchText, setSearchText] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  const getData = () => {
-    switch (activeTab) {
-      case 'friends':
-        return MOCK_FRIENDS;
-      case 'blocked':
-        return MOCK_BLOCKED;
-      case 'whitelist':
-        return MOCK_WHITELIST;
-    }
-  };
+  useEffect(() => {
+    loadData();
+  }, [address]);
 
-  const filteredData = getData().filter(
-    (user) =>
-      user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.address.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const handleRemove = (user: User) => {
-    const actions = {
-      friends: '删除好友',
-      blocked: '解除屏蔽',
-      whitelist: '移出白名单',
-    };
-
-    const confirmRemove = () => {
-      // TODO: 调用链上对应方法
-      console.log(`${actions[activeTab]}: ${user.address}`);
-    };
-
-    if (Platform.OS === 'web') {
-      if (window.confirm(`确定要${actions[activeTab]} ${user.name} 吗？`)) {
-        confirmRemove();
-      }
-    } else {
-      Alert.alert('确认', `确定要${actions[activeTab]} ${user.name} 吗？`, [
-        { text: '取消', style: 'cancel' },
-        { text: '确定', style: 'destructive', onPress: confirmRemove },
+  const loadData = async () => {
+    if (!address) return;
+    setLoading(true);
+    try {
+      const [friendsData, requestsData] = await Promise.all([
+        getFriends(address),
+        getFriendRequests(address),
       ]);
+      setFriends(friendsData);
+      setRequests(requestsData);
+    } catch (error) {
+      console.error('Failed to load friends:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleAdd = () => {
-    if (!addAddress.trim()) {
-      const msg = '请输入用户地址';
-      if (Platform.OS === 'web') {
-        alert(msg);
-      } else {
-        Alert.alert('提示', msg);
-      }
-      return;
+  const handleAccept = async (requestId: string) => {
+    if (!mnemonic) return;
+    try {
+      await acceptFriendRequest(requestId, mnemonic);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      loadData();
+    } catch (error: any) {
+      Alert.alert('操作失败', error.message);
     }
-
-    const actions = {
-      friends: '添加好友',
-      blocked: '加入黑名单',
-      whitelist: '加入白名单',
-    };
-
-    // TODO: 调用链上对应方法
-    console.log(`${actions[activeTab]}: ${addAddress}`);
-    setAddAddress('');
-    setShowAddModal(false);
   };
 
-  const renderItem = ({ item }: { item: User }) => (
-    <View style={styles.userItem}>
-      <UserAvatar name={item.name} size="medium" />
-      <View style={styles.userInfo}>
-        <Text style={styles.userName}>{item.name}</Text>
-        <Text style={styles.userAddress}>{item.address}</Text>
-      </View>
-      <Pressable
-        style={styles.actionButton}
-        onPress={() => handleRemove(item)}
-      >
-        <Text style={styles.actionText}>
-          {activeTab === 'friends' ? '删除' : activeTab === 'blocked' ? '解除' : '移除'}
-        </Text>
-      </Pressable>
-    </View>
+  const handleReject = async (requestId: string) => {
+    if (!mnemonic) return;
+    try {
+      await rejectFriendRequest(requestId, mnemonic);
+      loadData();
+    } catch (error: any) {
+      Alert.alert('操作失败', error.message);
+    }
+  };
+
+  const handleRemove = (friend: Friend) => {
+    Alert.alert('删除好友', `确定要删除 ${friend.name} 吗？`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: async () => {
+          if (!mnemonic) return;
+          try {
+            await removeFriend(friend.address, mnemonic);
+            loadData();
+          } catch (error: any) {
+            Alert.alert('操作失败', error.message);
+          }
+        },
+      },
+    ]);
+  };
+
+  const filteredFriends = friends.filter(
+    (f) =>
+      f.name.toLowerCase().includes(searchText.toLowerCase()) ||
+      f.address.toLowerCase().includes(searchText.toLowerCase())
   );
 
-  const getEmptyText = () => {
-    switch (activeTab) {
-      case 'friends':
-        return '暂无好友';
-      case 'blocked':
-        return '黑名单为空';
-      case 'whitelist':
-        return '白名单为空';
-    }
-  };
-
-  const getAddText = () => {
-    switch (activeTab) {
-      case 'friends':
-        return '添加好友';
-      case 'blocked':
-        return '添加黑名单';
-      case 'whitelist':
-        return '添加白名单';
-    }
-  };
-
-  return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backText}>‹ 返回</Text>
-        </Pressable>
-        <Text style={styles.headerTitle}>
-          {activeTab === 'friends' ? '好友' : activeTab === 'blocked' ? '黑名单' : '白名单'}
+  const renderFriend = ({ item }: { item: Friend }) => (
+    <TouchableOpacity
+      style={[styles.friendItem, { borderBottomColor: colors.border }]}
+      onPress={() => router.push(`/chat/${item.id}`)}
+      onLongPress={() => handleRemove(item)}
+      activeOpacity={0.7}
+    >
+      <View style={styles.friendLeft}>
+        <View style={[styles.avatar, { backgroundColor: Colors.primary + '20' }]}>
+          <Text style={[styles.avatarText, { color: Colors.primary }]}>
+            {item.name.charAt(0)}
+          </Text>
+        </View>
+        <View style={styles.onlineIndicator}>
+          <Circle
+            size={10}
+            fill={item.isOnline ? Colors.success : colors.textTertiary}
+            color={item.isOnline ? Colors.success : colors.textTertiary}
+          />
+        </View>
+      </View>
+      <View style={styles.friendInfo}>
+        <Text style={[styles.friendName, { color: colors.textPrimary }]}>
+          {item.remark || item.name}
         </Text>
-        <Pressable style={styles.addButton} onPress={() => setShowAddModal(true)}>
-          <Text style={styles.addText}>+ 添加</Text>
-        </Pressable>
+        <Text style={[styles.friendStatus, { color: colors.textTertiary }]}>
+          {item.isOnline ? '在线' : item.lastSeen ? `${formatLastSeen(item.lastSeen)}` : '离线'}
+        </Text>
       </View>
+      <TouchableOpacity
+        style={styles.chatButton}
+        onPress={() => router.push(`/chat/${item.id}`)}
+      >
+        <MessageCircle size={22} color={Colors.primary} />
+      </TouchableOpacity>
+    </TouchableOpacity>
+  );
 
-      <View style={styles.tabs}>
-        <Pressable
-          style={[styles.tab, activeTab === 'friends' && styles.tabActive]}
-          onPress={() => setActiveTab('friends')}
-        >
-          <Text style={[styles.tabText, activeTab === 'friends' && styles.tabTextActive]}>
-            好友 ({MOCK_FRIENDS.length})
+  const renderRequest = ({ item }: { item: FriendRequest }) => (
+    <Card style={styles.requestCard}>
+      <View style={styles.requestHeader}>
+        <View style={[styles.avatar, { backgroundColor: Colors.primary + '20' }]}>
+          <Text style={[styles.avatarText, { color: Colors.primary }]}>
+            {item.fromName.charAt(0)}
           </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.tab, activeTab === 'blocked' && styles.tabActive]}
-          onPress={() => setActiveTab('blocked')}
-        >
-          <Text style={[styles.tabText, activeTab === 'blocked' && styles.tabTextActive]}>
-            黑名单 ({MOCK_BLOCKED.length})
+        </View>
+        <View style={styles.requestInfo}>
+          <Text style={[styles.requestName, { color: colors.textPrimary }]}>
+            {item.fromName}
           </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.tab, activeTab === 'whitelist' && styles.tabActive]}
-          onPress={() => setActiveTab('whitelist')}
-        >
-          <Text style={[styles.tabText, activeTab === 'whitelist' && styles.tabTextActive]}>
-            白名单 ({MOCK_WHITELIST.length})
+          <Text style={[styles.requestTime, { color: colors.textTertiary }]}>
+            {formatTime(item.createdAt)}
           </Text>
-        </Pressable>
+        </View>
       </View>
-
-      <View style={styles.searchContainer}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="搜索用户..."
-          placeholderTextColor="#9ca3af"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
+      {item.message && (
+        <Text style={[styles.requestMessage, { color: colors.textSecondary }]}>
+          "{item.message}"
+        </Text>
+      )}
+      <View style={styles.requestActions}>
+        <Button
+          title="拒绝"
+          variant="outline"
+          size="sm"
+          onPress={() => handleReject(item.id)}
+          style={styles.requestButton}
+        />
+        <Button
+          title="接受"
+          size="sm"
+          onPress={() => handleAccept(item.id)}
+          style={styles.requestButton}
         />
       </View>
+    </Card>
+  );
 
-      <FlatList
-        data={filteredData}
-        renderItem={renderItem}
-        keyExtractor={(item) => item.address}
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>{getEmptyText()}</Text>
-          </View>
-        }
-      />
-
-      {showAddModal && (
-        <View style={styles.modalOverlay}>
-          <View style={styles.modal}>
-            <Text style={styles.modalTitle}>{getAddText()}</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="输入用户钱包地址"
-              placeholderTextColor="#9ca3af"
-              value={addAddress}
-              onChangeText={setAddAddress}
-            />
-            <View style={styles.modalActions}>
-              <Pressable
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => {
-                  setShowAddModal(false);
-                  setAddAddress('');
-                }}
-              >
-                <Text style={styles.cancelButtonText}>取消</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.modalButton, styles.confirmButton]}
-                onPress={handleAdd}
-              >
-                <Text style={styles.confirmButtonText}>确定</Text>
-              </Pressable>
-            </View>
-          </View>
+  return (
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <View style={[styles.searchBar, { backgroundColor: colors.surface }]}>
+          <Search size={20} color={colors.textTertiary} />
+          <TextInput
+            style={[styles.searchInput, { color: colors.textPrimary }]}
+            placeholder="搜索好友"
+            placeholderTextColor={colors.textTertiary}
+            value={searchText}
+            onChangeText={setSearchText}
+          />
         </View>
+        <TouchableOpacity
+          style={[styles.addButton, { backgroundColor: Colors.primary }]}
+          onPress={() => router.push('/friends/add')}
+        >
+          <UserPlus size={22} color="#FFFFFF" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Tabs */}
+      <View style={[styles.tabs, { borderBottomColor: colors.border }]}>
+        <TouchableOpacity
+          style={[
+            styles.tab,
+            activeTab === 'friends' && styles.tabActive,
+          ]}
+          onPress={() => setActiveTab('friends')}
+        >
+          <Text
+            style={[
+              styles.tabText,
+              { color: activeTab === 'friends' ? Colors.primary : colors.textSecondary },
+            ]}
+          >
+            好友 ({friends.length})
+          </Text>
+          {activeTab === 'friends' && (
+            <View style={[styles.tabIndicator, { backgroundColor: Colors.primary }]} />
+          )}
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.tab,
+            activeTab === 'requests' && styles.tabActive,
+          ]}
+          onPress={() => setActiveTab('requests')}
+        >
+          <View style={styles.tabContent}>
+            <Text
+              style={[
+                styles.tabText,
+                { color: activeTab === 'requests' ? Colors.primary : colors.textSecondary },
+              ]}
+            >
+              请求
+            </Text>
+            {requests.length > 0 && (
+              <View style={[styles.badge, { backgroundColor: Colors.error }]}>
+                <Text style={styles.badgeText}>{requests.length}</Text>
+              </View>
+            )}
+          </View>
+          {activeTab === 'requests' && (
+            <View style={[styles.tabIndicator, { backgroundColor: Colors.primary }]} />
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* Content */}
+      {activeTab === 'friends' ? (
+        <FlatList
+          data={filteredFriends}
+          renderItem={renderFriend}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.list}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                {loading ? '加载中...' : searchText ? '未找到匹配的好友' : '暂无好友'}
+              </Text>
+              {!loading && !searchText && (
+                <Button
+                  title="添加好友"
+                  onPress={() => router.push('/friends/add')}
+                  style={styles.emptyButton}
+                />
+              )}
+            </View>
+          }
+        />
+      ) : (
+        <FlatList
+          data={requests}
+          renderItem={renderRequest}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.list}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+                {loading ? '加载中...' : '暂无好友请求'}
+              </Text>
+            </View>
+          }
+        />
       )}
     </View>
   );
 }
 
+function formatLastSeen(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+
+  if (minutes < 1) return '刚刚在线';
+  if (minutes < 60) return `${minutes}分钟前`;
+  if (hours < 24) return `${hours}小时前`;
+  return `${days}天前`;
+}
+
+function formatTime(timestamp: number): string {
+  const date = new Date(timestamp);
+  return date.toLocaleDateString();
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
-  header: {
+  searchContainer: {
+    flexDirection: 'row',
+    padding: 16,
+    gap: 12,
+  },
+  searchBar: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#fff',
-    paddingTop: 50,
-    paddingBottom: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    height: 44,
   },
-  backButton: {
-    padding: 4,
-  },
-  backText: {
-    fontSize: 17,
-    color: '#6D28D9',
-  },
-  headerTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#1f2937',
+  searchInput: {
+    flex: 1,
+    marginLeft: 8,
+    fontSize: 16,
   },
   addButton: {
-    padding: 4,
-  },
-  addText: {
-    fontSize: 15,
-    color: '#6D28D9',
-    fontWeight: '600',
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   tabs: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
   },
   tab: {
     flex: 1,
-    paddingVertical: 12,
     alignItems: 'center',
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+    paddingVertical: 12,
+    position: 'relative',
   },
-  tabActive: {
-    borderBottomColor: '#6D28D9',
+  tabActive: {},
+  tabContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   tabText: {
-    fontSize: 14,
-    color: '#6b7280',
-  },
-  tabTextActive: {
-    color: '#6D28D9',
-    fontWeight: '600',
-  },
-  searchContainer: {
-    padding: 16,
-    paddingBottom: 8,
-  },
-  searchInput: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
     fontSize: 15,
-    color: '#1f2937',
+    fontWeight: '500',
+  },
+  tabIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    height: 2,
+    width: 40,
+    borderRadius: 1,
+  },
+  badge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 6,
+    paddingHorizontal: 5,
+  },
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '600',
   },
   list: {
     padding: 16,
-    paddingTop: 8,
   },
-  userItem: {
+  friendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 8,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
   },
-  userInfo: {
+  friendLeft: {
+    position: 'relative',
+  },
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  onlineIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 6,
+    padding: 2,
+  },
+  friendInfo: {
     flex: 1,
     marginLeft: 12,
   },
-  userName: {
+  friendName: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#1f2937',
-  },
-  userAddress: {
-    fontSize: 13,
-    color: '#6b7280',
-    marginTop: 2,
-  },
-  actionButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: '#fee2e2',
-  },
-  actionText: {
-    fontSize: 13,
-    color: '#dc2626',
     fontWeight: '500',
   },
-  empty: {
-    padding: 40,
+  friendStatus: {
+    fontSize: 13,
+    marginTop: 2,
+  },
+  chatButton: {
+    padding: 8,
+  },
+  requestCard: {
+    marginBottom: 12,
+  },
+  requestHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 8,
   },
-  emptyText: {
-    fontSize: 15,
-    color: '#9ca3af',
+  requestInfo: {
+    flex: 1,
+    marginLeft: 12,
   },
-  modalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
+  requestName: {
+    fontSize: 16,
+    fontWeight: '500',
   },
-  modal: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 24,
-    width: '100%',
-    maxWidth: 400,
+  requestTime: {
+    fontSize: 12,
+    marginTop: 2,
   },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1f2937',
-    marginBottom: 16,
-    textAlign: 'center',
+  requestMessage: {
+    fontSize: 14,
+    fontStyle: 'italic',
+    marginBottom: 12,
   },
-  modalInput: {
-    backgroundColor: '#f3f4f6',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 15,
-    color: '#1f2937',
-    marginBottom: 20,
-  },
-  modalActions: {
+  requestActions: {
     flexDirection: 'row',
     gap: 12,
   },
-  modalButton: {
+  requestButton: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 8,
+  },
+  empty: {
     alignItems: 'center',
+    paddingTop: 60,
   },
-  cancelButton: {
-    backgroundColor: '#f3f4f6',
+  emptyText: {
+    fontSize: 16,
+    marginBottom: 16,
   },
-  cancelButtonText: {
-    color: '#6b7280',
-    fontWeight: '600',
-  },
-  confirmButton: {
-    backgroundColor: '#6D28D9',
-  },
-  confirmButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-  },
+  emptyButton: {},
 });

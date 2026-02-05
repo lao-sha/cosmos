@@ -1,79 +1,56 @@
 import { Tabs } from 'expo-router';
-import React from 'react';
-import { Platform } from 'react-native';
-
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useColorScheme } from 'react-native';
+import { Wallet, Repeat, MessageCircle, User } from 'lucide-react-native';
+import { Colors } from '@/constants/colors';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const theme = isDark ? Colors.dark : Colors.light;
 
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
-        tabBarInactiveTintColor: '#888',
-        headerShown: false,
-        tabBarShowLabel: true,
+        tabBarActiveTintColor: Colors.primary,
+        tabBarInactiveTintColor: theme.textTertiary,
         tabBarStyle: {
-          height: Platform.OS === 'web' ? 80 : 65,
-          paddingTop: 10,
-          paddingBottom: Platform.OS === 'web' ? 16 : 10,
-          borderTopWidth: 1,
-          borderTopColor: '#e0e0e0',
-          backgroundColor: '#fff',
+          backgroundColor: theme.background,
+          borderTopColor: theme.border,
         },
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '600',
-          paddingBottom: 4,
+        headerStyle: {
+          backgroundColor: theme.background,
         },
-        tabBarIconStyle: {
-          marginBottom: 0,
-        },
-        tabBarHideOnKeyboard: true,
-      }}>
+        headerTintColor: theme.textPrimary,
+      }}
+    >
       <Tabs.Screen
         name="index"
         options={{
-          title: '首页',
-          tabBarIcon: ({ color }) => <IconSymbol size={18} name="house.fill" color={color} />,
+          title: '钱包',
+          tabBarIcon: ({ color, size }) => <Wallet size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="trade"
+        options={{
+          title: '交易',
+          tabBarIcon: ({ color, size }) => <Repeat size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="chat"
         options={{
-          title: '聊天',
-          tabBarIcon: ({ color }) => <IconSymbol size={18} name="bubble.left.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="mall"
-        options={{
-          title: '商城',
-          tabBarIcon: ({ color }) => <IconSymbol size={18} name="bag.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="market"
-        options={{
-          title: '占卜',
-          tabBarIcon: ({ color }) => <IconSymbol size={18} name="sparkles" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="matchmaking"
-        options={{
-          title: '合婚',
-          tabBarIcon: ({ color }) => <IconSymbol size={18} name="heart.fill" color={color} />,
+          title: '消息',
+          tabBarIcon: ({ color, size }) => (
+            <MessageCircle size={size} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: '我的',
-          tabBarIcon: ({ color }) => <IconSymbol size={18} name="person.fill" color={color} />,
+          tabBarIcon: ({ color, size }) => <User size={size} color={color} />,
         }}
       />
     </Tabs>

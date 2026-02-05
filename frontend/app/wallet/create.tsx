@@ -1,433 +1,500 @@
-import { MnemonicDisplay } from '@/src/components/MnemonicDisplay';
-import { WalletService } from '@/src/lib/wallet';
-import { useAuthStore } from '@/src/stores/auth';
-import { useWalletStore } from '@/src/stores/wallet';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-    Alert,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
 } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Copy, Eye, EyeOff, Shield, CheckCircle } from 'lucide-react-native';
+import * as Clipboard from 'expo-clipboard';
+import * as Haptics from 'expo-haptics';
+import { mnemonicGenerate } from '@polkadot/util-crypto';
+import { useColors } from '@/hooks/useColors';
+import { useWalletStore } from '@/stores/wallet';
+import { Button, Input, Card } from '@/components/ui';
+import { Colors, Shadows } from '@/constants/colors';
 
-type Step = 'generate' | 'backup' | 'verify' | 'complete';
+type Step = 'setup' | 'mnemonic' | 'verify';
 
 export default function CreateWalletScreen() {
+  const colors = useColors();
   const router = useRouter();
-  const { login } = useAuthStore();
-  const { refreshAccounts } = useWalletStore();
+  const { createWallet } = useWalletStore();
 
-  const [step, setStep] = useState<Step>('generate');
-  const [mnemonic, setMnemonic] = useState<string>('');
-  const [verifyIndexes, setVerifyIndexes] = useState<number[]>([]);
-  const [verifyInputs, setVerifyInputs] = useState<string[]>(['', '', '']);
-  const [verifyError, setVerifyError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [step, setStep] = useState<Step>('setup');
+  const [name, setName] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [mnemonic, setMnemonic] = useState('');
+  const [showMnemonic, setShowMnemonic] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [selectedWords, setSelectedWords] = useState<number[]>([]);
+  const [verifyIndices, setVerifyIndices] = useState<number[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const handleGenerate = async () => {
-    setIsLoading(true);
-    try {
-      await WalletService.init();
-      const newMnemonic = WalletService.generateMnemonic();
+  useEffect(() => {
+    if (step === 'mnemonic' && !mnemonic) {
+      const newMnemonic = mnemonicGenerate();
       setMnemonic(newMnemonic);
-
-      // 随机选择3个索引用于验证
-      const indexes: number[] = [];
-      while (indexes.length < 3) {
-        const idx = Math.floor(Math.random() * 12);
-        if (!indexes.includes(idx)) {
-          indexes.push(idx);
-        }
-      }
-      setVerifyIndexes(indexes.sort((a, b) => a - b));
-      setStep('backup');
-    } catch (error) {
-      const msg = '生成助记词失败: ' + (error as Error).message;
-      if (Platform.OS === 'web') {
-        alert(msg);
-      } else {
-        Alert.alert('错误', msg);
-      }
-    } finally {
-      setIsLoading(false);
     }
+  }, [step]);
+
+  useEffect(() => {
+    if (step === 'verify' && mnemonic) {
+      const indices = [];
+      while (indices.length < 3) {
+        const idx = Math.floor(Math.random() * 12);
+        if (!indices.includes(idx)) indices.push(idx);
+      }
+      setVerifyIndices(indices.sort((a, b) => a - b));
+      setSelectedWords([]);
+    }
+  }, [step, mnemonic]);
+
+  const words = mnemonic.split(' ');
+
+  const handleCopy = async () => {
+    await Clipboard.setStringAsync(mnemonic);
+    setCopied(true);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleBackupComplete = () => {
+  const handleSetupNext = () => {
+    if (!name.trim()) {
+      Alert.alert('提示', '请输入钱包名称');
+      return;
+    }
+    if (password.length < 6) {
+      Alert.alert('提示', '密码至少6位');
+      return;
+    }
+    if (password !== confirmPassword) {
+      Alert.alert('提示', '两次密码不一致');
+      return;
+    }
+    setStep('mnemonic');
+  };
+
+  const handleMnemonicNext = () => {
+    if (!copied) {
+      Alert.alert('提示', '请先复制并安全保存助记词');
+      return;
+    }
     setStep('verify');
   };
 
-  const handleVerify = async () => {
-    const words = mnemonic.split(' ');
-    const isCorrect = verifyIndexes.every(
-      (idx, i) => verifyInputs[i].toLowerCase().trim() === words[idx]
+  const handleVerifyWord = (wordIndex: number) => {
+    if (selectedWords.includes(wordIndex)) {
+      setSelectedWords(selectedWords.filter((i) => i !== wordIndex));
+    } else if (selectedWords.length < 3) {
+      setSelectedWords([...selectedWords, wordIndex]);
+    }
+  };
+
+  const handleCreate = async () => {
+    const correctOrder = verifyIndices.every(
+      (idx, i) => selectedWords[i] === idx
     );
 
-    if (!isCorrect) {
-      setVerifyError('验证失败，请检查输入的单词');
+    if (!correctOrder || selectedWords.length !== 3) {
+      Alert.alert('验证失败', '请按顺序选择正确的助记词');
       return;
     }
 
-    setIsLoading(true);
+    setLoading(true);
     try {
-      await WalletService.saveMnemonic(mnemonic);
-      // 初始化多账户系统的主账户
-      const primaryAccount = await WalletService.initializePrimaryAccount(mnemonic);
-      login(primaryAccount.address, mnemonic);
-      await refreshAccounts();
-      setStep('complete');
-    } catch (error) {
-      const msg = '保存钱包失败: ' + (error as Error).message;
-      if (Platform.OS === 'web') {
-        alert(msg);
-      } else {
-        Alert.alert('错误', msg);
-      }
+      await createWallet(name, password);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      router.replace('/(tabs)');
+    } catch (error: any) {
+      Alert.alert('创建失败', error.message);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
-  const handleFinish = () => {
-    router.replace('/wallet');
-  };
+  const renderSetup = () => (
+    <View style={styles.stepContent}>
+      <View style={styles.iconContainer}>
+        <Shield size={48} color={Colors.primary} />
+      </View>
+      <Text style={[styles.title, { color: colors.textPrimary }]}>
+        创建新钱包
+      </Text>
+      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+        设置钱包名称和密码
+      </Text>
 
-  const renderStep = () => {
-    switch (step) {
-      case 'generate':
-        return (
-          <View style={styles.stepContent}>
-            <View style={styles.iconContainer}>
-              <Text style={styles.icon}>🔑</Text>
-            </View>
-            <Text style={styles.stepTitle}>创建新钱包</Text>
-            <Text style={styles.stepDesc}>
-              系统将生成一组12个单词的助记词，这是恢复钱包的唯一凭证。
-              请确保在安全的环境中操作。
-            </Text>
-
-            <View style={styles.securityTips}>
-              <Text style={styles.tipTitle}>安全提示</Text>
-              <Text style={styles.tipItem}>• 不要截图或拍照保存助记词</Text>
-              <Text style={styles.tipItem}>• 不要在网络上传输或存储</Text>
-              <Text style={styles.tipItem}>• 建议手抄并保存在安全位置</Text>
-              <Text style={styles.tipItem}>• 任何人获取助记词都能控制你的资产</Text>
-            </View>
-
-            <Pressable
-              style={[styles.primaryButton, isLoading && styles.buttonDisabled]}
-              onPress={handleGenerate}
-              disabled={isLoading}
-            >
-              <Text style={styles.primaryButtonText}>
-                {isLoading ? '生成中...' : '生成助记词'}
-              </Text>
-            </Pressable>
-          </View>
-        );
-
-      case 'backup':
-        return (
-          <View style={styles.stepContent}>
-            <View style={styles.progressBar}>
-              <View style={[styles.progressStep, styles.progressActive]} />
-              <View style={styles.progressStep} />
-              <View style={styles.progressStep} />
-            </View>
-
-            <Text style={styles.stepTitle}>备份助记词</Text>
-            <Text style={styles.stepDesc}>
-              请按顺序抄写这12个单词，完成后点击继续。
-            </Text>
-
-            <MnemonicDisplay mnemonic={mnemonic} showCopy={false} />
-
-            <Pressable style={styles.primaryButton} onPress={handleBackupComplete}>
-              <Text style={styles.primaryButtonText}>我已完成备份</Text>
-            </Pressable>
-          </View>
-        );
-
-      case 'verify':
-        const words = mnemonic.split(' ');
-        return (
-          <View style={styles.stepContent}>
-            <View style={styles.progressBar}>
-              <View style={[styles.progressStep, styles.progressActive]} />
-              <View style={[styles.progressStep, styles.progressActive]} />
-              <View style={styles.progressStep} />
-            </View>
-
-            <Text style={styles.stepTitle}>验证助记词</Text>
-            <Text style={styles.stepDesc}>
-              请输入以下位置的单词以验证你已正确备份
-            </Text>
-
-            <View style={styles.verifyInputs}>
-              {verifyIndexes.map((wordIndex, i) => (
-                <View key={wordIndex} style={styles.verifyItem}>
-                  <Text style={styles.verifyLabel}>第 {wordIndex + 1} 个单词</Text>
-                  <TextInput
-                    style={styles.verifyInput}
-                    placeholder="输入单词"
-                    placeholderTextColor="#9ca3af"
-                    value={verifyInputs[i]}
-                    onChangeText={(text) => {
-                      const newInputs = [...verifyInputs];
-                      newInputs[i] = text;
-                      setVerifyInputs(newInputs);
-                      setVerifyError(null);
-                    }}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                </View>
-              ))}
-            </View>
-
-            {verifyError && (
-              <View style={styles.errorBox}>
-                <Text style={styles.errorText}>❌ {verifyError}</Text>
-              </View>
-            )}
-
-            <Pressable
-              style={[styles.primaryButton, isLoading && styles.buttonDisabled]}
-              onPress={handleVerify}
-              disabled={isLoading}
-            >
-              <Text style={styles.primaryButtonText}>
-                {isLoading ? '验证中...' : '验证并创建钱包'}
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={styles.textButton}
-              onPress={() => setStep('backup')}
-            >
-              <Text style={styles.textButtonText}>返回查看助记词</Text>
-            </Pressable>
-          </View>
-        );
-
-      case 'complete':
-        return (
-          <View style={styles.stepContent}>
-            <View style={styles.progressBar}>
-              <View style={[styles.progressStep, styles.progressActive]} />
-              <View style={[styles.progressStep, styles.progressActive]} />
-              <View style={[styles.progressStep, styles.progressActive]} />
-            </View>
-
-            <View style={styles.successIcon}>
-              <Text style={styles.successEmoji}>✅</Text>
-            </View>
-            <Text style={styles.stepTitle}>钱包创建成功！</Text>
-            <Text style={styles.stepDesc}>
-              你的钱包已安全创建。请妥善保管助记词，
-              它是找回钱包的唯一方式。
-            </Text>
-
-            <Pressable style={styles.primaryButton} onPress={handleFinish}>
-              <Text style={styles.primaryButtonText}>开始使用</Text>
-            </Pressable>
-          </View>
-        );
-    }
-  };
-
-  return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Pressable
-          style={styles.backButton}
-          onPress={() => {
-            if (step === 'generate' || step === 'complete') {
-              router.back();
-            } else if (step === 'backup') {
-              setStep('generate');
-              setMnemonic('');
-            } else if (step === 'verify') {
-              setStep('backup');
-            }
-          }}
-        >
-          <Text style={styles.backText}>
-            {step === 'complete' ? '✕' : '‹ 返回'}
-          </Text>
-        </Pressable>
-        <Text style={styles.headerTitle}>创建钱包</Text>
-        <View style={styles.headerRight} />
+      <View style={styles.form}>
+        <Input
+          label="钱包名称"
+          placeholder="输入钱包名称"
+          value={name}
+          onChangeText={setName}
+          maxLength={20}
+        />
+        <Input
+          label="密码"
+          placeholder="至少6位密码"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+        />
+        <Input
+          label="确认密码"
+          placeholder="再次输入密码"
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          secureTextEntry
+        />
       </View>
 
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={styles.contentContainer}
-        showsVerticalScrollIndicator={false}
-      >
-        {renderStep()}
-      </ScrollView>
+      <Button title="下一步" onPress={handleSetupNext} style={styles.button} />
     </View>
+  );
+
+  const renderMnemonic = () => (
+    <View style={styles.stepContent}>
+      <View style={styles.iconContainer}>
+        <Eye size={48} color={Colors.warning} />
+      </View>
+      <Text style={[styles.title, { color: colors.textPrimary }]}>
+        备份助记词
+      </Text>
+      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+        请按顺序抄写并安全保存，丢失将无法恢复
+      </Text>
+
+      <Card style={styles.mnemonicCard}>
+        <View style={styles.mnemonicHeader}>
+          <TouchableOpacity onPress={() => setShowMnemonic(!showMnemonic)}>
+            {showMnemonic ? (
+              <EyeOff size={20} color={colors.textSecondary} />
+            ) : (
+              <Eye size={20} color={colors.textSecondary} />
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleCopy} style={styles.copyButton}>
+            {copied ? (
+              <CheckCircle size={20} color={Colors.success} />
+            ) : (
+              <Copy size={20} color={colors.textSecondary} />
+            )}
+            <Text
+              style={[
+                styles.copyText,
+                { color: copied ? Colors.success : colors.textSecondary },
+              ]}
+            >
+              {copied ? '已复制' : '复制'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.wordsGrid}>
+          {words.map((word, index) => (
+            <View
+              key={index}
+              style={[styles.wordItem, { backgroundColor: colors.surface }]}
+            >
+              <Text style={[styles.wordIndex, { color: colors.textTertiary }]}>
+                {index + 1}
+              </Text>
+              <Text style={[styles.wordText, { color: colors.textPrimary }]}>
+                {showMnemonic ? word : '••••'}
+              </Text>
+            </View>
+          ))}
+        </View>
+      </Card>
+
+      <View style={styles.warningBox}>
+        <Text style={[styles.warningText, { color: Colors.warning }]}>
+          ⚠️ 请勿截图或分享助记词，任何人获取助记词都能控制您的资产
+        </Text>
+      </View>
+
+      <Button
+        title="我已安全保存"
+        onPress={handleMnemonicNext}
+        style={styles.button}
+        disabled={!copied}
+      />
+    </View>
+  );
+
+  const renderVerify = () => (
+    <View style={styles.stepContent}>
+      <View style={styles.iconContainer}>
+        <CheckCircle size={48} color={Colors.success} />
+      </View>
+      <Text style={[styles.title, { color: colors.textPrimary }]}>
+        验证助记词
+      </Text>
+      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+        请按顺序选择第 {verifyIndices.map((i) => i + 1).join('、')} 个词
+      </Text>
+
+      <View style={styles.selectedArea}>
+        {verifyIndices.map((targetIdx, i) => (
+          <View
+            key={targetIdx}
+            style={[
+              styles.selectedSlot,
+              {
+                backgroundColor:
+                  selectedWords[i] !== undefined
+                    ? Colors.primary + '20'
+                    : colors.surface,
+                borderColor:
+                  selectedWords[i] !== undefined
+                    ? Colors.primary
+                    : colors.border,
+              },
+            ]}
+          >
+            <Text style={[styles.slotLabel, { color: colors.textTertiary }]}>
+              #{targetIdx + 1}
+            </Text>
+            <Text style={[styles.slotWord, { color: colors.textPrimary }]}>
+              {selectedWords[i] !== undefined ? words[selectedWords[i]] : ''}
+            </Text>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.wordsOptions}>
+        {words.map((word, index) => {
+          const isSelected = selectedWords.includes(index);
+          return (
+            <TouchableOpacity
+              key={index}
+              style={[
+                styles.optionWord,
+                {
+                  backgroundColor: isSelected
+                    ? Colors.primary
+                    : colors.surface,
+                  borderColor: isSelected ? Colors.primary : colors.border,
+                },
+              ]}
+              onPress={() => handleVerifyWord(index)}
+              disabled={isSelected && !selectedWords.includes(index)}
+            >
+              <Text
+                style={[
+                  styles.optionText,
+                  { color: isSelected ? '#FFFFFF' : colors.textPrimary },
+                ]}
+              >
+                {word}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      <Button
+        title="确认创建"
+        onPress={handleCreate}
+        style={styles.button}
+        loading={loading}
+        disabled={selectedWords.length !== 3}
+      />
+    </View>
+  );
+
+  return (
+    <ScrollView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+    >
+      {/* Progress */}
+      <View style={styles.progress}>
+        {['setup', 'mnemonic', 'verify'].map((s, i) => (
+          <View key={s} style={styles.progressItem}>
+            <View
+              style={[
+                styles.progressDot,
+                {
+                  backgroundColor:
+                    step === s || i < ['setup', 'mnemonic', 'verify'].indexOf(step)
+                      ? Colors.primary
+                      : colors.border,
+                },
+              ]}
+            />
+            {i < 2 && (
+              <View
+                style={[
+                  styles.progressLine,
+                  {
+                    backgroundColor:
+                      i < ['setup', 'mnemonic', 'verify'].indexOf(step)
+                        ? Colors.primary
+                        : colors.border,
+                  },
+                ]}
+              />
+            )}
+          </View>
+        ))}
+      </View>
+
+      {step === 'setup' && renderSetup()}
+      {step === 'mnemonic' && renderMnemonic()}
+      {step === 'verify' && renderVerify()}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#fff',
-    paddingTop: 50,
-    paddingBottom: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  backButton: {
-    padding: 4,
-  },
-  backText: {
-    fontSize: 17,
-    color: '#6D28D9',
-  },
-  headerTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#1f2937',
-  },
-  headerRight: {
-    width: 50,
   },
   content: {
-    flex: 1,
+    padding: 20,
+    paddingBottom: 40,
   },
-  contentContainer: {
-    padding: 16,
-  },
-  stepContent: {
-    flex: 1,
-  },
-  progressBar: {
+  progress: {
     flexDirection: 'row',
-    gap: 8,
-    marginBottom: 24,
-  },
-  progressStep: {
-    flex: 1,
-    height: 4,
-    backgroundColor: '#e5e7eb',
-    borderRadius: 2,
-  },
-  progressActive: {
-    backgroundColor: '#6D28D9',
-  },
-  iconContainer: {
-    alignSelf: 'center',
-    marginBottom: 24,
-    marginTop: 40,
-  },
-  icon: {
-    fontSize: 64,
-  },
-  stepTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#1f2937',
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  stepDesc: {
-    fontSize: 15,
-    color: '#6b7280',
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 24,
-  },
-  securityTips: {
-    backgroundColor: '#fef3c7',
-    borderRadius: 12,
-    padding: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: 32,
   },
-  tipTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#92400e',
+  progressItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  progressDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  progressLine: {
+    width: 60,
+    height: 2,
+    marginHorizontal: 4,
+  },
+  stepContent: {
+    alignItems: 'center',
+  },
+  iconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: '700',
     marginBottom: 8,
   },
-  tipItem: {
-    fontSize: 13,
-    color: '#78350f',
-    lineHeight: 22,
+  subtitle: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 32,
   },
-  primaryButton: {
-    backgroundColor: '#6D28D9',
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
+  form: {
+    width: '100%',
+  },
+  button: {
+    width: '100%',
     marginTop: 16,
   },
-  buttonDisabled: {
-    backgroundColor: '#d1d5db',
-  },
-  primaryButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  verifyInputs: {
-    gap: 16,
+  mnemonicCard: {
+    width: '100%',
     marginBottom: 16,
   },
-  verifyItem: {},
-  verifyLabel: {
+  mnemonicHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  copyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  copyText: {
+    marginLeft: 4,
     fontSize: 14,
-    color: '#374151',
-    marginBottom: 8,
   },
-  verifyInput: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: '#1f2937',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+  wordsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
   },
-  errorBox: {
-    backgroundColor: '#fef2f2',
+  wordItem: {
+    width: '31%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
     borderRadius: 8,
+  },
+  wordIndex: {
+    fontSize: 12,
+    marginRight: 6,
+    width: 18,
+  },
+  wordText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  warningBox: {
+    width: '100%',
     padding: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
     marginBottom: 16,
   },
-  errorText: {
-    fontSize: 14,
-    color: '#dc2626',
+  warningText: {
+    fontSize: 13,
+    lineHeight: 20,
   },
-  textButton: {
-    marginTop: 16,
-    alignItems: 'center',
-  },
-  textButtonText: {
-    fontSize: 14,
-    color: '#6D28D9',
-  },
-  successIcon: {
-    alignSelf: 'center',
-    marginTop: 40,
+  selectedArea: {
+    flexDirection: 'row',
+    gap: 12,
     marginBottom: 24,
   },
-  successEmoji: {
-    fontSize: 72,
+  selectedSlot: {
+    width: 100,
+    height: 70,
+    borderRadius: 12,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  slotLabel: {
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  slotWord: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  wordsOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  optionWord: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  optionText: {
+    fontSize: 14,
+    fontWeight: '500',
   },
 });

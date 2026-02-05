@@ -1,232 +1,332 @@
-import { MnemonicInput } from '@/src/components/MnemonicInput';
-import { WalletService } from '@/src/lib/wallet';
-import { useAuthStore } from '@/src/stores/auth';
-import { useWalletStore } from '@/src/stores/wallet';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import React, { useState } from 'react';
 import {
-    Alert,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
 } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Download, Key, FileText } from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
+import { mnemonicValidate } from '@polkadot/util-crypto';
+import { useColors } from '@/hooks/useColors';
+import { useWalletStore } from '@/stores/wallet';
+import { Button, Input, Card } from '@/components/ui';
+import { Colors } from '@/constants/colors';
+
+type ImportType = 'mnemonic' | 'privateKey';
 
 export default function ImportWalletScreen() {
+  const colors = useColors();
   const router = useRouter();
-  const { login } = useAuthStore();
-  const { refreshAccounts } = useWalletStore();
+  const { importWallet } = useWalletStore();
 
-  const [isImporting, setIsImporting] = useState(false);
-  const [success, setSuccess] = useState(false);
+  const [importType, setImportType] = useState<ImportType>('mnemonic');
+  const [name, setName] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [mnemonic, setMnemonic] = useState('');
+  const [privateKey, setPrivateKey] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleValidMnemonic = async (mnemonic: string) => {
-    setIsImporting(true);
-    try {
-      await WalletService.saveMnemonic(mnemonic);
-      // 初始化多账户系统的主账户
-      const primaryAccount = await WalletService.initializePrimaryAccount(mnemonic);
-      login(primaryAccount.address, mnemonic);
-      await refreshAccounts();
-      setSuccess(true);
-    } catch (error) {
-      const msg = '导入失败: ' + (error as Error).message;
-      if (Platform.OS === 'web') {
-        alert(msg);
-      } else {
-        Alert.alert('错误', msg);
+  const handleImport = async () => {
+    if (!name.trim()) {
+      Alert.alert('提示', '请输入钱包名称');
+      return;
+    }
+    if (password.length < 6) {
+      Alert.alert('提示', '密码至少6位');
+      return;
+    }
+    if (password !== confirmPassword) {
+      Alert.alert('提示', '两次密码不一致');
+      return;
+    }
+
+    if (importType === 'mnemonic') {
+      const words = mnemonic.trim().split(/\s+/);
+      if (words.length !== 12 && words.length !== 24) {
+        Alert.alert('提示', '助记词应为12或24个单词');
+        return;
       }
+      if (!mnemonicValidate(mnemonic.trim())) {
+        Alert.alert('提示', '无效的助记词');
+        return;
+      }
+    } else {
+      if (!privateKey.trim() || privateKey.length < 64) {
+        Alert.alert('提示', '请输入有效的私钥');
+        return;
+      }
+    }
+
+    setLoading(true);
+    try {
+      const secret = importType === 'mnemonic' ? mnemonic.trim() : privateKey.trim();
+      await importWallet(secret, name, password);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      router.replace('/(tabs)');
+    } catch (error: any) {
+      Alert.alert('导入失败', error.message);
     } finally {
-      setIsImporting(false);
+      setLoading(false);
     }
   };
 
-  const handleFinish = () => {
-    router.replace('/wallet');
-  };
-
-  if (success) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <View style={styles.backButton} />
-          <Text style={styles.headerTitle}>导入钱包</Text>
-          <View style={styles.headerRight} />
-        </View>
-
-        <View style={styles.successContainer}>
-          <Text style={styles.successEmoji}>✅</Text>
-          <Text style={styles.successTitle}>导入成功！</Text>
-          <Text style={styles.successDesc}>
-            你的钱包已成功导入，现在可以开始使用了。
-          </Text>
-          <Pressable style={styles.primaryButton} onPress={handleFinish}>
-            <Text style={styles.primaryButtonText}>开始使用</Text>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
-
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backText}>‹ 返回</Text>
-        </Pressable>
-        <Text style={styles.headerTitle}>导入钱包</Text>
-        <View style={styles.headerRight} />
+    <ScrollView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      contentContainerStyle={styles.content}
+      keyboardShouldPersistTaps="handled"
+    >
+      <View style={styles.iconContainer}>
+        <Download size={48} color={Colors.primary} />
+      </View>
+      <Text style={[styles.title, { color: colors.textPrimary }]}>
+        导入钱包
+      </Text>
+      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+        使用助记词或私钥恢复钱包
+      </Text>
+
+      {/* Import Type Selector */}
+      <View style={styles.typeSelector}>
+        <TouchableOpacity
+          style={[
+            styles.typeOption,
+            {
+              backgroundColor:
+                importType === 'mnemonic' ? Colors.primary : colors.surface,
+              borderColor:
+                importType === 'mnemonic' ? Colors.primary : colors.border,
+            },
+          ]}
+          onPress={() => setImportType('mnemonic')}
+        >
+          <FileText
+            size={20}
+            color={importType === 'mnemonic' ? '#FFFFFF' : colors.textSecondary}
+          />
+          <Text
+            style={[
+              styles.typeText,
+              {
+                color:
+                  importType === 'mnemonic' ? '#FFFFFF' : colors.textPrimary,
+              },
+            ]}
+          >
+            助记词
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.typeOption,
+            {
+              backgroundColor:
+                importType === 'privateKey' ? Colors.primary : colors.surface,
+              borderColor:
+                importType === 'privateKey' ? Colors.primary : colors.border,
+            },
+          ]}
+          onPress={() => setImportType('privateKey')}
+        >
+          <Key
+            size={20}
+            color={importType === 'privateKey' ? '#FFFFFF' : colors.textSecondary}
+          />
+          <Text
+            style={[
+              styles.typeText,
+              {
+                color:
+                  importType === 'privateKey' ? '#FFFFFF' : colors.textPrimary,
+              },
+            ]}
+          >
+            私钥
+          </Text>
+        </TouchableOpacity>
       </View>
 
-      <ScrollView
-        style={styles.content}
-        contentContainerStyle={styles.contentContainer}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.intro}>
-          <Text style={styles.introTitle}>恢复你的钱包</Text>
-          <Text style={styles.introDesc}>
-            输入你之前备份的12个助记词单词来恢复钱包。
-            请确保在安全的环境中操作。
-          </Text>
-        </View>
-
-        <MnemonicInput
-          onValidMnemonic={handleValidMnemonic}
-          onInvalid={() => {}}
+      {/* Form */}
+      <View style={styles.form}>
+        <Input
+          label="钱包名称"
+          placeholder="输入钱包名称"
+          value={name}
+          onChangeText={setName}
+          maxLength={20}
         />
 
-        {isImporting && (
-          <View style={styles.loadingOverlay}>
-            <Text style={styles.loadingText}>正在导入钱包...</Text>
+        {importType === 'mnemonic' ? (
+          <View style={styles.inputGroup}>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>
+              助记词
+            </Text>
+            <Card style={styles.mnemonicInput}>
+              <Input
+                placeholder="输入12或24个助记词，用空格分隔"
+                value={mnemonic}
+                onChangeText={setMnemonic}
+                multiline
+                numberOfLines={4}
+                style={styles.textArea}
+                containerStyle={styles.noMargin}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </Card>
+            <Text style={[styles.hint, { color: colors.textTertiary }]}>
+              请按顺序输入助记词，单词之间用空格分隔
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.inputGroup}>
+            <Text style={[styles.label, { color: colors.textSecondary }]}>
+              私钥
+            </Text>
+            <Input
+              placeholder="输入私钥（0x开头或不带）"
+              value={privateKey}
+              onChangeText={setPrivateKey}
+              containerStyle={styles.noMargin}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+            />
           </View>
         )}
 
-        <View style={styles.securityNote}>
-          <Text style={styles.noteIcon}>🔒</Text>
-          <Text style={styles.noteText}>
-            你的助记词将安全存储在设备本地，不会上传到任何服务器。
-          </Text>
-        </View>
-      </ScrollView>
-    </View>
+        <Input
+          label="密码"
+          placeholder="设置钱包密码（至少6位）"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+        />
+
+        <Input
+          label="确认密码"
+          placeholder="再次输入密码"
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          secureTextEntry
+        />
+      </View>
+
+      {/* Warning */}
+      <Card style={[styles.warningCard, { backgroundColor: Colors.warning + '10' }]}>
+        <Text style={[styles.warningTitle, { color: Colors.warning }]}>
+          ⚠️ 安全提示
+        </Text>
+        <Text style={[styles.warningText, { color: colors.textSecondary }]}>
+          • 请确保在安全环境下导入{'\n'}
+          • 不要在公共网络或设备上操作{'\n'}
+          • 导入后助记词/私钥不会上传服务器
+        </Text>
+      </Card>
+
+      <Button
+        title="导入钱包"
+        onPress={handleImport}
+        style={styles.button}
+        loading={loading}
+      />
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#fff',
-    paddingTop: 50,
-    paddingBottom: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  backButton: {
-    padding: 4,
-    width: 50,
-  },
-  backText: {
-    fontSize: 17,
-    color: '#6D28D9',
-  },
-  headerTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#1f2937',
-  },
-  headerRight: {
-    width: 50,
   },
   content: {
-    flex: 1,
+    padding: 20,
+    paddingBottom: 40,
   },
-  contentContainer: {
-    padding: 16,
+  iconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    marginBottom: 20,
   },
-  intro: {
-    marginBottom: 24,
-  },
-  introTitle: {
+  title: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#1f2937',
+    textAlign: 'center',
     marginBottom: 8,
   },
-  introDesc: {
-    fontSize: 15,
-    color: '#6b7280',
-    lineHeight: 22,
-  },
-  loadingOverlay: {
-    marginTop: 16,
-    padding: 16,
-    backgroundColor: '#f5f3ff',
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  loadingText: {
-    fontSize: 15,
-    color: '#6D28D9',
-    fontWeight: '500',
-  },
-  securityNote: {
-    flexDirection: 'row',
-    marginTop: 24,
-    padding: 16,
-    backgroundColor: '#eff6ff',
-    borderRadius: 12,
-  },
-  noteIcon: {
-    fontSize: 20,
-    marginRight: 12,
-  },
-  noteText: {
-    flex: 1,
-    fontSize: 13,
-    color: '#1e40af',
-    lineHeight: 20,
-  },
-  successContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 40,
-  },
-  successEmoji: {
-    fontSize: 72,
+  subtitle: {
+    fontSize: 14,
+    textAlign: 'center',
     marginBottom: 24,
   },
-  successTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#1f2937',
-    marginBottom: 12,
+  typeSelector: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 24,
   },
-  successDesc: {
-    fontSize: 15,
-    color: '#6b7280',
-    textAlign: 'center',
-    marginBottom: 32,
-  },
-  primaryButton: {
-    backgroundColor: '#6D28D9',
-    paddingVertical: 16,
-    paddingHorizontal: 48,
+  typeOption: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 14,
     borderRadius: 12,
+    borderWidth: 1,
+    gap: 8,
   },
-  primaryButtonText: {
-    color: '#fff',
+  typeText: {
     fontSize: 16,
+    fontWeight: '500',
+  },
+  form: {
+    marginBottom: 16,
+  },
+  inputGroup: {
+    marginBottom: 16,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  mnemonicInput: {
+    padding: 4,
+  },
+  textArea: {
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+  noMargin: {
+    marginBottom: 0,
+  },
+  hint: {
+    fontSize: 12,
+    marginTop: 8,
+  },
+  warningCard: {
+    marginBottom: 24,
+    borderWidth: 0,
+  },
+  warningTitle: {
+    fontSize: 14,
     fontWeight: '600',
+    marginBottom: 8,
+  },
+  warningText: {
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  button: {
+    width: '100%',
   },
 });

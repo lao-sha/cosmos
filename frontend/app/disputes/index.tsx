@@ -1,218 +1,229 @@
-import { useAuthStore } from '@/src/stores/auth';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-    FlatList,
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  RefreshControl,
 } from 'react-native';
-
-type ComplaintStatus =
-  | 'submitted'
-  | 'responded'
-  | 'mediating'
-  | 'arbitrating'
-  | 'resolved_complainant_win'
-  | 'resolved_respondent_win'
-  | 'resolved_settlement'
-  | 'withdrawn';
-
-type ComplaintType = 'service_quality' | 'payment_issue' | 'fraud' | 'harassment' | 'other';
-
-interface Complaint {
-  id: string;
-  domain: string;
-  objectId: string;
-  complaintType: ComplaintType;
-  status: ComplaintStatus;
-  isComplainant: boolean;
-  counterparty: string;
-  createdAt: string;
-  amount?: string;
-}
-
-const MOCK_COMPLAINTS: Complaint[] = [
-  {
-    id: '1',
-    domain: 'otc',
-    objectId: '12345',
-    complaintType: 'payment_issue',
-    status: 'submitted',
-    isComplainant: true,
-    counterparty: '5Grw...utQY',
-    createdAt: '2025-01-27',
-    amount: '100 USDT',
-  },
-  {
-    id: '2',
-    domain: 'divination',
-    objectId: '67890',
-    complaintType: 'service_quality',
-    status: 'responded',
-    isComplainant: false,
-    counterparty: '5DAn...kQrB',
-    createdAt: '2025-01-25',
-  },
-  {
-    id: '3',
-    domain: 'otc',
-    objectId: '11111',
-    complaintType: 'fraud',
-    status: 'resolved_complainant_win',
-    isComplainant: true,
-    counterparty: '5Ck8...mNpC',
-    createdAt: '2025-01-20',
-    amount: '500 USDT',
-  },
-];
-
-const STATUS_INFO: Record<ComplaintStatus, { label: string; color: string }> = {
-  submitted: { label: '已提交', color: '#f59e0b' },
-  responded: { label: '已回应', color: '#3b82f6' },
-  mediating: { label: '调解中', color: '#8b5cf6' },
-  arbitrating: { label: '仲裁中', color: '#ec4899' },
-  resolved_complainant_win: { label: '投诉方胜', color: '#22c55e' },
-  resolved_respondent_win: { label: '被投诉方胜', color: '#ef4444' },
-  resolved_settlement: { label: '和解', color: '#06b6d4' },
-  withdrawn: { label: '已撤销', color: '#6b7280' },
-};
-
-const TYPE_INFO: Record<ComplaintType, { label: string; icon: string }> = {
-  service_quality: { label: '服务质量', icon: '⭐' },
-  payment_issue: { label: '付款问题', icon: '💳' },
-  fraud: { label: '欺诈', icon: '🚨' },
-  harassment: { label: '骚扰', icon: '🚫' },
-  other: { label: '其他', icon: '📝' },
-};
-
-const DOMAIN_INFO: Record<string, string> = {
-  otc: 'OTC交易',
-  divination: '占卜服务',
-  matchmaking: '婚恋匹配',
-};
+import { useRouter } from 'expo-router';
+import {
+  Scale,
+  Plus,
+  Clock,
+  FileText,
+  AlertTriangle,
+  CheckCircle,
+} from 'lucide-react-native';
+import { useColors } from '@/hooks/useColors';
+import { useWalletStore } from '@/stores/wallet';
+import {
+  getDisputes,
+  DISPUTE_STATUS_CONFIG,
+  type Dispute,
+  type DisputeStatus,
+} from '@/services/dispute';
+import { Card, Button } from '@/components/ui';
+import { Colors } from '@/constants/colors';
 
 export default function DisputesScreen() {
+  const colors = useColors();
   const router = useRouter();
-  const { isLoggedIn } = useAuthStore();
+  const { address } = useWalletStore();
 
+  const [disputes, setDisputes] = useState<Dispute[]>([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'active' | 'resolved'>('all');
 
-  const filteredComplaints = MOCK_COMPLAINTS.filter((c) => {
-    if (filter === 'all') return true;
-    if (filter === 'active') {
-      return ['submitted', 'responded', 'mediating', 'arbitrating'].includes(c.status);
+  useEffect(() => {
+    loadData();
+  }, [address]);
+
+  const loadData = async () => {
+    if (!address) return;
+    setLoading(true);
+    try {
+      const data = await getDisputes(address);
+      setDisputes(data);
+    } catch (error) {
+      console.error('Failed to load disputes:', error);
+    } finally {
+      setLoading(false);
     }
-    return ['resolved_complainant_win', 'resolved_respondent_win', 'resolved_settlement', 'withdrawn'].includes(c.status);
+  };
+
+  const filteredDisputes = disputes.filter((d) => {
+    if (filter === 'active') {
+      return d.status === 'pending' || d.status === 'evidence' || d.status === 'arbitrating';
+    }
+    if (filter === 'resolved') {
+      return d.status === 'resolved' || d.status === 'appealed';
+    }
+    return true;
   });
 
-  const handleViewDetail = (id: string) => {
-    router.push(`/disputes/${id}` as any);
+  const formatAmount = (value: string): string => {
+    const num = BigInt(value || '0') / BigInt(1e12);
+    return num.toLocaleString();
   };
 
-  const renderItem = ({ item }: { item: Complaint }) => {
-    const statusInfo = STATUS_INFO[item.status];
-    const typeInfo = TYPE_INFO[item.complaintType];
+  const getTimeLeft = (deadline: number): string => {
+    const diff = deadline - Date.now();
+    if (diff <= 0) return '已截止';
+    const hours = Math.floor(diff / 3600000);
+    if (hours < 24) return `${hours}小时`;
+    const days = Math.floor(hours / 24);
+    return `${days}天${hours % 24}小时`;
+  };
+
+  const renderDispute = ({ item }: { item: Dispute }) => {
+    const config = DISPUTE_STATUS_CONFIG[item.status];
+    const isPlaintiff = item.plaintiff === address;
 
     return (
-      <Pressable style={styles.card} onPress={() => handleViewDetail(item.id)}>
-        <View style={styles.cardHeader}>
-          <View style={styles.typeRow}>
-            <Text style={styles.typeIcon}>{typeInfo.icon}</Text>
-            <Text style={styles.typeLabel}>{typeInfo.label}</Text>
-            <View style={styles.domainBadge}>
-              <Text style={styles.domainText}>{DOMAIN_INFO[item.domain]}</Text>
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => router.push(`/disputes/${item.id}`)}
+      >
+        <Card style={styles.disputeCard}>
+          <View style={styles.disputeHeader}>
+            <View style={[styles.statusBadge, { backgroundColor: config.color + '20' }]}>
+              <Text style={[styles.statusText, { color: config.color }]}>
+                {config.label}
+              </Text>
+            </View>
+            <View style={[styles.roleBadge, { backgroundColor: isPlaintiff ? Colors.primary + '20' : Colors.warning + '20' }]}>
+              <Text style={[styles.roleText, { color: isPlaintiff ? Colors.primary : Colors.warning }]}>
+                {isPlaintiff ? '我是原告' : '我是被告'}
+              </Text>
             </View>
           </View>
-          <View style={[styles.statusBadge, { backgroundColor: `${statusInfo.color}15` }]}>
-            <Text style={[styles.statusText, { color: statusInfo.color }]}>
-              {statusInfo.label}
-            </Text>
-          </View>
-        </View>
 
-        <View style={styles.cardContent}>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>角色</Text>
-            <Text style={[styles.infoValue, { color: item.isComplainant ? '#f59e0b' : '#3b82f6' }]}>
-              {item.isComplainant ? '投诉方' : '被投诉方'}
+          <Text style={[styles.disputeTitle, { color: colors.textPrimary }]} numberOfLines={2}>
+            {item.description}
+          </Text>
+
+          <View style={styles.partiesRow}>
+            <View style={styles.partyItem}>
+              <Text style={[styles.partyLabel, { color: colors.textTertiary }]}>
+                原告
+              </Text>
+              <Text style={[styles.partyName, { color: colors.textPrimary }]}>
+                {item.plaintiffName}
+              </Text>
+            </View>
+            <View style={styles.vsText}>
+              <Text style={[styles.vs, { color: colors.textTertiary }]}>VS</Text>
+            </View>
+            <View style={styles.partyItem}>
+              <Text style={[styles.partyLabel, { color: colors.textTertiary }]}>
+                被告
+              </Text>
+              <Text style={[styles.partyName, { color: colors.textPrimary }]}>
+                {item.defendantName}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.depositRow}>
+            <Text style={[styles.depositLabel, { color: colors.textSecondary }]}>
+              押金池
+            </Text>
+            <Text style={[styles.depositValue, { color: Colors.primary }]}>
+              {formatAmount(BigInt(item.plaintiffDeposit) + BigInt(item.defendantDeposit) + '')} COS
             </Text>
           </View>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>对方</Text>
-            <Text style={styles.infoValue}>{item.counterparty}</Text>
-          </View>
-          {item.amount && (
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>涉及金额</Text>
-              <Text style={styles.infoValue}>{item.amount}</Text>
+
+          {item.status === 'evidence' && (
+            <View style={[styles.deadlineRow, { backgroundColor: Colors.warning + '10' }]}>
+              <Clock size={14} color={Colors.warning} />
+              <Text style={[styles.deadlineText, { color: Colors.warning }]}>
+                举证截止: {getTimeLeft(item.evidenceDeadline)}
+              </Text>
             </View>
           )}
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>创建时间</Text>
-            <Text style={styles.infoValue}>{item.createdAt}</Text>
-          </View>
-        </View>
 
-        <View style={styles.cardFooter}>
-          <Text style={styles.viewDetail}>查看详情 →</Text>
-        </View>
-      </Pressable>
+          <View style={styles.disputeFooter}>
+            <Text style={[styles.footerText, { color: colors.textTertiary }]}>
+              {item.domain.toUpperCase()} • {item.bizId.slice(0, 12)}...
+            </Text>
+            <Text style={[styles.footerText, { color: colors.textTertiary }]}>
+              {new Date(item.createdAt).toLocaleDateString()}
+            </Text>
+          </View>
+        </Card>
+      </TouchableOpacity>
     );
   };
 
-  if (!isLoggedIn) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Text style={styles.backText}>‹ 返回</Text>
-          </Pressable>
-          <Text style={styles.headerTitle}>我的申诉</Text>
-          <View style={styles.headerRight} />
-        </View>
-        <View style={styles.centerContent}>
-          <Text style={styles.emptyText}>请先登录</Text>
-        </View>
-      </View>
-    );
-  }
-
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* Header */}
       <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backText}>‹ 返回</Text>
-        </Pressable>
-        <Text style={styles.headerTitle}>我的申诉</Text>
-        <View style={styles.headerRight} />
+        <View>
+          <Text style={[styles.title, { color: colors.textPrimary }]}>争议仲裁</Text>
+          <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+            公平公正的纠纷解决
+          </Text>
+        </View>
+        <TouchableOpacity
+          style={[styles.createButton, { backgroundColor: Colors.primary }]}
+          onPress={() => router.push('/disputes/create')}
+        >
+          <Plus size={20} color="#FFFFFF" />
+        </TouchableOpacity>
       </View>
 
-      <View style={styles.filterRow}>
+      {/* Info Card */}
+      <Card style={[styles.infoCard, { backgroundColor: Colors.info + '10' }]}>
+        <Scale size={20} color={Colors.info} />
+        <Text style={[styles.infoText, { color: Colors.info }]}>
+          平台提供双方押金仲裁机制，由专业仲裁员公正裁决
+        </Text>
+      </Card>
+
+      {/* Filter Tabs */}
+      <View style={styles.filterTabs}>
         {(['all', 'active', 'resolved'] as const).map((f) => (
-          <Pressable
+          <TouchableOpacity
             key={f}
-            style={[styles.filterButton, filter === f && styles.filterActive]}
+            style={[
+              styles.filterTab,
+              filter === f && { backgroundColor: Colors.primary + '15' },
+            ]}
             onPress={() => setFilter(f)}
           >
-            <Text style={[styles.filterText, filter === f && styles.filterTextActive]}>
+            <Text
+              style={[
+                styles.filterText,
+                { color: filter === f ? Colors.primary : colors.textSecondary },
+              ]}
+            >
               {f === 'all' ? '全部' : f === 'active' ? '进行中' : '已结束'}
             </Text>
-          </Pressable>
+          </TouchableOpacity>
         ))}
       </View>
 
+      {/* Disputes List */}
       <FlatList
-        data={filteredComplaints}
-        renderItem={renderItem}
+        data={filteredDisputes}
+        renderItem={renderDispute}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={loading} onRefresh={loadData} />
+        }
         ListEmptyComponent={
-          <View style={styles.centerContent}>
-            <Text style={styles.emptyEmoji}>📋</Text>
-            <Text style={styles.emptyText}>暂无申诉记录</Text>
+          <View style={styles.empty}>
+            <Scale size={48} color={colors.textTertiary} />
+            <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+              {loading ? '加载中...' : '暂无争议记录'}
+            </Text>
+            <Text style={[styles.emptySubtext, { color: colors.textTertiary }]}>
+              希望您永远不需要使用此功能
+            </Text>
           </View>
         }
       />
@@ -223,94 +234,67 @@ export default function DisputesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#fff',
-    paddingTop: 50,
-    paddingBottom: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  backButton: {
-    padding: 4,
-  },
-  backText: {
-    fontSize: 17,
-    color: '#6D28D9',
-  },
-  headerTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#1f2937',
-  },
-  headerRight: {
-    width: 50,
-  },
-  filterRow: {
-    flexDirection: 'row',
+    alignItems: 'center',
     padding: 16,
+    paddingBottom: 8,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  subtitle: {
+    fontSize: 14,
+    marginTop: 4,
+  },
+  createButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  infoCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderWidth: 0,
+  },
+  infoText: {
+    flex: 1,
+    fontSize: 13,
+    marginLeft: 10,
+  },
+  filterTabs: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    marginBottom: 8,
     gap: 8,
   },
-  filterButton: {
+  filterTab: {
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: '#fff',
-  },
-  filterActive: {
-    backgroundColor: '#6D28D9',
   },
   filterText: {
     fontSize: 14,
-    color: '#6b7280',
-  },
-  filterTextActive: {
-    color: '#fff',
-    fontWeight: '600',
+    fontWeight: '500',
   },
   list: {
     padding: 16,
-    paddingTop: 0,
+    paddingTop: 8,
   },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
+  disputeCard: {
     marginBottom: 12,
   },
-  cardHeader: {
+  disputeHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  typeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: 8,
-  },
-  typeIcon: {
-    fontSize: 18,
-  },
-  typeLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1f2937',
-  },
-  domainBadge: {
-    backgroundColor: '#f3f4f6',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  domainText: {
-    fontSize: 11,
-    color: '#6b7280',
+    marginBottom: 12,
   },
   statusBadge: {
     paddingHorizontal: 10,
@@ -319,47 +303,91 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 12,
-    fontWeight: '600',
-  },
-  cardContent: {
-    gap: 8,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
-  },
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  infoLabel: {
-    fontSize: 14,
-    color: '#6b7280',
-  },
-  infoValue: {
-    fontSize: 14,
-    color: '#1f2937',
-  },
-  cardFooter: {
-    paddingTop: 12,
-    alignItems: 'center',
-  },
-  viewDetail: {
-    fontSize: 14,
-    color: '#6D28D9',
     fontWeight: '500',
   },
-  centerContent: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 40,
+  roleBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
-  emptyEmoji: {
-    fontSize: 48,
-    marginBottom: 16,
+  roleText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  disputeTitle: {
+    fontSize: 15,
+    fontWeight: '500',
+    marginBottom: 12,
+    lineHeight: 22,
+  },
+  partiesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  partyItem: {
+    flex: 1,
+  },
+  partyLabel: {
+    fontSize: 12,
+    marginBottom: 2,
+  },
+  partyName: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  vsText: {
+    paddingHorizontal: 12,
+  },
+  vs: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  depositRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  depositLabel: {
+    fontSize: 13,
+  },
+  depositValue: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  deadlineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  deadlineText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  disputeFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.05)',
+  },
+  footerText: {
+    fontSize: 12,
+  },
+  empty: {
+    alignItems: 'center',
+    paddingTop: 60,
   },
   emptyText: {
     fontSize: 16,
-    color: '#6b7280',
+    marginTop: 12,
+  },
+  emptySubtext: {
+    fontSize: 13,
+    marginTop: 4,
   },
 });
