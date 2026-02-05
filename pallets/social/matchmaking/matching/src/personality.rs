@@ -37,13 +37,8 @@ pub enum XingGeTrait {
     QueFaNaiXin,
 }
 
-/// 性格分析结果存根
-#[derive(Clone, Debug, Default)]
-pub struct CompactXingGe {
-    pub zhu_yao_te_dian: BoundedVec<XingGeTrait, ConstU32<5>>,
-    pub you_dian: BoundedVec<XingGeTrait, ConstU32<5>>,
-    pub que_dian: BoundedVec<XingGeTrait, ConstU32<5>>,
-}
+/// 重导出公共模块的 CompactXingGe 类型
+pub use pallet_matchmaking_common::CompactXingGe;
 
 /// 性格匹配结果
 #[derive(Clone, Debug, Default)]
@@ -66,8 +61,8 @@ pub fn calculate_default_personality_score() -> PersonalityMatchResult {
 
 /// 计算性格匹配综合评分（存根实现）
 pub fn calculate_personality_compatibility(
-    _xingge1: &CompactXingGe,
-    _xingge2: &CompactXingGe,
+    _xingge1: &pallet_matchmaking_common::CompactXingGe,
+    _xingge2: &pallet_matchmaking_common::CompactXingGe,
 ) -> PersonalityMatchResult {
     calculate_default_personality_score()
 }

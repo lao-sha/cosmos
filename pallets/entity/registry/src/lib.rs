@@ -45,7 +45,7 @@ pub mod pallet {
         BoundedVec, PalletId,
     };
     use frame_system::pallet_prelude::*;
-    use pallet_entity_common::{EntityStatus, EntityType, GovernanceMode, PricingProvider, ShopProvider, ShopStatus};
+    use pallet_entity_common::{EntityStatus, EntityType, GovernanceMode, PricingProvider, EntityProvider, ShopStatus};
     use sp_runtime::{
         traits::{AccountIdConversion, Saturating, Zero},
         SaturatedConversion,
@@ -86,39 +86,25 @@ pub mod pallet {
     pub type BalanceOf<T> =
         <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
-    /// 实体信息（原 Shop，Phase 2 扩展）
+    /// 实体信息（组织层，Entity-Shop 分离架构）
     #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
-    #[scale_info(skip_type_params(MaxNameLen, MaxCidLen, MaxAdmins))]
-    pub struct Entity<AccountId, Balance, BlockNumber, MaxNameLen: Get<u32>, MaxCidLen: Get<u32>, MaxAdmins: Get<u32>> {
+    #[scale_info(skip_type_params(MaxNameLen, MaxCidLen, MaxAdmins, MaxShops))]
+    pub struct Entity<AccountId, Balance, BlockNumber, MaxNameLen: Get<u32>, MaxCidLen: Get<u32>, MaxAdmins: Get<u32>, MaxShops: Get<u32>> {
         /// 实体 ID
         pub id: u64,
         /// 创建者/所有者账户
         pub owner: AccountId,
-        /// 客服聊天账户（用于 Pallet Chat，默认使用所有者账户）
-        pub customer_service: Option<AccountId>,
         /// 实体名称
         pub name: BoundedVec<u8, MaxNameLen>,
         /// 实体 Logo IPFS CID
         pub logo_cid: Option<BoundedVec<u8, MaxCidLen>>,
         /// 实体描述 IPFS CID
         pub description_cid: Option<BoundedVec<u8, MaxCidLen>>,
-        /// 初始运营资金
-        pub initial_fund: Balance,
         /// 实体状态
         pub status: EntityStatus,
-        /// 商品/服务数量
-        pub product_count: u32,
-        /// 累计销售额
-        pub total_sales: Balance,
-        /// 累计订单/交易数
-        pub total_orders: u32,
-        /// 实体评分 (0-500，代表 0.0-5.0)
-        pub rating: u16,
-        /// 评价数量
-        pub rating_count: u32,
         /// 创建时间
         pub created_at: BlockNumber,
-        // ========== Phase 2 新增字段 ==========
+        // ========== 组织层字段 ==========
         /// 实体类型（默认 Merchant）
         pub entity_type: EntityType,
         /// 管理员列表（所有者之外的管理员）
@@ -129,11 +115,19 @@ pub mod pallet {
         pub verified: bool,
         /// 元数据 URI（链下扩展信息）
         pub metadata_uri: Option<BoundedVec<u8, MaxCidLen>>,
+        /// 金库初始资金
+        pub treasury_fund: Balance,
+        // ========== Entity-Shop 关联 ==========
+        /// 下属 Shop ID 列表
+        pub shop_ids: BoundedVec<u64, MaxShops>,
+        /// 主 Shop ID（创建 Entity 时自动创建）
+        pub primary_shop_id: u64,
+        // ========== 汇总统计（从 Shops 聚合） ==========
+        /// 累计销售额（所有 Shop 汇总）
+        pub total_sales: Balance,
+        /// 累计订单数（所有 Shop 汇总）
+        pub total_orders: u64,
     }
-
-    /// 向后兼容：Shop 类型别名
-    pub type Shop<AccountId, Balance, BlockNumber, MaxNameLen, MaxCidLen, MaxAdmins> = 
-        Entity<AccountId, Balance, BlockNumber, MaxNameLen, MaxCidLen, MaxAdmins>;
 
     /// 实体类型别名
     pub type EntityOf<T> = Entity<
@@ -143,9 +137,10 @@ pub mod pallet {
         <T as Config>::MaxShopNameLength,
         <T as Config>::MaxCidLength,
         <T as Config>::MaxAdmins,
+        <T as Config>::MaxShopsPerEntity,
     >;
 
-    /// 向后兼容：ShopOf 类型别名
+    /// 向后兼容：ShopOf 类型别名（指向 EntityOf）
     pub type ShopOf<T> = EntityOf<T>;
 
     /// 店铺统计
@@ -204,6 +199,15 @@ pub mod pallet {
         /// 最大管理员数量
         #[pallet::constant]
         type MaxAdmins: Get<u32>;
+
+        // ========== Entity-Shop 分离架构配置 ==========
+        
+        /// 每个 Entity 最大 Shop 数量
+        #[pallet::constant]
+        type MaxShopsPerEntity: Get<u32>;
+
+        /// Shop 模块（用于创建 Primary Shop）
+        type ShopProvider: pallet_entity_common::ShopProvider<Self::AccountId>;
     }
 
     #[pallet::pallet]
@@ -211,42 +215,91 @@ pub mod pallet {
 
     // ==================== 存储项 ====================
 
-    /// 下一个店铺 ID
+    /// 下一个 Entity ID
+    #[pallet::storage]
+    #[pallet::getter(fn next_entity_id)]
+    pub type NextEntityId<T> = StorageValue<_, u64, ValueQuery>;
+
+    /// 向后兼容：NextShopId 别名
     #[pallet::storage]
     #[pallet::getter(fn next_shop_id)]
     pub type NextShopId<T> = StorageValue<_, u64, ValueQuery>;
 
-    /// 店铺存储
+    /// Entity 存储 entity_id -> Entity
+    #[pallet::storage]
+    #[pallet::getter(fn entities)]
+    pub type Entities<T: Config> = StorageMap<_, Blake2_128Concat, u64, EntityOf<T>>;
+
+    /// 向后兼容：Shops 别名（指向 Entities）
     #[pallet::storage]
     #[pallet::getter(fn shops)]
-    pub type Shops<T: Config> = StorageMap<_, Blake2_128Concat, u64, ShopOf<T>>;
+    pub type Shops<T: Config> = StorageMap<_, Blake2_128Concat, u64, EntityOf<T>>;
 
-    /// 用户店铺索引（一个用户只能有一个店铺）
+    /// 用户 Entity 索引（一个用户可以有多个 Entity，但这里保留单个映射以保持兼容）
+    #[pallet::storage]
+    #[pallet::getter(fn user_entity)]
+    pub type UserEntity<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, u64>;
+
+    /// 向后兼容：UserShop 别名
     #[pallet::storage]
     #[pallet::getter(fn user_shop)]
     pub type UserShop<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, u64>;
 
-    /// 店铺统计
+    /// Entity 统计
+    #[pallet::storage]
+    #[pallet::getter(fn entity_stats)]
+    pub type EntityStats<T: Config> = StorageValue<_, ShopStatistics, ValueQuery>;
+
+    /// 向后兼容：ShopStats 别名
     #[pallet::storage]
     #[pallet::getter(fn shop_stats)]
     pub type ShopStats<T: Config> = StorageValue<_, ShopStatistics, ValueQuery>;
 
-    /// 店铺关闭申请时间
+    /// Entity 关闭申请时间
+    #[pallet::storage]
+    #[pallet::getter(fn entity_close_requests)]
+    pub type EntityCloseRequests<T: Config> = StorageMap<_, Blake2_128Concat, u64, BlockNumberFor<T>>;
+
+    /// 向后兼容：ShopCloseRequests 别名
     #[pallet::storage]
     #[pallet::getter(fn shop_close_requests)]
     pub type ShopCloseRequests<T: Config> = StorageMap<_, Blake2_128Concat, u64, BlockNumberFor<T>>;
+
+    /// Entity -> Shops 索引 entity_id -> Vec<shop_id>
+    #[pallet::storage]
+    #[pallet::getter(fn entity_shops)]
+    pub type EntityShops<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,
+        BoundedVec<u64, T::MaxShopsPerEntity>,
+        ValueQuery,
+    >;
 
     // ==================== 事件 ====================
 
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
     pub enum Event<T: Config> {
-        /// 店铺已创建
+        /// Entity 已创建（含 Primary Shop）
+        EntityCreated {
+            entity_id: u64,
+            owner: T::AccountId,
+            treasury_account: T::AccountId,
+            primary_shop_id: u64,
+            treasury_fund: BalanceOf<T>,
+        },
+        /// 向后兼容：店铺已创建
         ShopCreated {
             shop_id: u64,
             owner: T::AccountId,
             shop_account: T::AccountId,
             initial_fund: BalanceOf<T>,
+        },
+        /// Shop 已添加到 Entity
+        ShopAddedToEntity {
+            entity_id: u64,
+            shop_id: u64,
         },
         /// 店铺已更新
         ShopUpdated { shop_id: u64 },
@@ -386,7 +439,12 @@ pub mod pallet {
 
     #[pallet::call]
     impl<T: Config> Pallet<T> {
-        /// 创建店铺（转入运营资金到派生账户）
+        /// 创建 Entity（自动创建 Primary Shop）
+        /// 
+        /// Entity-Shop 分离架构：
+        /// 1. 创建 Entity（组织层）
+        /// 2. 自动创建 Primary Shop（业务层）
+        /// 3. 资金转入 Entity 金库
         #[pallet::call_index(0)]
         #[pallet::weight(Weight::from_parts(50_000, 0))]
         pub fn create_shop(
@@ -397,7 +455,7 @@ pub mod pallet {
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            ensure!(!UserShop::<T>::contains_key(&who), Error::<T>::ShopAlreadyExists);
+            ensure!(!UserEntity::<T>::contains_key(&who), Error::<T>::ShopAlreadyExists);
 
             let name: BoundedVec<u8, T::MaxShopNameLength> =
                 name.try_into().map_err(|_| Error::<T>::NameTooLong)?;
@@ -409,59 +467,79 @@ pub mod pallet {
                 .map(|c| c.try_into().map_err(|_| Error::<T>::CidTooLong))
                 .transpose()?;
 
-            // 计算初始运营资金（50 USDT 等值 COS）
-            let initial_fund = Self::calculate_initial_fund()?;
+            // 计算金库初始资金（50 USDT 等值 COS）
+            let treasury_fund = Self::calculate_initial_fund()?;
             
-            // 生成店铺派生账户
-            let shop_id = NextShopId::<T>::get();
-            let shop_account = Self::shop_account(shop_id);
+            // 生成 Entity ID 和金库账户
+            let entity_id = NextEntityId::<T>::get();
+            let treasury_account = Self::entity_treasury_account(entity_id);
             
-            // 转入派生账户（不可提取）
+            // 转入金库账户
             T::Currency::transfer(
                 &who,
-                &shop_account,
-                initial_fund,
+                &treasury_account,
+                treasury_fund,
                 ExistenceRequirement::KeepAlive,
             ).map_err(|_| Error::<T>::InsufficientBalanceForInitialFund)?;
 
             let now = <frame_system::Pallet<T>>::block_number();
 
-            let shop = Entity {
-                id: shop_id,
+            // Primary Shop ID（暂时使用 entity_id，实际由 Shop 模块分配）
+            // TODO: 调用 Shop 模块创建 Primary Shop
+            let primary_shop_id = entity_id; // 简化：使用相同 ID
+
+            // 创建 Entity
+            let mut shop_ids: BoundedVec<u64, T::MaxShopsPerEntity> = BoundedVec::default();
+            let _ = shop_ids.try_push(primary_shop_id);
+
+            let entity = Entity {
+                id: entity_id,
                 owner: who.clone(),
-                customer_service: None,  // 默认使用所有者账户
                 name,
                 logo_cid,
                 description_cid,
-                initial_fund,
                 status: EntityStatus::Pending,
-                product_count: 0,
-                total_sales: Zero::zero(),
-                total_orders: 0,
-                rating: 0,
-                rating_count: 0,
                 created_at: now,
-                // Phase 2 新增字段（默认值）
                 entity_type: EntityType::Merchant,
                 admins: BoundedVec::default(),
                 governance_mode: GovernanceMode::None,
                 verified: false,
                 metadata_uri: None,
+                treasury_fund,
+                shop_ids,
+                primary_shop_id,
+                total_sales: Zero::zero(),
+                total_orders: 0,
             };
 
-            Shops::<T>::insert(shop_id, shop);
-            UserShop::<T>::insert(&who, shop_id);
-            NextShopId::<T>::put(shop_id.saturating_add(1));
+            Entities::<T>::insert(entity_id, entity);
+            UserEntity::<T>::insert(&who, entity_id);
+            NextEntityId::<T>::put(entity_id.saturating_add(1));
 
-            ShopStats::<T>::mutate(|stats| {
+            // 更新统计
+            EntityStats::<T>::mutate(|stats| {
                 stats.total_shops = stats.total_shops.saturating_add(1);
             });
 
+            // 建立 Entity-Shop 关联
+            EntityShops::<T>::mutate(entity_id, |shops| {
+                let _ = shops.try_push(primary_shop_id);
+            });
+
+            Self::deposit_event(Event::EntityCreated {
+                entity_id,
+                owner: who.clone(),
+                treasury_account: treasury_account.clone(),
+                primary_shop_id,
+                treasury_fund,
+            });
+
+            // 向后兼容事件
             Self::deposit_event(Event::ShopCreated {
-                shop_id,
+                shop_id: entity_id,
                 owner: who,
-                shop_account,
-                initial_fund,
+                shop_account: treasury_account,
+                initial_fund: treasury_fund,
             });
 
             Ok(())
@@ -493,9 +571,8 @@ pub mod pallet {
                 if let Some(c) = description_cid {
                     shop.description_cid = Some(c.try_into().map_err(|_| Error::<T>::CidTooLong)?);
                 }
-                if customer_service.is_some() {
-                    shop.customer_service = customer_service;
-                }
+                // Note: customer_service 已移动到 Shop 层级
+                let _ = customer_service; // 保持 API 兼容但忽略此参数
 
                 Ok(())
             })?;
@@ -981,9 +1058,14 @@ pub mod pallet {
     // ==================== 辅助函数 ====================
 
     impl<T: Config> Pallet<T> {
-        /// 获取店铺派生账户
+        /// 获取 Entity 金库派生账户
+        pub fn entity_treasury_account(entity_id: u64) -> T::AccountId {
+            SHOP_PALLET_ID.into_sub_account_truncating(entity_id)
+        }
+
+        /// 向后兼容：获取店铺派生账户
         pub fn shop_account(shop_id: u64) -> T::AccountId {
-            SHOP_PALLET_ID.into_sub_account_truncating(shop_id)
+            Self::entity_treasury_account(shop_id)
         }
 
         /// 计算初始运营资金（USDT 等值 COS）
@@ -1182,46 +1264,40 @@ pub mod pallet {
         }
     }
 
-    // ==================== ShopProvider 实现 ====================
+    // ==================== EntityProvider 实现 ====================
 
-    impl<T: Config> ShopProvider<T::AccountId> for Pallet<T> {
-        fn shop_exists(shop_id: u64) -> bool {
-            Shops::<T>::contains_key(shop_id)
+    impl<T: Config> EntityProvider<T::AccountId> for Pallet<T> {
+        fn entity_exists(entity_id: u64) -> bool {
+            Shops::<T>::contains_key(entity_id)
         }
 
-        fn is_shop_active(shop_id: u64) -> bool {
-            Shops::<T>::get(shop_id)
+        fn is_entity_active(entity_id: u64) -> bool {
+            Shops::<T>::get(entity_id)
                 .map(|s| s.status == ShopStatus::Active)
                 .unwrap_or(false)
         }
 
-        fn shop_owner(shop_id: u64) -> Option<T::AccountId> {
-            Shops::<T>::get(shop_id).map(|s| s.owner)
+        fn entity_owner(entity_id: u64) -> Option<T::AccountId> {
+            Shops::<T>::get(entity_id).map(|s| s.owner)
         }
 
-        fn shop_account(shop_id: u64) -> T::AccountId {
-            Self::shop_account(shop_id)
+        fn entity_account(entity_id: u64) -> T::AccountId {
+            Self::shop_account(entity_id)
         }
 
-        fn update_shop_stats(shop_id: u64, sales_amount: u128, order_count: u32) -> Result<(), sp_runtime::DispatchError> {
-            Shops::<T>::try_mutate(shop_id, |maybe_shop| -> Result<(), sp_runtime::DispatchError> {
-                let shop = maybe_shop.as_mut().ok_or(Error::<T>::ShopNotFound)?;
-                shop.total_sales = shop.total_sales.saturating_add(sales_amount.saturated_into());
-                shop.total_orders = shop.total_orders.saturating_add(order_count);
+        fn update_entity_stats(entity_id: u64, sales_amount: u128, order_count: u32) -> Result<(), sp_runtime::DispatchError> {
+            Entities::<T>::try_mutate(entity_id, |maybe_entity| -> Result<(), sp_runtime::DispatchError> {
+                let entity = maybe_entity.as_mut().ok_or(Error::<T>::ShopNotFound)?;
+                entity.total_sales = entity.total_sales.saturating_add(sales_amount.saturated_into());
+                entity.total_orders = entity.total_orders.saturating_add(order_count as u64);
                 Ok(())
             })
         }
 
-        fn update_shop_rating(shop_id: u64, rating: u8) -> Result<(), sp_runtime::DispatchError> {
-            Shops::<T>::try_mutate(shop_id, |maybe_shop| -> Result<(), sp_runtime::DispatchError> {
-                let shop = maybe_shop.as_mut().ok_or(Error::<T>::ShopNotFound)?;
-                let total_rating = (shop.rating as u32)
-                    .saturating_mul(shop.rating_count)
-                    .saturating_add((rating as u32) * 100);
-                shop.rating_count = shop.rating_count.saturating_add(1);
-                shop.rating = (total_rating / shop.rating_count) as u16;
-                Ok(())
-            })
+        fn update_entity_rating(_entity_id: u64, _rating: u8) -> Result<(), sp_runtime::DispatchError> {
+            // Note: 评分功能已移至 Shop 层级，Entity 层级不再存储评分
+            // 此方法保留以保持 API 兼容性
+            Ok(())
         }
     }
 }

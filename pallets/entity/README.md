@@ -52,14 +52,14 @@ pallets/entity/
 
 ```rust
 pub enum EntityType {
-    Shop,           // 店铺
-    Restaurant,     // 餐饮
-    Investment,     // 投资基金
-    DAO,            // 去中心化自治组织
-    Cooperative,    // 合作社
-    Project,        // 项目/众筹
-    Club,           // 俱乐部
-    Custom(u8),     // 自定义
+    Merchant,         // 商户（默认）
+    Enterprise,       // 企业
+    DAO,              // 去中心化自治组织
+    Community,        // 社区
+    Project,          // 项目方
+    ServiceProvider,  // 服务提供商
+    Fund,             // 基金
+    Custom(u8),       // 自定义类型
 }
 ```
 
@@ -67,11 +67,37 @@ pub enum EntityType {
 
 ```rust
 pub enum TokenType {
-    Utility,        // 实用型（消费积分）
-    Equity,         // 权益型（分红权）
-    Governance,     // 治理型（投票权）
-    Membership,     // 会员型
-    Hybrid,         // 混合型
+    Points,       // 积分（消费奖励，默认）
+    Governance,   // 治理代币（投票权）
+    Equity,       // 股权代币（分红权，需 Enhanced KYC）
+    Membership,   // 会员代币（会员资格）
+    Share,        // 份额代币（基金份额）
+    Bond,         // 债券代币（固定收益）
+    Hybrid(u8),   // 混合型（多种权益）
+}
+```
+
+#### TokenType 权益矩阵
+
+| 类型 | 投票权 | 分红权 | 可转让 | KYC级别 | 转账限制 |
+|------|--------|--------|--------|---------|----------|
+| Points | ❌ | ❌ | ✅ | None | None |
+| Governance | ✅ | ❌ | ✅ | Standard | KycRequired |
+| Equity | ✅ | ✅ | ✅ | Enhanced | Whitelist |
+| Membership | ❌ | ❌ | ❌ | Basic | MembersOnly |
+| Share | ❌ | ✅ | ✅ | Standard | KycRequired |
+| Bond | ❌ | ✅ | ✅ | Standard | KycRequired |
+| Hybrid | ✅ | ✅ | ✅ | Standard | 可配置 |
+
+### 转账限制模式 (TransferRestrictionMode)
+
+```rust
+pub enum TransferRestrictionMode {
+    None,         // 无限制（默认）
+    Whitelist,    // 白名单模式
+    Blacklist,    // 黑名单模式
+    KycRequired,  // KYC 模式
+    MembersOnly,  // 闭环模式
 }
 ```
 
@@ -97,10 +123,11 @@ pub enum GovernanceMode {
 - 运营资金管理
 
 ### 通证系统
-- 多种通证类型
-- 分红机制
+- 7 种通证类型（Points/Governance/Equity/Membership/Share/Bond/Hybrid）
+- 自动分红机制
 - 锁仓和解锁
 - 类型变更
+- **Phase 8 新增**: 转账限制（白名单/黑名单/KYC/成员限定）
 
 ### 治理系统
 - 6 种治理模式
@@ -110,9 +137,10 @@ pub enum GovernanceMode {
 
 ### 合规功能
 - 财务信息披露
-- KYC/AML 认证
+- KYC/AML 四级认证（None/Basic/Standard/Enhanced）
 - 内幕交易控制
 - 高风险国家管理
+- **Phase 8 新增**: TokenType 自动 KYC 级别要求
 
 ### 代币发售
 - 多种发售模式（固定价格、荷兰拍卖等）
@@ -157,6 +185,7 @@ cargo test -p pallet-entity-sale
 | v0.2.0 | 2026-02-01 | Phase 1-4: 扩展类型支持 |
 | v0.3.0 | 2026-02-02 | Phase 5: 治理增强 |
 | v0.4.0 | 2026-02-03 | Phase 6-8: 披露/KYC/发售 |
+| v0.5.0 | 2026-02-04 | Phase 8+: 转账限制、KYC 集成、投票权检查 |
 
 ## 许可证
 

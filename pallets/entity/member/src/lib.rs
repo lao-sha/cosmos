@@ -28,8 +28,22 @@ pub mod pallet {
         BoundedVec,
     };
     use frame_system::pallet_prelude::*;
-    use pallet_entity_common::ShopProvider;
+    use pallet_entity_common::{EntityProvider, MemberMode};
     use sp_runtime::traits::{Saturating, Zero};
+
+    // ============================================================================
+    // Entity-Shop 分离架构：会员范围
+    // ============================================================================
+
+    /// 会员范围（Entity 级别或 Shop 级别）
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    pub enum MemberScope {
+        /// Entity 级别（所有 Shop 共享会员）
+        #[default]
+        Entity,
+        /// Shop 级别（各 Shop 独立会员）
+        Shop,
+    }
 
     /// 货币余额类型别名
     pub type BalanceOf<T> =
@@ -86,10 +100,10 @@ pub mod pallet {
     /// 自定义等级类型别名
     pub type CustomLevelOf<T> = CustomLevel<BalanceOf<T>>;
 
-    /// 店铺会员等级系统配置
+    /// 实体会员等级系统配置
     #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     #[scale_info(skip_type_params(MaxLevels))]
-    pub struct ShopLevelSystem<Balance, MaxLevels: Get<u32>> {
+    pub struct EntityLevelSystem<Balance, MaxLevels: Get<u32>> {
         /// 自定义等级列表（按阈值升序排列）
         pub levels: BoundedVec<CustomLevel<Balance>, MaxLevels>,
         /// 是否启用自定义等级（false 则使用全局默认）
@@ -98,7 +112,7 @@ pub mod pallet {
         pub upgrade_mode: LevelUpgradeMode,
     }
 
-    impl<Balance: Default, MaxLevels: Get<u32>> Default for ShopLevelSystem<Balance, MaxLevels> {
+    impl<Balance: Default, MaxLevels: Get<u32>> Default for EntityLevelSystem<Balance, MaxLevels> {
         fn default() -> Self {
             Self {
                 levels: BoundedVec::default(),
@@ -108,8 +122,8 @@ pub mod pallet {
         }
     }
 
-    /// 店铺等级系统类型别名
-    pub type ShopLevelSystemOf<T> = ShopLevelSystem<BalanceOf<T>, <T as Config>::MaxCustomLevels>;
+    /// 实体等级系统类型别名
+    pub type EntityLevelSystemOf<T> = EntityLevelSystem<BalanceOf<T>, <T as Config>::MaxCustomLevels>;
 
     // ============================================================================
     // 升级规则相关数据结构
@@ -185,10 +199,10 @@ pub mod pallet {
     /// 升级规则类型别名
     pub type UpgradeRuleOf<T> = UpgradeRule<BalanceOf<T>, BlockNumberFor<T>>;
 
-    /// 店铺升级规则系统
+    /// 实体升级规则系统
     #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     #[scale_info(skip_type_params(MaxRules))]
-    pub struct ShopUpgradeRuleSystem<Balance, BlockNumber, MaxRules: Get<u32>> {
+    pub struct EntityUpgradeRuleSystem<Balance, BlockNumber, MaxRules: Get<u32>> {
         /// 升级规则列表
         pub rules: BoundedVec<UpgradeRule<Balance, BlockNumber>, MaxRules>,
         /// 下一个规则 ID
@@ -199,7 +213,7 @@ pub mod pallet {
         pub conflict_strategy: ConflictStrategy,
     }
 
-    impl<Balance, BlockNumber, MaxRules: Get<u32>> Default for ShopUpgradeRuleSystem<Balance, BlockNumber, MaxRules> {
+    impl<Balance, BlockNumber, MaxRules: Get<u32>> Default for EntityUpgradeRuleSystem<Balance, BlockNumber, MaxRules> {
         fn default() -> Self {
             Self {
                 rules: BoundedVec::default(),
@@ -210,8 +224,8 @@ pub mod pallet {
         }
     }
 
-    /// 店铺升级规则系统类型别名
-    pub type ShopUpgradeRuleSystemOf<T> = ShopUpgradeRuleSystem<BalanceOf<T>, BlockNumberFor<T>, <T as Config>::MaxUpgradeRules>;
+    /// 实体升级规则系统类型别名
+    pub type EntityUpgradeRuleSystemOf<T> = EntityUpgradeRuleSystem<BalanceOf<T>, BlockNumberFor<T>, <T as Config>::MaxUpgradeRules>;
 
     /// 升级记录
     #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
@@ -231,9 +245,9 @@ pub mod pallet {
     /// 升级记录类型别名
     pub type UpgradeRecordOf<T> = UpgradeRecord<BlockNumberFor<T>>;
 
-    /// 店铺会员信息
+    /// 实体会员信息
     #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
-    pub struct ShopMember<AccountId, Balance, BlockNumber> {
+    pub struct EntityMember<AccountId, Balance, BlockNumber> {
         /// 推荐人（上级）
         pub referrer: Option<AccountId>,
         /// 直接推荐人数
@@ -262,8 +276,8 @@ pub mod pallet {
         pub period_start: BlockNumber,
     }
 
-    /// 店铺会员类型别名
-    pub type ShopMemberOf<T> = ShopMember<
+    /// 实体会员类型别名
+    pub type EntityMemberOf<T> = EntityMember<
         <T as frame_system::Config>::AccountId,
         BalanceOf<T>,
         BlockNumberFor<T>,
@@ -308,8 +322,11 @@ pub mod pallet {
         /// 货币类型
         type Currency: Currency<Self::AccountId>;
 
-        /// 店铺查询接口
-        type ShopProvider: ShopProvider<Self::AccountId>;
+        /// 实体查询接口
+        type EntityProvider: EntityProvider<Self::AccountId>;
+
+        /// Shop 查询接口（Entity-Shop 分离架构）
+        type ShopProvider: pallet_entity_common::ShopProvider<Self::AccountId>;
 
         /// 最大直接推荐人数
         #[pallet::constant]
@@ -351,14 +368,14 @@ pub mod pallet {
     // 存储项
     // ============================================================================
 
-    /// 店铺会员存储 (shop_id, account) -> ShopMember
+    /// 实体会员存储 (entity_id, account) -> EntityMember
     #[pallet::storage]
-    #[pallet::getter(fn shop_members)]
-    pub type ShopMembers<T: Config> = StorageDoubleMap<
+    #[pallet::getter(fn entity_members)]
+    pub type EntityMembers<T: Config> = StorageDoubleMap<
         _,
         Blake2_128Concat, u64,
         Blake2_128Concat, T::AccountId,
-        ShopMemberOf<T>,
+        EntityMemberOf<T>,
     >;
 
     /// 店铺会员数量 shop_id -> count
@@ -396,22 +413,22 @@ pub mod pallet {
         ValueQuery,
     >;
 
-    /// 店铺等级系统配置 shop_id -> ShopLevelSystem
+    /// 实体等级系统配置 entity_id -> EntityLevelSystem
     #[pallet::storage]
-    #[pallet::getter(fn shop_level_system)]
-    pub type ShopLevelSystems<T: Config> = StorageMap<
+    #[pallet::getter(fn entity_level_system)]
+    pub type EntityLevelSystems<T: Config> = StorageMap<
         _,
         Blake2_128Concat, u64,
-        ShopLevelSystemOf<T>,
+        EntityLevelSystemOf<T>,
     >;
 
-    /// 店铺升级规则系统 shop_id -> ShopUpgradeRuleSystem
+    /// 实体升级规则系统 entity_id -> EntityUpgradeRuleSystem
     #[pallet::storage]
-    #[pallet::getter(fn shop_upgrade_rules)]
-    pub type ShopUpgradeRules<T: Config> = StorageMap<
+    #[pallet::getter(fn entity_upgrade_rules)]
+    pub type EntityUpgradeRules<T: Config> = StorageMap<
         _,
         Blake2_128Concat, u64,
-        ShopUpgradeRuleSystemOf<T>,
+        EntityUpgradeRuleSystemOf<T>,
     >;
 
     /// 会员等级过期时间 (shop_id, account) -> expires_at
@@ -445,6 +462,26 @@ pub mod pallet {
         u32,
         ValueQuery,
     >;
+
+    // ============================================================================
+    // Entity-Shop 分离架构：Shop 级别会员存储
+    // ============================================================================
+
+    /// Shop 级别会员存储 (shop_id, account) -> EntityMember
+    /// 当 MemberMode 为 Independent 或 Hybrid 时使用
+    #[pallet::storage]
+    #[pallet::getter(fn shop_members)]
+    pub type ShopMembers<T: Config> = StorageDoubleMap<
+        _,
+        Blake2_128Concat, u64,
+        Blake2_128Concat, T::AccountId,
+        EntityMemberOf<T>,
+    >;
+
+    /// Shop 会员数量 shop_id -> count
+    #[pallet::storage]
+    #[pallet::getter(fn shop_member_count)]
+    pub type ShopMemberCount<T: Config> = StorageMap<_, Blake2_128Concat, u64, u32, ValueQuery>;
 
     // ============================================================================
     // 事件
@@ -647,11 +684,11 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
 
             // 验证店铺存在
-            ensure!(T::ShopProvider::shop_exists(shop_id), Error::<T>::ShopNotFound);
+            ensure!(T::EntityProvider::entity_exists(shop_id), Error::<T>::ShopNotFound);
 
             // 验证未注册
             ensure!(
-                !ShopMembers::<T>::contains_key(shop_id, &who),
+                !EntityMembers::<T>::contains_key(shop_id, &who),
                 Error::<T>::AlreadyMember
             );
 
@@ -659,7 +696,7 @@ pub mod pallet {
             if let Some(ref ref_account) = referrer {
                 ensure!(ref_account != &who, Error::<T>::SelfReferral);
                 ensure!(
-                    ShopMembers::<T>::contains_key(shop_id, ref_account),
+                    EntityMembers::<T>::contains_key(shop_id, ref_account),
                     Error::<T>::InvalidReferrer
                 );
             }
@@ -690,7 +727,7 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
 
             // 验证是会员
-            let mut member = ShopMembers::<T>::get(shop_id, &who)
+            let mut member = EntityMembers::<T>::get(shop_id, &who)
                 .ok_or(Error::<T>::NotMember)?;
 
             // 验证未绑定推荐人
@@ -699,7 +736,7 @@ pub mod pallet {
             // 验证推荐人
             ensure!(referrer != who, Error::<T>::SelfReferral);
             ensure!(
-                ShopMembers::<T>::contains_key(shop_id, &referrer),
+                EntityMembers::<T>::contains_key(shop_id, &referrer),
                 Error::<T>::InvalidReferrer
             );
 
@@ -711,10 +748,10 @@ pub mod pallet {
 
             // 绑定推荐人
             member.referrer = Some(referrer.clone());
-            ShopMembers::<T>::insert(shop_id, &who, member);
+            EntityMembers::<T>::insert(shop_id, &who, member);
 
             // 更新推荐人的直接推荐人数
-            ShopMembers::<T>::mutate(shop_id, &referrer, |maybe_member| {
+            EntityMembers::<T>::mutate(shop_id, &referrer, |maybe_member| {
                 if let Some(ref mut m) = maybe_member {
                     m.direct_referrals = m.direct_referrals.saturating_add(1);
                 }
@@ -760,7 +797,7 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
 
             // 验证是店主
-            let owner = T::ShopProvider::shop_owner(shop_id)
+            let owner = T::EntityProvider::entity_owner(shop_id)
                 .ok_or(Error::<T>::ShopNotFound)?;
             ensure!(who == owner, Error::<T>::NotShopOwner);
 
@@ -793,7 +830,7 @@ pub mod pallet {
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            ShopMembers::<T>::try_mutate(shop_id, &who, |maybe_member| -> DispatchResult {
+            EntityMembers::<T>::try_mutate(shop_id, &who, |maybe_member| -> DispatchResult {
                 let member = maybe_member.as_mut().ok_or(Error::<T>::NotMember)?;
 
                 let withdraw_amount = amount.unwrap_or(member.pending_commission);
@@ -803,7 +840,7 @@ pub mod pallet {
                 );
 
                 // 从店铺派生账户转账给会员
-                let shop_account = T::ShopProvider::shop_account(shop_id);
+                let shop_account = T::EntityProvider::entity_account(shop_id);
 
                 T::Currency::transfer(
                     &shop_account,
@@ -841,13 +878,13 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             Self::ensure_shop_owner(shop_id, &who)?;
 
-            let system = ShopLevelSystem {
+            let system = EntityLevelSystem {
                 levels: BoundedVec::default(),
                 use_custom,
                 upgrade_mode,
             };
 
-            ShopLevelSystems::<T>::insert(shop_id, system);
+            EntityLevelSystems::<T>::insert(shop_id, system);
 
             Self::deposit_event(Event::LevelSystemInitialized {
                 shop_id,
@@ -881,7 +918,7 @@ pub mod pallet {
 
             ensure!(!name.is_empty(), Error::<T>::EmptyLevelName);
 
-            ShopLevelSystems::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
+            EntityLevelSystems::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
                 let system = maybe_system.as_mut().ok_or(Error::<T>::LevelSystemNotInitialized)?;
 
                 // 验证阈值必须大于最后一个等级
@@ -935,7 +972,7 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             Self::ensure_shop_owner(shop_id, &who)?;
 
-            ShopLevelSystems::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
+            EntityLevelSystems::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
                 let system = maybe_system.as_mut().ok_or(Error::<T>::LevelSystemNotInitialized)?;
 
                 ensure!((level_id as usize) < system.levels.len(), Error::<T>::LevelNotFound);
@@ -996,7 +1033,7 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             Self::ensure_shop_owner(shop_id, &who)?;
 
-            ShopLevelSystems::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
+            EntityLevelSystems::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
                 let system = maybe_system.as_mut().ok_or(Error::<T>::LevelSystemNotInitialized)?;
 
                 // 只能删除最后一个等级
@@ -1030,7 +1067,7 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             Self::ensure_shop_owner(shop_id, &who)?;
 
-            let system = ShopLevelSystems::<T>::get(shop_id)
+            let system = EntityLevelSystems::<T>::get(shop_id)
                 .ok_or(Error::<T>::LevelSystemNotInitialized)?;
 
             ensure!(
@@ -1043,7 +1080,7 @@ pub mod pallet {
                 Error::<T>::InvalidLevelId
             );
 
-            ShopMembers::<T>::try_mutate(shop_id, &member, |maybe_member| -> DispatchResult {
+            EntityMembers::<T>::try_mutate(shop_id, &member, |maybe_member| -> DispatchResult {
                 let m = maybe_member.as_mut().ok_or(Error::<T>::NotMember)?;
                 m.custom_level_id = target_level_id;
 
@@ -1072,7 +1109,7 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             Self::ensure_shop_owner(shop_id, &who)?;
 
-            ShopLevelSystems::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
+            EntityLevelSystems::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
                 let system = maybe_system.as_mut().ok_or(Error::<T>::LevelSystemNotInitialized)?;
                 system.use_custom = use_custom;
                 Ok(())
@@ -1094,7 +1131,7 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             Self::ensure_shop_owner(shop_id, &who)?;
 
-            ShopLevelSystems::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
+            EntityLevelSystems::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
                 let system = maybe_system.as_mut().ok_or(Error::<T>::LevelSystemNotInitialized)?;
                 system.upgrade_mode = upgrade_mode;
                 Ok(())
@@ -1120,14 +1157,14 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             Self::ensure_shop_owner(shop_id, &who)?;
 
-            let system = ShopUpgradeRuleSystem {
+            let system = EntityUpgradeRuleSystem {
                 rules: BoundedVec::default(),
                 next_rule_id: 0,
                 enabled: true,
                 conflict_strategy,
             };
 
-            ShopUpgradeRules::<T>::insert(shop_id, system);
+            EntityUpgradeRules::<T>::insert(shop_id, system);
 
             Self::deposit_event(Event::UpgradeRuleSystemInitialized {
                 shop_id,
@@ -1166,7 +1203,7 @@ pub mod pallet {
 
             ensure!(!name.is_empty(), Error::<T>::EmptyRuleName);
 
-            ShopUpgradeRules::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
+            EntityUpgradeRules::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
                 let system = maybe_system.as_mut().ok_or(Error::<T>::UpgradeRuleSystemNotInitialized)?;
 
                 let rule_id = system.next_rule_id;
@@ -1217,7 +1254,7 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             Self::ensure_shop_owner(shop_id, &who)?;
 
-            ShopUpgradeRules::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
+            EntityUpgradeRules::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
                 let system = maybe_system.as_mut().ok_or(Error::<T>::UpgradeRuleSystemNotInitialized)?;
 
                 let rule = system.rules.iter_mut()
@@ -1253,7 +1290,7 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             Self::ensure_shop_owner(shop_id, &who)?;
 
-            ShopUpgradeRules::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
+            EntityUpgradeRules::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
                 let system = maybe_system.as_mut().ok_or(Error::<T>::UpgradeRuleSystemNotInitialized)?;
 
                 let pos = system.rules.iter()
@@ -1283,7 +1320,7 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             Self::ensure_shop_owner(shop_id, &who)?;
 
-            ShopUpgradeRules::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
+            EntityUpgradeRules::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
                 let system = maybe_system.as_mut().ok_or(Error::<T>::UpgradeRuleSystemNotInitialized)?;
                 system.enabled = enabled;
                 Ok(())
@@ -1305,7 +1342,7 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             Self::ensure_shop_owner(shop_id, &who)?;
 
-            ShopUpgradeRules::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
+            EntityUpgradeRules::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
                 let system = maybe_system.as_mut().ok_or(Error::<T>::UpgradeRuleSystemNotInitialized)?;
                 system.conflict_strategy = conflict_strategy;
                 Ok(())
@@ -1326,7 +1363,7 @@ pub mod pallet {
         ) -> DispatchResult {
             let now = <frame_system::Pallet<T>>::block_number();
 
-            let member = ShopMember {
+            let member = EntityMember {
                 referrer: referrer.clone(),
                 direct_referrals: 0,
                 team_size: 0,
@@ -1342,12 +1379,12 @@ pub mod pallet {
                 period_start: now,
             };
 
-            ShopMembers::<T>::insert(shop_id, account, member);
+            EntityMembers::<T>::insert(shop_id, account, member);
             MemberCount::<T>::mutate(shop_id, |count| *count = count.saturating_add(1));
 
             // 更新推荐人统计
             if let Some(ref ref_account) = referrer {
-                ShopMembers::<T>::mutate(shop_id, ref_account, |maybe_member| {
+                EntityMembers::<T>::mutate(shop_id, ref_account, |maybe_member| {
                     if let Some(ref mut m) = maybe_member {
                         m.direct_referrals = m.direct_referrals.saturating_add(1);
                     }
@@ -1395,7 +1432,7 @@ pub mod pallet {
                 if depth >= MAX_DEPTH {
                     break;
                 }
-                current = ShopMembers::<T>::get(shop_id, curr_account)
+                current = EntityMembers::<T>::get(shop_id, curr_account)
                     .and_then(|m| m.referrer);
                 depth += 1;
             }
@@ -1414,13 +1451,13 @@ pub mod pallet {
                     break;
                 }
 
-                ShopMembers::<T>::mutate(shop_id, curr_account, |maybe_member| {
+                EntityMembers::<T>::mutate(shop_id, curr_account, |maybe_member| {
                     if let Some(ref mut m) = maybe_member {
                         m.team_size = m.team_size.saturating_add(1);
                     }
                 });
 
-                current = ShopMembers::<T>::get(shop_id, curr_account)
+                current = EntityMembers::<T>::get(shop_id, curr_account)
                     .and_then(|m| m.referrer);
                 depth += 1;
             }
@@ -1428,7 +1465,7 @@ pub mod pallet {
 
         /// 验证店主权限
         fn ensure_shop_owner(shop_id: u64, who: &T::AccountId) -> DispatchResult {
-            let owner = T::ShopProvider::shop_owner(shop_id)
+            let owner = T::EntityProvider::entity_owner(shop_id)
                 .ok_or(Error::<T>::ShopNotFound)?;
             ensure!(*who == owner, Error::<T>::NotShopOwner);
             Ok(())
@@ -1436,7 +1473,7 @@ pub mod pallet {
 
         /// 计算自定义等级（根据消费金额）
         pub fn calculate_custom_level(shop_id: u64, total_spent: BalanceOf<T>) -> u8 {
-            let system = match ShopLevelSystems::<T>::get(shop_id) {
+            let system = match EntityLevelSystems::<T>::get(shop_id) {
                 Some(s) if s.use_custom && !s.levels.is_empty() => s,
                 _ => return 0,
             };
@@ -1454,7 +1491,7 @@ pub mod pallet {
 
         /// 获取等级信息
         pub fn get_custom_level_info(shop_id: u64, level_id: u8) -> Option<CustomLevelOf<T>> {
-            ShopLevelSystems::<T>::get(shop_id)
+            EntityLevelSystems::<T>::get(shop_id)
                 .and_then(|s| s.levels.iter().find(|l| l.id == level_id).cloned())
         }
 
@@ -1483,12 +1520,12 @@ pub mod pallet {
             product_id: u64,
             order_amount: BalanceOf<T>,
         ) -> DispatchResult {
-            let system = match ShopUpgradeRules::<T>::get(shop_id) {
+            let system = match EntityUpgradeRules::<T>::get(shop_id) {
                 Some(s) if s.enabled => s,
                 _ => return Ok(()),
             };
 
-            let member = match ShopMembers::<T>::get(shop_id, buyer) {
+            let member = match EntityMembers::<T>::get(shop_id, buyer) {
                 Some(m) => m,
                 None => return Ok(()),
             };
@@ -1590,7 +1627,7 @@ pub mod pallet {
         ) -> DispatchResult {
             let now = <frame_system::Pallet<T>>::block_number();
 
-            ShopMembers::<T>::try_mutate(shop_id, account, |maybe_member| -> DispatchResult {
+            EntityMembers::<T>::try_mutate(shop_id, account, |maybe_member| -> DispatchResult {
                 let member = maybe_member.as_mut().ok_or(Error::<T>::NotMember)?;
 
                 let old_level_id = member.custom_level_id;
@@ -1633,7 +1670,7 @@ pub mod pallet {
                 });
 
                 // 更新规则触发计数
-                ShopUpgradeRules::<T>::mutate(shop_id, |maybe_system| {
+                EntityUpgradeRules::<T>::mutate(shop_id, |maybe_system| {
                     if let Some(system) = maybe_system {
                         if let Some(r) = system.rules.iter_mut().find(|r| r.id == rule_id) {
                             r.trigger_count = r.trigger_count.saturating_add(1);
@@ -1656,7 +1693,7 @@ pub mod pallet {
 
         /// 获取有效等级（考虑过期）
         pub fn get_effective_level(shop_id: u64, account: &T::AccountId) -> u8 {
-            let member = match ShopMembers::<T>::get(shop_id, account) {
+            let member = match EntityMembers::<T>::get(shop_id, account) {
                 Some(m) => m,
                 None => return 0,
             };
@@ -1674,7 +1711,7 @@ pub mod pallet {
 
         /// 检查店铺是否使用自定义等级
         pub fn uses_custom_levels(shop_id: u64) -> bool {
-            ShopLevelSystems::<T>::get(shop_id)
+            EntityLevelSystems::<T>::get(shop_id)
                 .map(|s| s.use_custom)
                 .unwrap_or(false)
         }
@@ -1706,7 +1743,7 @@ pub mod pallet {
                 _ => return Ok(()), // 未配置或未启用，跳过
             };
 
-            let member = match ShopMembers::<T>::get(shop_id, buyer) {
+            let member = match EntityMembers::<T>::get(shop_id, buyer) {
                 Some(m) => m,
                 None => return Ok(()), // 非会员，跳过
             };
@@ -1718,7 +1755,7 @@ pub mod pallet {
             for (level, rate) in rates.iter().enumerate() {
                 if let Some(ref ref_account) = referrer {
                     if *rate == 0 {
-                        referrer = ShopMembers::<T>::get(shop_id, ref_account)
+                        referrer = EntityMembers::<T>::get(shop_id, ref_account)
                             .and_then(|m| m.referrer);
                         continue;
                     }
@@ -1735,7 +1772,7 @@ pub mod pallet {
                     remaining = remaining.saturating_sub(actual_commission);
 
                     // 记录返佣
-                    ShopMembers::<T>::mutate(shop_id, ref_account, |maybe_member| {
+                    EntityMembers::<T>::mutate(shop_id, ref_account, |maybe_member| {
                         if let Some(ref mut m) = maybe_member {
                             m.total_commission = m.total_commission.saturating_add(actual_commission);
                             m.pending_commission = m.pending_commission.saturating_add(actual_commission);
@@ -1743,7 +1780,7 @@ pub mod pallet {
                     });
 
                     // 更新买家的贡献
-                    ShopMembers::<T>::mutate(shop_id, buyer, |maybe_member| {
+                    EntityMembers::<T>::mutate(shop_id, buyer, |maybe_member| {
                         if let Some(ref mut m) = maybe_member {
                             m.total_contributed = m.total_contributed.saturating_add(actual_commission);
                         }
@@ -1762,7 +1799,7 @@ pub mod pallet {
                     });
 
                     // 获取上级的推荐人
-                    referrer = ShopMembers::<T>::get(shop_id, ref_account)
+                    referrer = EntityMembers::<T>::get(shop_id, ref_account)
                         .and_then(|m| m.referrer);
                 } else {
                     break;
@@ -1779,7 +1816,7 @@ pub mod pallet {
             amount: BalanceOf<T>,
             amount_usdt: u64,
         ) -> DispatchResult {
-            ShopMembers::<T>::try_mutate(shop_id, account, |maybe_member| -> DispatchResult {
+            EntityMembers::<T>::try_mutate(shop_id, account, |maybe_member| -> DispatchResult {
                 let member = maybe_member.as_mut().ok_or(Error::<T>::NotMember)?;
 
                 member.total_spent = member.total_spent.saturating_add(amount);
@@ -1802,7 +1839,7 @@ pub mod pallet {
                 }
 
                 // 计算自定义等级（如果启用且为自动升级模式）
-                if let Some(system) = ShopLevelSystems::<T>::get(shop_id) {
+                if let Some(system) = EntityLevelSystems::<T>::get(shop_id) {
                     if system.use_custom && system.upgrade_mode == LevelUpgradeMode::AutoUpgrade {
                         let new_custom_level = Self::calculate_custom_level(shop_id, member.total_spent);
                         if new_custom_level != member.custom_level_id {
@@ -1829,13 +1866,13 @@ pub mod pallet {
             account: &T::AccountId,
             referrer: Option<T::AccountId>,
         ) -> DispatchResult {
-            if ShopMembers::<T>::contains_key(shop_id, account) {
+            if EntityMembers::<T>::contains_key(shop_id, account) {
                 return Ok(()); // 已是会员
             }
 
             // 验证推荐人
             let valid_referrer = if let Some(ref ref_account) = referrer {
-                if ref_account != account && ShopMembers::<T>::contains_key(shop_id, ref_account) {
+                if ref_account != account && EntityMembers::<T>::contains_key(shop_id, ref_account) {
                     referrer
                 } else {
                     None
@@ -1916,15 +1953,15 @@ pub trait MemberProvider<AccountId, Balance> {
 /// MemberProvider 实现
 impl<T: pallet::Config> MemberProvider<T::AccountId, pallet::BalanceOf<T>> for pallet::Pallet<T> {
     fn is_member(shop_id: u64, account: &T::AccountId) -> bool {
-        pallet::ShopMembers::<T>::contains_key(shop_id, account)
+        pallet::EntityMembers::<T>::contains_key(shop_id, account)
     }
 
     fn member_level(shop_id: u64, account: &T::AccountId) -> Option<pallet::MemberLevel> {
-        pallet::ShopMembers::<T>::get(shop_id, account).map(|m| m.level)
+        pallet::EntityMembers::<T>::get(shop_id, account).map(|m| m.level)
     }
 
     fn custom_level_id(shop_id: u64, account: &T::AccountId) -> u8 {
-        pallet::ShopMembers::<T>::get(shop_id, account)
+        pallet::EntityMembers::<T>::get(shop_id, account)
             .map(|m| m.custom_level_id)
             .unwrap_or(0)
     }
@@ -1942,7 +1979,7 @@ impl<T: pallet::Config> MemberProvider<T::AccountId, pallet::BalanceOf<T>> for p
     }
 
     fn get_referrer(shop_id: u64, account: &T::AccountId) -> Option<T::AccountId> {
-        pallet::ShopMembers::<T>::get(shop_id, account).and_then(|m| m.referrer)
+        pallet::EntityMembers::<T>::get(shop_id, account).and_then(|m| m.referrer)
     }
 
     fn auto_register(shop_id: u64, account: &T::AccountId, referrer: Option<T::AccountId>) -> sp_runtime::DispatchResult {
@@ -1976,7 +2013,7 @@ impl<T: pallet::Config> MemberProvider<T::AccountId, pallet::BalanceOf<T>> for p
     }
 
     fn get_member_stats(shop_id: u64, account: &T::AccountId) -> (u32, u32, u128) {
-        pallet::ShopMembers::<T>::get(shop_id, account)
+        pallet::EntityMembers::<T>::get(shop_id, account)
             .map(|m| {
                 let spent_usdt: u128 = sp_runtime::SaturatedConversion::saturated_into(m.total_spent);
                 (m.direct_referrals, m.team_size, spent_usdt)

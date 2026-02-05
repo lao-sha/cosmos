@@ -24,7 +24,7 @@ log = { workspace = true }
 
 # 本地依赖
 pallet-matchmaking-common = { path = "../common", default-features = false }
-pallet-storage-service = { path = "../../../storage-service", default-features = false }
+pallet-storage-service = { path = "../../../storage/service", default-features = false }
 pallet-trading-common = { path = "../../../trading/common", default-features = false }
 pallet-affiliate = { path = "../../../affiliate", default-features = false }
 

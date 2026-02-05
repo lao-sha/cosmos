@@ -20,12 +20,12 @@ members = [
     "pallets/trading/maker",
     "pallets/trading/swap",
     "pallets/trading/otc",
-    "pallets/escrow",
+    "pallets/dispute/escrow",
     "pallets/referral",
-    "pallets/storage-service",
-    "pallets/evidence",
-    "pallets/arbitration",
-    "pallets/storage-lifecycle",
+    "pallets/storage/service",
+    "pallets/dispute/evidence",
+    "pallets/dispute/arbitration",
+    "pallets/storage/lifecycle",
     "pallets/social/matchmaking/common",
     "pallets/social/matchmaking/profile",
     "pallets/social/matchmaking/matching",
@@ -34,6 +34,7 @@ members = [
     "pallets/social/matchmaking/membership",
 # Entity pallets (原 ShareMall，已重构为子模块)
     "pallets/entity/common",
+    "pallets/entity/shop",
     "pallets/entity/registry",
     "pallets/entity/token",
     "pallets/entity/governance",
@@ -50,6 +51,7 @@ members = [
     "runtime",
 ]
 resolver = "2"
+exclude = ["node-operator"]
 
 [workspace.dependencies]
 cosmos-runtime = { path = "./runtime", default-features = false }
@@ -68,17 +70,17 @@ pallet-trading-maker = { path = "./pallets/trading/maker", default-features = fa
 pallet-trading-swap = { path = "./pallets/trading/swap", default-features = false }
 pallet-trading-otc = { path = "./pallets/trading/otc", default-features = false }
 # Escrow, Referral, IPFS pallets
-pallet-escrow = { path = "./pallets/escrow", default-features = false }
+pallet-escrow = { path = "./pallets/dispute/escrow", default-features = false }
 pallet-referral = { path = "./pallets/referral", default-features = false }
-pallet-storage-service = { path = "./pallets/storage-service", default-features = false }
+pallet-storage-service = { path = "./pallets/storage/service", default-features = false }
 # Cosmos common libraries
 media-utils = { path = "./media-utils", default-features = false }
 # Evidence pallet
-pallet-evidence = { path = "./pallets/evidence", default-features = false }
+pallet-evidence = { path = "./pallets/dispute/evidence", default-features = false }
 # Arbitration pallet
-pallet-arbitration = { path = "./pallets/arbitration", default-features = false }
+pallet-arbitration = { path = "./pallets/dispute/arbitration", default-features = false }
 # Storage lifecycle pallet
-pallet-storage-lifecycle = { path = "./pallets/storage-lifecycle", default-features = false }
+pallet-storage-lifecycle = { path = "./pallets/storage/lifecycle", default-features = false }
 # Matchmaking pallets
 pallet-matchmaking-common = { path = "./pallets/social/matchmaking/common", default-features = false }
 pallet-matchmaking-profile = { path = "./pallets/social/matchmaking/profile", default-features = false }
@@ -88,6 +90,7 @@ pallet-matchmaking-interaction = { path = "./pallets/social/matchmaking/interact
 pallet-matchmaking-membership = { path = "./pallets/social/matchmaking/membership", default-features = false }
 # Entity pallets (原 ShareMall，已重构为子模块)
 pallet-entity-common = { path = "./pallets/entity/common", default-features = false }
+pallet-entity-shop = { path = "./pallets/entity/shop", default-features = false }
 pallet-entity-registry = { path = "./pallets/entity/registry", default-features = false }
 pallet-entity-token = { path = "./pallets/entity/token", default-features = false }
 pallet-entity-governance = { path = "./pallets/entity/governance", default-features = false }

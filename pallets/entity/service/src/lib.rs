@@ -43,7 +43,7 @@ pub mod pallet {
         BoundedVec, PalletId,
     };
     use frame_system::pallet_prelude::*;
-    use pallet_entity_common::{PricingProvider, ProductCategory, ProductProvider, ProductStatus, ShopProvider};
+    use pallet_entity_common::{PricingProvider, ProductCategory, ProductProvider, ProductStatus, EntityProvider, ShopProvider};
     use sp_runtime::{
         traits::{AccountIdConversion, Saturating, Zero},
         SaturatedConversion,
@@ -110,7 +110,10 @@ pub mod pallet {
         /// 货币类型
         type Currency: Currency<Self::AccountId>;
 
-        /// 店铺查询接口
+        /// 实体查询接口
+        type EntityProvider: EntityProvider<Self::AccountId>;
+
+        /// Shop 查询接口（Entity-Shop 分离架构）
         type ShopProvider: ShopProvider<Self::AccountId>;
 
         /// 定价提供者（用于计算 USDT 等值 COS 押金）

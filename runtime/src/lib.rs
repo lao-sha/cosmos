@@ -339,6 +339,9 @@ mod runtime {
 	#[runtime::pallet_index(120)]
 	pub type EntityRegistry = pallet_entity_registry;
 
+	#[runtime::pallet_index(129)]
+	pub type EntityShop = pallet_entity_shop;
+
 	#[runtime::pallet_index(121)]
 	pub type EntityService = pallet_entity_service;
 

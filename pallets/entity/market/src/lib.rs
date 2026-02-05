@@ -42,7 +42,7 @@ pub mod pallet {
         BoundedVec,
     };
     use frame_system::pallet_prelude::*;
-    use pallet_entity_common::{ShopProvider, ShopTokenProvider};
+    use pallet_entity_common::{EntityProvider, EntityTokenProvider, ShopProvider};
     use sp_runtime::traits::{CheckedAdd, CheckedMul, CheckedSub, Saturating, Zero};
     use sp_runtime::SaturatedConversion;
     use sp_runtime::transaction_validity::{
@@ -434,11 +434,14 @@ pub mod pallet {
             + Zero
             + Ord;
 
-        /// 店铺查询接口
+        /// 实体查询接口
+        type EntityProvider: EntityProvider<Self::AccountId>;
+
+        /// Shop 查询接口（Entity-Shop 分离架构）
         type ShopProvider: ShopProvider<Self::AccountId>;
 
-        /// 店铺代币接口
-        type TokenProvider: ShopTokenProvider<Self::AccountId, Self::TokenBalance>;
+        /// 实体代币接口
+        type TokenProvider: EntityTokenProvider<Self::AccountId, Self::TokenBalance>;
 
         /// 默认订单有效期（区块数）
         #[pallet::constant]

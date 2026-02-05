@@ -20,7 +20,7 @@ log = { workspace = true }
 
 # 内部依赖
 pallet-entity-common = { path = "../common", default-features = false }
-pallet-escrow = { path = "../../escrow", default-features = false }
+pallet-escrow = { workspace = true }
 
 [dev-dependencies]
 pallet-balances = { workspace = true }

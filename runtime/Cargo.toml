@@ -66,6 +66,7 @@ pallet-assets = { workspace = true }
 # Entity pallets (原 ShareMall，已重构)
 pallet-entity-common = { workspace = true }
 pallet-entity-registry = { workspace = true }
+pallet-entity-shop = { workspace = true }
 pallet-entity-token = { workspace = true }
 pallet-entity-governance = { workspace = true }
 pallet-entity-member = { workspace = true }
@@ -150,6 +151,7 @@ std = [
 	# Entity pallets std
 	"pallet-entity-common/std",
 	"pallet-entity-registry/std",
+	"pallet-entity-shop/std",
 	"pallet-entity-token/std",
 	"pallet-entity-governance/std",
 	"pallet-entity-member/std",

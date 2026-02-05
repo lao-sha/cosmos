@@ -33,7 +33,7 @@ pallet-trading-common = { workspace = true }
 pallet-chat-permission = { workspace = true }
 pallet-timestamp = { workspace = true }
 pallet-storage-lifecycle = { workspace = true }
-pallet-storage-service = { path = "../../storage-service", default-features = false }
+pallet-storage-service = { path = "../../storage/service", default-features = false }
 
 [dev-dependencies]
 sp-io = { workspace = true }

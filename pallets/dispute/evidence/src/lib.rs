@@ -1682,7 +1682,7 @@ pub mod pallet {
                             },
                             created_at,
                             archived_at: now,
-                            year_month: Self::block_to_year_month(now),
+                            year_month: pallet_storage_lifecycle::block_to_year_month(now, 14400),
                         };
 
                         // 存储归档记录
@@ -1712,16 +1712,6 @@ pub mod pallet {
 
             EvidenceArchiveCursor::<T>::put(cursor);
             archived_count
-        }
-
-        /// 函数级中文注释：将区块号转换为年月格式（YYMM）
-        fn block_to_year_month(block: u32) -> u16 {
-            // 假设区块0对应2024年1月，每月约432000个区块（6秒/块）
-            let blocks_per_month: u32 = 432_000;
-            let months_since_start = block / blocks_per_month;
-            let year = 24u16 + (months_since_start / 12) as u16;
-            let month = 1u16 + (months_since_start % 12) as u16;
-            year * 100 + month
         }
     }
 

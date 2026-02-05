@@ -31,10 +31,10 @@ pallet-trading-common = { path = "../trading-common", default-features = false }
 # 依赖其他pallet（保留用于类型定义）
 pallet-timestamp = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2506", default-features = false }
 pallet-pricing = { path = "../pricing", default-features = false }
-pallet-escrow = { path = "../escrow", default-features = false }
+pallet-escrow = { workspace = true }
 pallet-credit = { path = "../credit", default-features = false }
 pallet-affiliate = { path = "../affiliate", default-features = false }
-pallet-evidence = { path = "../evidence", default-features = false }
+pallet-evidence = { workspace = true }
 
 [dev-dependencies]
 pallet-balances = { version = "38.0.0" }

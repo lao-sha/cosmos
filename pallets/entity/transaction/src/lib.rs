@@ -38,7 +38,7 @@ pub mod pallet {
     };
     use frame_system::pallet_prelude::*;
     use pallet_escrow::pallet::Escrow as EscrowTrait;
-    use pallet_entity_common::{MallOrderStatus, OrderProvider, ProductCategory, ProductProvider, ShopProvider, ShopTokenProvider};
+    use pallet_entity_common::{MallOrderStatus, OrderProvider, ProductCategory, ProductProvider, EntityProvider, EntityTokenProvider, ShopProvider};
     use sp_runtime::{traits::{Saturating, Zero}, SaturatedConversion};
 
     /// 货币余额类型别名
@@ -125,14 +125,17 @@ pub mod pallet {
         /// 托管接口
         type Escrow: EscrowTrait<Self::AccountId, BalanceOf<Self>>;
 
-        /// 店铺查询接口
+        /// 实体查询接口
+        type EntityProvider: EntityProvider<Self::AccountId>;
+
+        /// Shop 查询接口（Entity-Shop 分离架构）
         type ShopProvider: ShopProvider<Self::AccountId>;
 
         /// 商品查询接口
         type ProductProvider: ProductProvider<Self::AccountId, BalanceOf<Self>>;
 
-        /// 店铺代币接口
-        type ShopToken: ShopTokenProvider<Self::AccountId, BalanceOf<Self>>;
+        /// 实体代币接口
+        type EntityToken: EntityTokenProvider<Self::AccountId, BalanceOf<Self>>;
 
         /// 平台账户
         #[pallet::constant]
@@ -339,8 +342,8 @@ pub mod pallet {
             let mut final_amount = total_amount;
             let mut token_discount = Zero::zero();
             if let Some(tokens) = use_tokens {
-                if !tokens.is_zero() && T::ShopToken::is_token_enabled(shop_id) {
-                    token_discount = T::ShopToken::redeem_for_discount(shop_id, &buyer, tokens)?;
+                if !tokens.is_zero() && T::EntityToken::is_token_enabled(shop_id) {
+                    token_discount = T::EntityToken::redeem_for_discount(shop_id, &buyer, tokens)?;
                     final_amount = final_amount.saturating_sub(token_discount);
                 }
             }
@@ -663,7 +666,7 @@ pub mod pallet {
             );
 
             // 发放购物积分奖励
-            let _ = T::ShopToken::reward_on_purchase(
+            let _ = T::EntityToken::reward_on_purchase(
                 order.shop_id,
                 &order.buyer,
                 order.total_amount,

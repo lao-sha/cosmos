@@ -186,13 +186,6 @@ result-*
 .direnv/
 
 # =========================
-# Scripts
-# =========================
-# Test accounts (contains private keys)
-scripts/test-accounts.json
-scripts/test-accounts.txt
-
-# =========================
 # LiveKit Deploy
 # =========================
 backend/livekit-deploy/*.log
@@ -208,6 +201,34 @@ media-utils/temp/
 # OpenClaw
 # =========================
 openclaw/
+
+# =========================
+# Node Operator (LLM Agent)
+# =========================
+node-operator/.env
+node-operator/target/
+node-operator/*.log
+# 审计日志
+node-operator/audit-*.json
+# 云服务器配置缓存
+node-operator/.cloud-cache/
+
+# =========================
+# Scripts
+# =========================
+scripts/test-accounts.json
+scripts/test-accounts.txt
+scripts/node_modules/
+scripts/*.log
+
+# =========================
+# Frontend (Expo/React Native) - 额外规则
+# =========================
+frontend/ios/
+frontend/android/
+frontend/.kotlin/
+frontend/*.tsbuildinfo
+frontend/app-example/
 
 # =========================
 # Misc
@@ -227,3 +248,92 @@ hs_err_pid*
 *.trace
 perf.data*
 flamegraph.svg
+
+# =========================
+# Rust 额外规则
+# =========================
+# Incremental compilation
+**/incremental/
+# Benchmark outputs
+criterion/
+# Cargo registry cache (if present)
+.cargo/registry/
+.cargo/git/
+# rustfmt backup
+*.rs.bk
+# rust-analyzer
+rust-project.json
+
+# =========================
+# Substrate 额外规则
+# =========================
+# Genesis files (may contain secrets)
+genesis.json
+chain_spec.json
+# Keystore
+keystore/
+# Network keys
+network/
+
+# =========================
+# Docker
+# =========================
+docker-compose.override.yml
+.docker/
+*.dockerignore
+
+# =========================
+# Terraform / Infrastructure
+# =========================
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars
+
+# =========================
+# Kubernetes
+# =========================
+kubeconfig
+*.kubeconfig
+secrets.yaml
+
+# =========================
+# Database
+# =========================
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# =========================
+# Archives
+# =========================
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# =========================
+# Large Binary Files
+# =========================
+*.wasm
+!runtime/src/**/*.wasm
+*.bin
+*.exe
+
+# =========================
+# Workspace Artifacts
+# =========================
+# Benchmark results
+benchmarks/
+# Documentation build
+docs/_build/
+docs/target/
+# Release artifacts
+releases/
+*.deb
+*.rpm
+*.AppImage

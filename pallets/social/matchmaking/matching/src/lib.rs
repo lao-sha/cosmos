@@ -413,8 +413,14 @@ pub mod pallet {
                 .ok_or(Error::<T>::BaziNotFound)?;
 
             // 计算日柱合婚评分
-            let day_ganzhi_a = bazi_a.day_ganzhi();
-            let day_ganzhi_b = bazi_b.day_ganzhi();
+            let day_ganzhi_a = bazi::GanZhi {
+                gan: bazi::TianGan::from_index(bazi_a.day_gan),
+                zhi: bazi::DiZhi::from_index(bazi_a.day_zhi),
+            };
+            let day_ganzhi_b = bazi::GanZhi {
+                gan: bazi::TianGan::from_index(bazi_b.day_gan),
+                zhi: bazi::DiZhi::from_index(bazi_b.day_zhi),
+            };
             let day_pillar_result = calculate_day_pillar_compatibility(day_ganzhi_a, day_ganzhi_b);
 
             // 计算五行互补评分

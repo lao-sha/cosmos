@@ -41,7 +41,7 @@ pub mod pallet {
         BoundedVec,
     };
     use frame_system::pallet_prelude::*;
-    use pallet_entity_common::ShopProvider;
+    use pallet_entity_common::EntityProvider;
     use sp_runtime::traits::{Saturating, Zero};
 
     // ==================== 类型定义 ====================
@@ -205,7 +205,7 @@ pub mod pallet {
         type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
         /// 实体查询接口
-        type EntityProvider: ShopProvider<Self::AccountId>;
+        type EntityProvider: EntityProvider<Self::AccountId>;
 
         /// CID 最大长度
         #[pallet::constant]
@@ -413,7 +413,7 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
 
             // 验证管理员权限
-            let owner = T::EntityProvider::shop_owner(entity_id).ok_or(Error::<T>::EntityNotFound)?;
+            let owner = T::EntityProvider::entity_owner(entity_id).ok_or(Error::<T>::EntityNotFound)?;
             ensure!(owner == who, Error::<T>::NotAdmin);
 
             let now = <frame_system::Pallet<T>>::block_number();
@@ -449,7 +449,7 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
 
             // 验证管理员权限
-            let owner = T::EntityProvider::shop_owner(entity_id).ok_or(Error::<T>::EntityNotFound)?;
+            let owner = T::EntityProvider::entity_owner(entity_id).ok_or(Error::<T>::EntityNotFound)?;
             ensure!(owner == who, Error::<T>::NotAdmin);
 
             let content_bounded: BoundedVec<u8, T::MaxCidLength> = 
@@ -528,7 +528,7 @@ pub mod pallet {
                 let record = maybe_record.as_mut().ok_or(Error::<T>::DisclosureNotFound)?;
                 
                 // 验证权限
-                let owner = T::EntityProvider::shop_owner(record.entity_id)
+                let owner = T::EntityProvider::entity_owner(record.entity_id)
                     .ok_or(Error::<T>::EntityNotFound)?;
                 ensure!(owner == who || record.discloser == who, Error::<T>::NotAdmin);
                 
@@ -560,7 +560,7 @@ pub mod pallet {
                 .ok_or(Error::<T>::DisclosureNotFound)?;
             
             // 验证权限
-            let owner = T::EntityProvider::shop_owner(old_record.entity_id)
+            let owner = T::EntityProvider::entity_owner(old_record.entity_id)
                 .ok_or(Error::<T>::EntityNotFound)?;
             ensure!(owner == who, Error::<T>::NotAdmin);
 
@@ -624,7 +624,7 @@ pub mod pallet {
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            let owner = T::EntityProvider::shop_owner(entity_id).ok_or(Error::<T>::EntityNotFound)?;
+            let owner = T::EntityProvider::entity_owner(entity_id).ok_or(Error::<T>::EntityNotFound)?;
             ensure!(owner == who, Error::<T>::NotAdmin);
 
             let now = <frame_system::Pallet<T>>::block_number();
@@ -665,7 +665,7 @@ pub mod pallet {
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            let owner = T::EntityProvider::shop_owner(entity_id).ok_or(Error::<T>::EntityNotFound)?;
+            let owner = T::EntityProvider::entity_owner(entity_id).ok_or(Error::<T>::EntityNotFound)?;
             ensure!(owner == who, Error::<T>::NotAdmin);
 
             Insiders::<T>::try_mutate(entity_id, |insiders| -> DispatchResult {
@@ -692,7 +692,7 @@ pub mod pallet {
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            let owner = T::EntityProvider::shop_owner(entity_id).ok_or(Error::<T>::EntityNotFound)?;
+            let owner = T::EntityProvider::entity_owner(entity_id).ok_or(Error::<T>::EntityNotFound)?;
             ensure!(owner == who, Error::<T>::NotAdmin);
 
             let now = <frame_system::Pallet<T>>::block_number();
@@ -717,7 +717,7 @@ pub mod pallet {
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            let owner = T::EntityProvider::shop_owner(entity_id).ok_or(Error::<T>::EntityNotFound)?;
+            let owner = T::EntityProvider::entity_owner(entity_id).ok_or(Error::<T>::EntityNotFound)?;
             ensure!(owner == who, Error::<T>::NotAdmin);
 
             BlackoutPeriods::<T>::remove(entity_id);

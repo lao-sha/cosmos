@@ -47,7 +47,7 @@ pub mod pallet {
         BoundedVec,
     };
     use frame_system::pallet_prelude::*;
-    use pallet_entity_common::{DividendConfig, ShopProvider, TokenType, TransferRestrictionMode};
+    use pallet_entity_common::{DividendConfig, EntityProvider, ShopProvider, TokenType, TransferRestrictionMode};
     use sp_runtime::traits::{AtLeast32BitUnsigned, Saturating, Zero};
 
     /// 实体通证配置（原 ShopTokenConfig，Phase 2 扩展）
@@ -114,7 +114,10 @@ pub mod pallet {
             + Mutate<Self::AccountId, AssetId = Self::AssetId, Balance = Self::AssetBalance>
             + MetadataMutate<Self::AccountId, AssetId = Self::AssetId>;
 
-        /// 店铺查询接口
+        /// 实体查询接口
+        type EntityProvider: EntityProvider<Self::AccountId>;
+
+        /// Shop 查询接口（Entity-Shop 分离架构）
         type ShopProvider: ShopProvider<Self::AccountId>;
 
         /// 店铺代币 ID 偏移量（避免与其他资产冲突）
@@ -1244,43 +1247,43 @@ impl<T: Config> Pallet<T> {
     }
 }
 
-// ==================== ShopTokenProvider 实现 ====================
+// ==================== EntityTokenProvider 实现 ====================
 
-use pallet_entity_common::{ShopTokenProvider, TokenType};
+use pallet_entity_common::{EntityTokenProvider, TokenType};
 
-impl<T: Config> ShopTokenProvider<T::AccountId, T::AssetBalance> for Pallet<T> {
-    fn is_token_enabled(shop_id: u64) -> bool {
-        Pallet::<T>::is_token_enabled(shop_id)
+impl<T: Config> EntityTokenProvider<T::AccountId, T::AssetBalance> for Pallet<T> {
+    fn is_token_enabled(entity_id: u64) -> bool {
+        Pallet::<T>::is_token_enabled(entity_id)
     }
 
-    fn token_balance(shop_id: u64, holder: &T::AccountId) -> T::AssetBalance {
-        Pallet::<T>::get_balance(shop_id, holder)
+    fn token_balance(entity_id: u64, holder: &T::AccountId) -> T::AssetBalance {
+        Pallet::<T>::get_balance(entity_id, holder)
     }
 
     fn reward_on_purchase(
-        shop_id: u64,
+        entity_id: u64,
         buyer: &T::AccountId,
         purchase_amount: T::AssetBalance,
     ) -> Result<T::AssetBalance, sp_runtime::DispatchError> {
-        Pallet::<T>::reward_on_purchase(shop_id, buyer, purchase_amount)
+        Pallet::<T>::reward_on_purchase(entity_id, buyer, purchase_amount)
     }
 
     fn redeem_for_discount(
-        shop_id: u64,
+        entity_id: u64,
         buyer: &T::AccountId,
         tokens: T::AssetBalance,
     ) -> Result<T::AssetBalance, sp_runtime::DispatchError> {
-        Pallet::<T>::redeem_for_discount(shop_id, buyer, tokens)
+        Pallet::<T>::redeem_for_discount(entity_id, buyer, tokens)
     }
 
     fn transfer(
-        shop_id: u64,
+        entity_id: u64,
         from: &T::AccountId,
         to: &T::AccountId,
         amount: T::AssetBalance,
     ) -> Result<(), sp_runtime::DispatchError> {
         use frame_support::traits::fungibles::Mutate;
-        let asset_id = Pallet::<T>::shop_to_asset_id(shop_id);
+        let asset_id = Pallet::<T>::shop_to_asset_id(entity_id);
         T::Assets::transfer(
             asset_id,
             from,
@@ -1292,12 +1295,12 @@ impl<T: Config> ShopTokenProvider<T::AccountId, T::AssetBalance> for Pallet<T> {
     }
 
     fn reserve(
-        shop_id: u64,
+        entity_id: u64,
         who: &T::AccountId,
         amount: T::AssetBalance,
     ) -> Result<(), sp_runtime::DispatchError> {
         use frame_support::traits::fungibles::Inspect;
-        let asset_id = Pallet::<T>::shop_to_asset_id(shop_id);
+        let asset_id = Pallet::<T>::shop_to_asset_id(entity_id);
         // 注意：pallet-assets 不直接支持 hold，使用转移到模块账户的方式模拟
         // 这里简化实现：直接检查余额是否足够
         let balance = T::Assets::balance(asset_id, who);
@@ -1308,7 +1311,7 @@ impl<T: Config> ShopTokenProvider<T::AccountId, T::AssetBalance> for Pallet<T> {
     }
 
     fn unreserve(
-        _shop_id: u64,
+        _entity_id: u64,
         _who: &T::AccountId,
         amount: T::AssetBalance,
     ) -> T::AssetBalance {
@@ -1317,23 +1320,23 @@ impl<T: Config> ShopTokenProvider<T::AccountId, T::AssetBalance> for Pallet<T> {
     }
 
     fn repatriate_reserved(
-        shop_id: u64,
+        entity_id: u64,
         from: &T::AccountId,
         to: &T::AccountId,
         amount: T::AssetBalance,
     ) -> Result<T::AssetBalance, sp_runtime::DispatchError> {
         // 直接转账（简化实现）
-        Self::transfer(shop_id, from, to, amount)?;
+        Self::transfer(entity_id, from, to, amount)?;
         Ok(amount)
     }
 
-    fn get_token_type(shop_id: u64) -> TokenType {
-        ShopTokenConfigs::<T>::get(shop_id)
+    fn get_token_type(entity_id: u64) -> TokenType {
+        ShopTokenConfigs::<T>::get(entity_id)
             .map(|c| c.token_type)
             .unwrap_or_default()
     }
 
-    fn total_supply(shop_id: u64) -> T::AssetBalance {
-        Pallet::<T>::get_total_supply(shop_id)
+    fn total_supply(entity_id: u64) -> T::AssetBalance {
+        Pallet::<T>::get_total_supply(entity_id)
     }
 }

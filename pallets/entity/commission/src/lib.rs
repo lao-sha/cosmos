@@ -31,7 +31,7 @@ pub mod pallet {
         traits::{Currency, ExistenceRequirement, Get},
     };
     use frame_system::pallet_prelude::*;
-    use pallet_entity_common::{MemberLevel, ShopProvider};
+    use pallet_entity_common::{MemberLevel, EntityProvider};
     use sp_runtime::traits::{Saturating, Zero};
 
     /// 货币余额类型别名
@@ -263,10 +263,10 @@ pub mod pallet {
         }
     }
 
-    /// 店铺提现配置
+    /// 实体提现配置
     #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     #[scale_info(skip_type_params(MaxLevels))]
-    pub struct ShopWithdrawalConfig<MaxLevels: Get<u32>> {
+    pub struct EntityWithdrawalConfig<MaxLevels: Get<u32>> {
         /// 各等级的提现配置（按 level_id 顺序）
         pub tier_configs: BoundedVec<WithdrawalTierConfig, MaxLevels>,
         /// 是否启用分级提现
@@ -275,7 +275,7 @@ pub mod pallet {
         pub shopping_balance_generates_commission: bool,
     }
 
-    impl<MaxLevels: Get<u32>> Default for ShopWithdrawalConfig<MaxLevels> {
+    impl<MaxLevels: Get<u32>> Default for EntityWithdrawalConfig<MaxLevels> {
         fn default() -> Self {
             Self {
                 tier_configs: BoundedVec::default(),
@@ -285,8 +285,8 @@ pub mod pallet {
         }
     }
 
-    /// 店铺提现配置类型别名
-    pub type ShopWithdrawalConfigOf<T> = ShopWithdrawalConfig<<T as Config>::MaxCustomLevels>;
+    /// 实体提现配置类型别名
+    pub type EntityWithdrawalConfigOf<T> = EntityWithdrawalConfig<<T as Config>::MaxCustomLevels>;
 
     /// 单线收益配置
     #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
@@ -325,10 +325,10 @@ pub mod pallet {
     // 店铺返佣配置
     // ============================================================================
 
-    /// 店铺返佣配置
+    /// 实体返佣配置
     #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     #[scale_info(skip_type_params(MaxLevels))]
-    pub struct ShopCommissionConfig<Balance, MaxLevels: Get<u32>> {
+    pub struct EntityCommissionConfig<Balance, MaxLevels: Get<u32>> {
         /// 启用的返佣模式（位标志，可多选）
         pub enabled_modes: CommissionModes,
         /// 返佣来源
@@ -355,7 +355,7 @@ pub mod pallet {
         pub single_line: SingleLineConfig<Balance>,
     }
 
-    impl<Balance: Default, MaxLevels: Get<u32>> Default for ShopCommissionConfig<Balance, MaxLevels> {
+    impl<Balance: Default, MaxLevels: Get<u32>> Default for EntityCommissionConfig<Balance, MaxLevels> {
         fn default() -> Self {
             Self {
                 enabled_modes: CommissionModes::default(),
@@ -374,8 +374,8 @@ pub mod pallet {
         }
     }
 
-    /// 店铺返佣配置类型别名
-    pub type ShopCommissionConfigOf<T> = ShopCommissionConfig<BalanceOf<T>, <T as Config>::MaxMultiLevels>;
+    /// 实体返佣配置类型别名
+    pub type EntityCommissionConfigOf<T> = EntityCommissionConfig<BalanceOf<T>, <T as Config>::MaxMultiLevels>;
 
     // ============================================================================
     // 返佣记录
@@ -463,8 +463,11 @@ pub mod pallet {
         /// 货币类型
         type Currency: Currency<Self::AccountId>;
 
-        /// 店铺查询接口
-        type ShopProvider: ShopProvider<Self::AccountId>;
+        /// 实体查询接口
+        type EntityProvider: EntityProvider<Self::AccountId>;
+
+        /// Shop 查询接口（Entity-Shop 分离架构）
+        type ShopProvider: pallet_entity_common::ShopProvider<Self::AccountId>;
 
         /// 会员查询接口（获取推荐人、等级）
         type MemberProvider: MemberProvider<Self::AccountId>;
@@ -493,13 +496,13 @@ pub mod pallet {
     // 存储项
     // ============================================================================
 
-    /// 店铺返佣配置 shop_id -> ShopCommissionConfig
+    /// 实体返佣配置 entity_id -> EntityCommissionConfig
     #[pallet::storage]
-    #[pallet::getter(fn shop_commission_config)]
-    pub type ShopCommissionConfigs<T: Config> = StorageMap<
+    #[pallet::getter(fn entity_commission_config)]
+    pub type EntityCommissionConfigs<T: Config> = StorageMap<
         _,
         Blake2_128Concat, u64,
-        ShopCommissionConfigOf<T>,
+        EntityCommissionConfigOf<T>,
     >;
 
     /// 会员返佣统计 (shop_id, account) -> MemberCommissionStatsData
@@ -523,20 +526,20 @@ pub mod pallet {
         ValueQuery,
     >;
 
-    /// 店铺返佣统计 shop_id -> (total_distributed, total_orders)
+    /// 实体返佣统计 entity_id -> (total_distributed, total_orders)
     #[pallet::storage]
-    #[pallet::getter(fn shop_commission_stats)]
-    pub type ShopCommissionTotals<T: Config> = StorageMap<
+    #[pallet::getter(fn entity_commission_stats)]
+    pub type EntityCommissionTotals<T: Config> = StorageMap<
         _,
         Blake2_128Concat, u64,
         (BalanceOf<T>, u64),
         ValueQuery,
     >;
 
-    /// 店铺消费单链 shop_id -> Vec<AccountId>（按首次消费顺序）
+    /// 实体消费单链 entity_id -> Vec<AccountId>（按首次消费顺序）
     #[pallet::storage]
-    #[pallet::getter(fn shop_single_line)]
-    pub type ShopSingleLine<T: Config> = StorageMap<
+    #[pallet::getter(fn entity_single_line)]
+    pub type EntitySingleLine<T: Config> = StorageMap<
         _,
         Blake2_128Concat, u64,
         BoundedVec<T::AccountId, T::MaxSingleLineLength>,
@@ -553,22 +556,22 @@ pub mod pallet {
         u32,
     >;
 
-    /// 店铺自定义等级极差配置 shop_id -> CustomLevelDiffConfig
+    /// 实体自定义等级极差配置 entity_id -> CustomLevelDiffConfig
     #[pallet::storage]
-    #[pallet::getter(fn shop_custom_level_diff_config)]
-    pub type ShopCustomLevelDiffConfigs<T: Config> = StorageMap<
+    #[pallet::getter(fn entity_custom_level_diff_config)]
+    pub type EntityCustomLevelDiffConfigs<T: Config> = StorageMap<
         _,
         Blake2_128Concat, u64,
         CustomLevelDiffConfigOf<T>,
     >;
 
-    /// 店铺提现配置 shop_id -> ShopWithdrawalConfig
+    /// 实体提现配置 entity_id -> EntityWithdrawalConfig
     #[pallet::storage]
-    #[pallet::getter(fn shop_withdrawal_config)]
-    pub type ShopWithdrawalConfigs<T: Config> = StorageMap<
+    #[pallet::getter(fn entity_withdrawal_config)]
+    pub type EntityWithdrawalConfigs<T: Config> = StorageMap<
         _,
         Blake2_128Concat, u64,
-        ShopWithdrawalConfigOf<T>,
+        EntityWithdrawalConfigOf<T>,
     >;
 
     /// 会员购物余额 (shop_id, account) -> Balance
@@ -685,8 +688,8 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             Self::ensure_shop_owner(shop_id, &who)?;
 
-            ShopCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
-                let config = maybe_config.get_or_insert_with(ShopCommissionConfig::default);
+            EntityCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
+                let config = maybe_config.get_or_insert_with(EntityCommissionConfig::default);
                 config.enabled_modes = modes;
             });
 
@@ -706,8 +709,8 @@ pub mod pallet {
             Self::ensure_shop_owner(shop_id, &who)?;
             ensure!(rate <= 10000, Error::<T>::InvalidCommissionRate);
 
-            ShopCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
-                let config = maybe_config.get_or_insert_with(ShopCommissionConfig::default);
+            EntityCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
+                let config = maybe_config.get_or_insert_with(EntityCommissionConfig::default);
                 config.direct_reward.rate = rate;
             });
 
@@ -738,8 +741,8 @@ pub mod pallet {
             }
             ensure!(max_total_rate <= 10000, Error::<T>::InvalidCommissionRate);
 
-            ShopCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
-                let config = maybe_config.get_or_insert_with(ShopCommissionConfig::default);
+            EntityCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
+                let config = maybe_config.get_or_insert_with(EntityCommissionConfig::default);
                 config.multi_level = MultiLevelConfig {
                     levels,
                     max_total_rate,
@@ -765,8 +768,8 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             Self::ensure_shop_owner(shop_id, &who)?;
 
-            ShopCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
-                let config = maybe_config.get_or_insert_with(ShopCommissionConfig::default);
+            EntityCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
+                let config = maybe_config.get_or_insert_with(EntityCommissionConfig::default);
                 config.level_diff = LevelDiffConfig {
                     normal_rate,
                     silver_rate,
@@ -803,7 +806,7 @@ pub mod pallet {
             }
             ensure!(max_depth > 0 && max_depth <= 20, Error::<T>::InvalidCommissionRate);
 
-            ShopCustomLevelDiffConfigs::<T>::insert(shop_id, CustomLevelDiffConfig {
+            EntityCustomLevelDiffConfigs::<T>::insert(shop_id, CustomLevelDiffConfig {
                 level_rates,
                 max_depth,
             });
@@ -823,8 +826,8 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             Self::ensure_shop_owner(shop_id, &who)?;
 
-            ShopCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
-                let config = maybe_config.get_or_insert_with(ShopCommissionConfig::default);
+            EntityCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
+                let config = maybe_config.get_or_insert_with(EntityCommissionConfig::default);
                 config.fixed_amount = FixedAmountConfig { amount };
             });
 
@@ -845,8 +848,8 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             Self::ensure_shop_owner(shop_id, &who)?;
 
-            ShopCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
-                let config = maybe_config.get_or_insert_with(ShopCommissionConfig::default);
+            EntityCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
+                let config = maybe_config.get_or_insert_with(EntityCommissionConfig::default);
                 config.first_order = FirstOrderConfig { amount, rate, use_amount };
             });
 
@@ -866,8 +869,8 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             Self::ensure_shop_owner(shop_id, &who)?;
 
-            ShopCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
-                let config = maybe_config.get_or_insert_with(ShopCommissionConfig::default);
+            EntityCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
+                let config = maybe_config.get_or_insert_with(EntityCommissionConfig::default);
                 config.repeat_purchase = RepeatPurchaseConfig { rate, min_orders };
             });
 
@@ -893,8 +896,8 @@ pub mod pallet {
             Self::ensure_shop_owner(shop_id, &who)?;
             ensure!(upline_rate <= 1000 && downline_rate <= 1000, Error::<T>::InvalidCommissionRate);
 
-            ShopCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
-                let config = maybe_config.get_or_insert_with(ShopCommissionConfig::default);
+            EntityCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
+                let config = maybe_config.get_or_insert_with(EntityCommissionConfig::default);
                 config.single_line = SingleLineConfig {
                     upline_rate,
                     downline_rate,
@@ -923,8 +926,8 @@ pub mod pallet {
             Self::ensure_shop_owner(shop_id, &who)?;
             ensure!(max_rate <= 10000, Error::<T>::InvalidCommissionRate);
 
-            ShopCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
-                let config = maybe_config.get_or_insert_with(ShopCommissionConfig::default);
+            EntityCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
+                let config = maybe_config.get_or_insert_with(EntityCommissionConfig::default);
                 config.source = source;
                 config.max_commission_rate = max_rate;
             });
@@ -944,8 +947,8 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
             Self::ensure_shop_owner(shop_id, &who)?;
 
-            ShopCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
-                let config = maybe_config.get_or_insert_with(ShopCommissionConfig::default);
+            EntityCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
+                let config = maybe_config.get_or_insert_with(EntityCommissionConfig::default);
                 config.enabled = enabled;
             });
 
@@ -970,7 +973,7 @@ pub mod pallet {
                 ensure!(stats.pending >= total_amount, Error::<T>::InsufficientCommission);
 
                 // 检查是否启用分级提现
-                let withdrawal_config = ShopWithdrawalConfigs::<T>::get(shop_id);
+                let withdrawal_config = EntityWithdrawalConfigs::<T>::get(shop_id);
                 
                 let (withdrawal_amount, repurchase_amount) = if let Some(ref config) = withdrawal_config {
                     if config.enabled && !config.tier_configs.is_empty() {
@@ -999,7 +1002,7 @@ pub mod pallet {
 
                 // 从店铺派生账户转账提现部分到用户钱包
                 if !withdrawal_amount.is_zero() {
-                    let shop_account = T::ShopProvider::shop_account(shop_id);
+                    let shop_account = T::EntityProvider::entity_account(shop_id);
                     // P0 安全修复: 预检查店铺账户余额
                     let shop_balance = T::Currency::free_balance(&shop_account);
                     ensure!(shop_balance >= withdrawal_amount, Error::<T>::InsufficientCommission);
@@ -1069,7 +1072,7 @@ pub mod pallet {
                 );
             }
 
-            ShopWithdrawalConfigs::<T>::insert(shop_id, ShopWithdrawalConfig {
+            EntityWithdrawalConfigs::<T>::insert(shop_id, EntityWithdrawalConfig {
                 tier_configs,
                 enabled,
                 shopping_balance_generates_commission,
@@ -1113,7 +1116,7 @@ pub mod pallet {
     impl<T: Config> Pallet<T> {
         /// 验证店主权限
         fn ensure_shop_owner(shop_id: u64, who: &T::AccountId) -> DispatchResult {
-            let owner = T::ShopProvider::shop_owner(shop_id)
+            let owner = T::EntityProvider::entity_owner(shop_id)
                 .ok_or(Error::<T>::ShopNotFound)?;
             ensure!(*who == owner, Error::<T>::NotShopOwner);
             Ok(())
@@ -1127,7 +1130,7 @@ pub mod pallet {
             order_amount: BalanceOf<T>,
             available_pool: BalanceOf<T>,
         ) -> DispatchResult {
-            let config = match ShopCommissionConfigs::<T>::get(shop_id) {
+            let config = match EntityCommissionConfigs::<T>::get(shop_id) {
                 Some(c) if c.enabled => c,
                 _ => return Ok(()), // 未配置或未启用
             };
@@ -1211,7 +1214,7 @@ pub mod pallet {
 
             // 更新店铺统计
             let distributed = max_commission.saturating_sub(remaining);
-            ShopCommissionTotals::<T>::mutate(shop_id, |(total, orders)| {
+            EntityCommissionTotals::<T>::mutate(shop_id, |(total, orders)| {
                 *total = total.saturating_add(distributed);
                 *orders = orders.saturating_add(1);
             });
@@ -1370,7 +1373,7 @@ pub mod pallet {
         ) -> DispatchResult {
             // 检查是否使用自定义等级
             let uses_custom = T::MemberProvider::uses_custom_levels(shop_id);
-            let custom_config = ShopCustomLevelDiffConfigs::<T>::get(shop_id);
+            let custom_config = EntityCustomLevelDiffConfigs::<T>::get(shop_id);
 
             // 确定最大遍历层级
             let max_depth = if uses_custom {
@@ -1527,7 +1530,7 @@ pub mod pallet {
                 return Ok(());
             }
 
-            ShopSingleLine::<T>::try_mutate(shop_id, |single_line| {
+            EntitySingleLine::<T>::try_mutate(shop_id, |single_line| {
                 let index = single_line.len() as u32;
                 single_line.try_push(account.clone()).map_err(|_| Error::<T>::SingleLineFull)?;
                 SingleLineIndex::<T>::insert(shop_id, account, index);
@@ -1559,7 +1562,7 @@ pub mod pallet {
                 return Ok(()); // 没有上线
             }
 
-            let single_line = ShopSingleLine::<T>::get(shop_id);
+            let single_line = EntitySingleLine::<T>::get(shop_id);
 
             // 计算可获取层数
             let extra_levels = if !config.level_increment_threshold.is_zero() {
@@ -1629,7 +1632,7 @@ pub mod pallet {
                 None => return Ok(()), // 买家不在单链中
             };
 
-            let single_line = ShopSingleLine::<T>::get(shop_id);
+            let single_line = EntitySingleLine::<T>::get(shop_id);
             let single_line_len = single_line.len() as u32;
 
             if buyer_index >= single_line_len - 1 {
@@ -1922,16 +1925,16 @@ impl<T: pallet::Config> CommissionProvider<T::AccountId, pallet::BalanceOf<T>> f
     }
 
     fn set_commission_modes(shop_id: u64, modes: u16) -> sp_runtime::DispatchResult {
-        pallet::ShopCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
-            let config = maybe_config.get_or_insert_with(pallet::ShopCommissionConfig::default);
+        pallet::EntityCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
+            let config = maybe_config.get_or_insert_with(pallet::EntityCommissionConfig::default);
             config.enabled_modes = pallet::CommissionModes(modes);
         });
         Ok(())
     }
 
     fn set_direct_reward_rate(shop_id: u64, rate: u16) -> sp_runtime::DispatchResult {
-        pallet::ShopCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
-            let config = maybe_config.get_or_insert_with(pallet::ShopCommissionConfig::default);
+        pallet::EntityCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
+            let config = maybe_config.get_or_insert_with(pallet::EntityCommissionConfig::default);
             config.direct_reward.rate = rate;
         });
         Ok(())
@@ -1945,8 +1948,8 @@ impl<T: pallet::Config> CommissionProvider<T::AccountId, pallet::BalanceOf<T>> f
         platinum_rate: u16,
         diamond_rate: u16,
     ) -> sp_runtime::DispatchResult {
-        pallet::ShopCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
-            let config = maybe_config.get_or_insert_with(pallet::ShopCommissionConfig::default);
+        pallet::EntityCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
+            let config = maybe_config.get_or_insert_with(pallet::EntityCommissionConfig::default);
             config.level_diff.normal_rate = normal_rate;
             config.level_diff.silver_rate = silver_rate;
             config.level_diff.gold_rate = gold_rate;
@@ -1957,8 +1960,8 @@ impl<T: pallet::Config> CommissionProvider<T::AccountId, pallet::BalanceOf<T>> f
     }
 
     fn set_fixed_amount(shop_id: u64, amount: pallet::BalanceOf<T>) -> sp_runtime::DispatchResult {
-        pallet::ShopCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
-            let config = maybe_config.get_or_insert_with(pallet::ShopCommissionConfig::default);
+        pallet::EntityCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
+            let config = maybe_config.get_or_insert_with(pallet::EntityCommissionConfig::default);
             config.fixed_amount.amount = amount;
         });
         Ok(())
@@ -1970,8 +1973,8 @@ impl<T: pallet::Config> CommissionProvider<T::AccountId, pallet::BalanceOf<T>> f
         rate: u16,
         use_amount: bool,
     ) -> sp_runtime::DispatchResult {
-        pallet::ShopCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
-            let config = maybe_config.get_or_insert_with(pallet::ShopCommissionConfig::default);
+        pallet::EntityCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
+            let config = maybe_config.get_or_insert_with(pallet::EntityCommissionConfig::default);
             config.first_order.amount = amount;
             config.first_order.rate = rate;
             config.first_order.use_amount = use_amount;
@@ -1980,8 +1983,8 @@ impl<T: pallet::Config> CommissionProvider<T::AccountId, pallet::BalanceOf<T>> f
     }
 
     fn set_repeat_purchase_config(shop_id: u64, rate: u16, min_orders: u32) -> sp_runtime::DispatchResult {
-        pallet::ShopCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
-            let config = maybe_config.get_or_insert_with(pallet::ShopCommissionConfig::default);
+        pallet::EntityCommissionConfigs::<T>::mutate(shop_id, |maybe_config| {
+            let config = maybe_config.get_or_insert_with(pallet::EntityCommissionConfig::default);
             config.repeat_purchase.rate = rate;
             config.repeat_purchase.min_orders = min_orders;
         });
@@ -1993,8 +1996,8 @@ impl<T: pallet::Config> CommissionProvider<T::AccountId, pallet::BalanceOf<T>> f
         enabled: bool,
         shopping_balance_generates_commission: bool,
     ) -> sp_runtime::DispatchResult {
-        pallet::ShopWithdrawalConfigs::<T>::mutate(shop_id, |maybe_config| {
-            let config = maybe_config.get_or_insert_with(pallet::ShopWithdrawalConfig::default);
+        pallet::EntityWithdrawalConfigs::<T>::mutate(shop_id, |maybe_config| {
+            let config = maybe_config.get_or_insert_with(pallet::EntityWithdrawalConfig::default);
             config.enabled = enabled;
             config.shopping_balance_generates_commission = shopping_balance_generates_commission;
         });

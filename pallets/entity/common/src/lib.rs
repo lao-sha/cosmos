@@ -35,6 +35,76 @@ pub enum EntityType {
     Custom(u8),
 }
 
+impl EntityType {
+    /// 默认治理模式（创建实体时的建议值）
+    pub fn default_governance(&self) -> GovernanceMode {
+        match self {
+            Self::Merchant | Self::ServiceProvider => GovernanceMode::None,
+            Self::Enterprise => GovernanceMode::DualTrack,
+            Self::DAO => GovernanceMode::FullDAO,
+            Self::Community => GovernanceMode::Advisory,
+            Self::Project => GovernanceMode::DualTrack,
+            Self::Fund => GovernanceMode::Committee,
+            Self::Custom(_) => GovernanceMode::None,
+        }
+    }
+    
+    /// 默认代币类型（创建实体时的建议值）
+    pub fn default_token_type(&self) -> TokenType {
+        match self {
+            Self::Merchant | Self::ServiceProvider => TokenType::Points,
+            Self::Enterprise => TokenType::Equity,
+            Self::DAO => TokenType::Governance,
+            Self::Community => TokenType::Membership,
+            Self::Project => TokenType::Share,
+            Self::Fund => TokenType::Share,
+            Self::Custom(_) => TokenType::Points,
+        }
+    }
+    
+    /// 是否默认需要 KYC
+    pub fn requires_kyc_by_default(&self) -> bool {
+        matches!(self, Self::Enterprise | Self::Fund | Self::Project)
+    }
+    
+    /// 检查代币类型是否与实体类型匹配（仅为建议，不强制）
+    /// 返回 true 表示推荐组合，false 表示不常见组合但仍允许
+    pub fn suggests_token_type(&self, token: &TokenType) -> bool {
+        match (self, token) {
+            // 商户/服务商通常不发行证券类代币
+            (Self::Merchant | Self::ServiceProvider, TokenType::Equity | TokenType::Bond) => false,
+            // DAO 通常使用治理代币
+            (Self::DAO, TokenType::Points | TokenType::Membership) => false,
+            // 基金通常使用份额类代币
+            (Self::Fund, TokenType::Points | TokenType::Governance) => false,
+            _ => true,
+        }
+    }
+    
+    /// 检查治理模式是否与实体类型匹配（仅为建议，不强制）
+    /// 返回 true 表示推荐组合，false 表示不常见组合但仍允许
+    pub fn suggests_governance(&self, mode: &GovernanceMode) -> bool {
+        match (self, mode) {
+            // DAO 通常需要治理机制
+            (Self::DAO, GovernanceMode::None) => false,
+            // 基金通常需要专业管理
+            (Self::Fund, GovernanceMode::FullDAO) => false,
+            _ => true,
+        }
+    }
+    
+    /// 默认转账限制模式
+    pub fn default_transfer_restriction(&self) -> TransferRestrictionMode {
+        match self {
+            Self::Merchant | Self::ServiceProvider | Self::Community => TransferRestrictionMode::None,
+            Self::Enterprise | Self::Fund => TransferRestrictionMode::Whitelist,
+            Self::DAO => TransferRestrictionMode::None,
+            Self::Project => TransferRestrictionMode::KycRequired,
+            Self::Custom(_) => TransferRestrictionMode::None,
+        }
+    }
+}
+
 /// 治理模式
 #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
 pub enum GovernanceMode {
@@ -73,8 +143,103 @@ pub enum EntityStatus {
     Closed,
 }
 
-/// 向后兼容：ShopStatus 别名
+/// 向后兼容：ShopStatus 别名（Entity 级别状态）
 pub type ShopStatus = EntityStatus;
+
+// ============================================================================
+// Shop 类型枚举 (Entity-Shop 分离架构)
+// ============================================================================
+
+/// Shop 类型
+#[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+pub enum ShopType {
+    /// 线上商城（默认）
+    #[default]
+    OnlineStore,
+    /// 实体门店
+    PhysicalStore,
+    /// 服务网点
+    ServicePoint,
+    /// 仓储/自提点
+    Warehouse,
+    /// 加盟店
+    Franchise,
+    /// 快闪店/临时店
+    Popup,
+    /// 虚拟店铺（纯服务）
+    Virtual,
+}
+
+impl ShopType {
+    /// 是否需要地理位置
+    pub fn requires_location(&self) -> bool {
+        matches!(self, Self::PhysicalStore | Self::ServicePoint | Self::Warehouse | Self::Popup)
+    }
+    
+    /// 是否支持实物商品
+    pub fn supports_physical_products(&self) -> bool {
+        matches!(self, Self::OnlineStore | Self::PhysicalStore | Self::Warehouse | Self::Franchise)
+    }
+    
+    /// 是否支持服务类商品
+    pub fn supports_services(&self) -> bool {
+        matches!(self, Self::ServicePoint | Self::Virtual | Self::OnlineStore)
+    }
+}
+
+/// Shop 状态（业务层状态）
+#[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+pub enum ShopOperatingStatus {
+    /// 待激活
+    #[default]
+    Pending,
+    /// 营业中
+    Active,
+    /// 暂停营业
+    Paused,
+    /// 资金耗尽（自动暂停）
+    FundDepleted,
+    /// 关闭中
+    Closing,
+    /// 已关闭
+    Closed,
+}
+
+impl ShopOperatingStatus {
+    /// 是否可以进行业务操作
+    pub fn is_operational(&self) -> bool {
+        matches!(self, Self::Active)
+    }
+    
+    /// 是否可以恢复营业
+    pub fn can_resume(&self) -> bool {
+        matches!(self, Self::Paused | Self::FundDepleted)
+    }
+}
+
+/// 会员体系模式
+#[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+pub enum MemberMode {
+    /// 继承模式：会员数据存储在 Entity 级别，所有 Shop 共享
+    #[default]
+    Inherit,
+    /// 独立模式：会员数据存储在 Shop 级别，各 Shop 独立
+    Independent,
+    /// 混合模式：Entity + Shop 双层会员体系
+    Hybrid,
+}
+
+impl MemberMode {
+    /// 是否在 Entity 级别存储会员
+    pub fn uses_entity_members(&self) -> bool {
+        matches!(self, Self::Inherit | Self::Hybrid)
+    }
+    
+    /// 是否在 Shop 级别存储会员
+    pub fn uses_shop_members(&self) -> bool {
+        matches!(self, Self::Independent | Self::Hybrid)
+    }
+}
 
 // ============================================================================
 // 通证类型枚举 (Phase 2 新增)
@@ -272,37 +437,106 @@ pub enum MallOrderStatus {
 // 跨模块 Trait 接口
 // ============================================================================
 
-/// 店铺查询接口
+/// 实体查询接口
 /// 
-/// 供 product 模块查询店铺信息
-pub trait ShopProvider<AccountId> {
-    /// 检查店铺是否存在
-    fn shop_exists(shop_id: u64) -> bool;
+/// 供其他模块查询实体信息
+pub trait EntityProvider<AccountId> {
+    /// 检查实体是否存在
+    fn entity_exists(entity_id: u64) -> bool;
     
-    /// 检查店铺是否激活
-    fn is_shop_active(shop_id: u64) -> bool;
+    /// 检查实体是否激活
+    fn is_entity_active(entity_id: u64) -> bool;
     
-    /// 获取店铺所有者
-    fn shop_owner(shop_id: u64) -> Option<AccountId>;
+    /// 获取实体所有者
+    fn entity_owner(entity_id: u64) -> Option<AccountId>;
     
-    /// 获取店铺派生账户
-    fn shop_account(shop_id: u64) -> AccountId;
+    /// 获取实体派生账户
+    fn entity_account(entity_id: u64) -> AccountId;
     
-    /// 更新店铺统计（销售额、订单数）
-    fn update_shop_stats(shop_id: u64, sales_amount: u128, order_count: u32) -> Result<(), DispatchError>;
+    /// 更新实体统计（销售额、订单数）
+    fn update_entity_stats(entity_id: u64, sales_amount: u128, order_count: u32) -> Result<(), DispatchError>;
     
-    /// 更新店铺评分
-    fn update_shop_rating(shop_id: u64, rating: u8) -> Result<(), DispatchError>;
+    /// 更新实体评分
+    fn update_entity_rating(entity_id: u64, rating: u8) -> Result<(), DispatchError>;
     
     // ==================== 治理调用接口 ====================
     
-    /// 暂停店铺（治理调用）
-    fn pause_shop(shop_id: u64) -> Result<(), DispatchError> {
-        let _ = shop_id;
+    /// 暂停实体（治理调用）
+    fn pause_entity(entity_id: u64) -> Result<(), DispatchError> {
+        let _ = entity_id;
         Ok(()) // 默认空实现
     }
     
-    /// 恢复店铺（治理调用）
+    /// 恢复实体（治理调用）
+    fn resume_entity(entity_id: u64) -> Result<(), DispatchError> {
+        let _ = entity_id;
+        Ok(())
+    }
+}
+
+/// 向后兼容别名（旧 EntityProvider）
+pub trait LegacyShopProvider<AccountId>: EntityProvider<AccountId> {}
+
+// ============================================================================
+// Shop 查询接口 (Entity-Shop 分离架构)
+// ============================================================================
+
+/// Shop 查询接口
+/// 
+/// 供业务模块查询 Shop 信息（与 EntityProvider 区分）
+pub trait ShopProvider<AccountId> {
+    /// 检查 Shop 是否存在
+    fn shop_exists(shop_id: u64) -> bool;
+    
+    /// 检查 Shop 是否营业中
+    fn is_shop_active(shop_id: u64) -> bool;
+    
+    /// 获取 Shop 所属 Entity ID
+    fn shop_entity_id(shop_id: u64) -> Option<u64>;
+    
+    /// 获取 Shop 所有者（通过 Entity 查询）
+    fn shop_owner(shop_id: u64) -> Option<AccountId>;
+    
+    /// 获取 Shop 运营账户
+    fn shop_account(shop_id: u64) -> AccountId;
+    
+    /// 获取 Shop 类型
+    fn shop_type(shop_id: u64) -> Option<ShopType>;
+    
+    /// 获取 Shop 会员模式
+    fn shop_member_mode(shop_id: u64) -> MemberMode;
+    
+    /// 检查是否为 Shop 管理员
+    fn is_shop_manager(shop_id: u64, account: &AccountId) -> bool;
+    
+    /// 检查是否为主 Shop
+    fn is_primary_shop(shop_id: u64) -> bool;
+    
+    // ==================== 统计更新 ====================
+    
+    /// 更新 Shop 统计（销售额、订单数）
+    fn update_shop_stats(shop_id: u64, sales_amount: u128, order_count: u32) -> Result<(), DispatchError>;
+    
+    /// 更新 Shop 评分
+    fn update_shop_rating(shop_id: u64, rating: u8) -> Result<(), DispatchError>;
+    
+    // ==================== 运营资金 ====================
+    
+    /// 扣减运营资金
+    fn deduct_operating_fund(shop_id: u64, amount: u128) -> Result<(), DispatchError>;
+    
+    /// 获取运营资金余额
+    fn operating_balance(shop_id: u64) -> u128;
+    
+    // ==================== 控制接口 ====================
+    
+    /// 暂停 Shop
+    fn pause_shop(shop_id: u64) -> Result<(), DispatchError> {
+        let _ = shop_id;
+        Ok(())
+    }
+    
+    /// 恢复 Shop
     fn resume_shop(shop_id: u64) -> Result<(), DispatchError> {
         let _ = shop_id;
         Ok(())
@@ -382,16 +616,38 @@ pub trait OrderProvider<AccountId, Balance> {
 // 空实现（用于测试）
 // ============================================================================
 
-/// 空店铺提供者（测试用）
+/// 空实体提供者（测试用）
+pub struct NullEntityProvider;
+
+impl<AccountId: Default> EntityProvider<AccountId> for NullEntityProvider {
+    fn entity_exists(_entity_id: u64) -> bool { false }
+    fn is_entity_active(_entity_id: u64) -> bool { false }
+    fn entity_owner(_entity_id: u64) -> Option<AccountId> { None }
+    fn entity_account(_entity_id: u64) -> AccountId { AccountId::default() }
+    fn update_entity_stats(_entity_id: u64, _sales_amount: u128, _order_count: u32) -> Result<(), DispatchError> { Ok(()) }
+    fn update_entity_rating(_entity_id: u64, _rating: u8) -> Result<(), DispatchError> { Ok(()) }
+}
+
+/// 向后兼容别名（旧 EntityProvider 的空实现）
+pub type NullLegacyShopProvider = NullEntityProvider;
+
+/// 空 Shop 提供者（测试用）
 pub struct NullShopProvider;
 
 impl<AccountId: Default> ShopProvider<AccountId> for NullShopProvider {
     fn shop_exists(_shop_id: u64) -> bool { false }
     fn is_shop_active(_shop_id: u64) -> bool { false }
+    fn shop_entity_id(_shop_id: u64) -> Option<u64> { None }
     fn shop_owner(_shop_id: u64) -> Option<AccountId> { None }
     fn shop_account(_shop_id: u64) -> AccountId { AccountId::default() }
+    fn shop_type(_shop_id: u64) -> Option<ShopType> { None }
+    fn shop_member_mode(_shop_id: u64) -> MemberMode { MemberMode::default() }
+    fn is_shop_manager(_shop_id: u64, _account: &AccountId) -> bool { false }
+    fn is_primary_shop(_shop_id: u64) -> bool { false }
     fn update_shop_stats(_shop_id: u64, _sales_amount: u128, _order_count: u32) -> Result<(), DispatchError> { Ok(()) }
     fn update_shop_rating(_shop_id: u64, _rating: u8) -> Result<(), DispatchError> { Ok(()) }
+    fn deduct_operating_fund(_shop_id: u64, _amount: u128) -> Result<(), DispatchError> { Ok(()) }
+    fn operating_balance(_shop_id: u64) -> u128 { 0 }
 }
 
 /// 空商品提供者（测试用）
@@ -420,36 +676,36 @@ impl<AccountId, Balance> OrderProvider<AccountId, Balance> for NullOrderProvider
 }
 
 // ============================================================================
-// 店铺代币接口
+// 实体代币接口
 // ============================================================================
 
-/// 店铺代币接口
+/// 实体代币接口
 /// 
 /// 供 order 模块调用，实现购物返积分和积分抵扣
-pub trait ShopTokenProvider<AccountId, Balance> {
-    /// 检查店铺是否启用代币
-    fn is_token_enabled(shop_id: u64) -> bool;
+pub trait EntityTokenProvider<AccountId, Balance> {
+    /// 检查实体是否启用代币
+    fn is_token_enabled(entity_id: u64) -> bool;
     
-    /// 获取用户积分余额
-    fn token_balance(shop_id: u64, holder: &AccountId) -> Balance;
+    /// 获取用户代币余额
+    fn token_balance(entity_id: u64, holder: &AccountId) -> Balance;
     
     /// 购物奖励（订单完成时调用）
     fn reward_on_purchase(
-        shop_id: u64,
+        entity_id: u64,
         buyer: &AccountId,
         purchase_amount: Balance,
     ) -> Result<Balance, DispatchError>;
     
-    /// 积分兑换折扣（下单时调用）
+    /// 代币兑换折扣（下单时调用）
     fn redeem_for_discount(
-        shop_id: u64,
+        entity_id: u64,
         buyer: &AccountId,
         tokens: Balance,
     ) -> Result<Balance, DispatchError>;
     
     /// 转移代币（P2P 交易市场使用）
     fn transfer(
-        shop_id: u64,
+        entity_id: u64,
         from: &AccountId,
         to: &AccountId,
         amount: Balance,
@@ -457,35 +713,38 @@ pub trait ShopTokenProvider<AccountId, Balance> {
     
     /// 锁定代币（挂单时使用）
     fn reserve(
-        shop_id: u64,
+        entity_id: u64,
         who: &AccountId,
         amount: Balance,
     ) -> Result<(), DispatchError>;
     
     /// 解锁代币（取消订单时使用）
     fn unreserve(
-        shop_id: u64,
+        entity_id: u64,
         who: &AccountId,
         amount: Balance,
     ) -> Balance;
     
     /// 从锁定中转移（成交时使用）
     fn repatriate_reserved(
-        shop_id: u64,
+        entity_id: u64,
         from: &AccountId,
         to: &AccountId,
         amount: Balance,
     ) -> Result<Balance, DispatchError>;
     
     /// Phase 8: 获取代币类型
-    fn get_token_type(shop_id: u64) -> TokenType;
+    fn get_token_type(entity_id: u64) -> TokenType;
     
     /// Phase 8: 获取代币总供应量
-    fn total_supply(shop_id: u64) -> Balance;
+    fn total_supply(entity_id: u64) -> Balance;
 }
 
-/// 空店铺代币提供者（测试用或未启用代币时）
-pub struct NullShopTokenProvider;
+/// 向后兼容别名
+pub trait ShopTokenProvider<AccountId, Balance>: EntityTokenProvider<AccountId, Balance> {}
+
+/// 空实体代币提供者（测试用或未启用代币时）
+pub struct NullEntityTokenProvider;
 
 // ============================================================================
 // 定价接口
@@ -513,9 +772,9 @@ impl PricingProvider for NullPricingProvider {
     }
 }
 
-impl<AccountId, Balance: Default> ShopTokenProvider<AccountId, Balance> for NullShopTokenProvider {
-    fn is_token_enabled(_shop_id: u64) -> bool { false }
-    fn token_balance(_shop_id: u64, _holder: &AccountId) -> Balance { Default::default() }
+impl<AccountId, Balance: Default> EntityTokenProvider<AccountId, Balance> for NullEntityTokenProvider {
+    fn is_token_enabled(_entity_id: u64) -> bool { false }
+    fn token_balance(_entity_id: u64, _holder: &AccountId) -> Balance { Default::default() }
     fn reward_on_purchase(_: u64, _: &AccountId, _: Balance) -> Result<Balance, DispatchError> { 
         Ok(Default::default()) 
     }
@@ -534,10 +793,13 @@ impl<AccountId, Balance: Default> ShopTokenProvider<AccountId, Balance> for Null
     fn repatriate_reserved(_: u64, _: &AccountId, _: &AccountId, _: Balance) -> Result<Balance, DispatchError> {
         Ok(Default::default())
     }
-    fn get_token_type(_shop_id: u64) -> TokenType {
+    fn get_token_type(_entity_id: u64) -> TokenType {
         TokenType::default()
     }
-    fn total_supply(_shop_id: u64) -> Balance {
+    fn total_supply(_entity_id: u64) -> Balance {
         Default::default()
     }
 }
+
+/// 向后兼容别名
+pub type NullShopTokenProvider = NullEntityTokenProvider;

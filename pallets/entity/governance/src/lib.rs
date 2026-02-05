@@ -45,7 +45,7 @@ pub mod pallet {
         BoundedVec,
     };
     use frame_system::pallet_prelude::*;
-    use pallet_entity_common::{GovernanceMode, ShopProvider, TokenType};
+    use pallet_entity_common::{GovernanceMode, EntityProvider, EntityTokenProvider, ShopProvider, TokenType};
     use pallet_entity_commission::{CommissionProvider, MemberProvider};
     use sp_runtime::traits::{Saturating, Zero};
 
@@ -399,11 +399,14 @@ pub mod pallet {
             + From<u128>
             + Into<u128>;
 
-        /// 店铺查询接口
+        /// 实体查询接口
+        type EntityProvider: EntityProvider<Self::AccountId>;
+
+        /// Shop 查询接口（Entity-Shop 分离架构）
         type ShopProvider: ShopProvider<Self::AccountId>;
 
         /// 代币余额查询接口
-        type TokenProvider: ShopTokenProvider<Self::AccountId, Self::Balance>;
+        type TokenProvider: EntityTokenProvider<Self::AccountId, Self::Balance>;
 
         /// 返佣服务接口（治理调用）
         type CommissionProvider: pallet_entity_commission::CommissionProvider<Self::AccountId, Self::Balance>;
@@ -450,12 +453,12 @@ pub mod pallet {
         type MaxCommitteeSize: Get<u32>;
     }
 
-    /// 代币余额查询 trait
-    pub trait ShopTokenProvider<AccountId, Balance> {
-        /// 获取用户在店铺的代币余额
-        fn token_balance(shop_id: u64, holder: &AccountId) -> Balance;
-        /// 获取店铺代币总供应量
-        fn total_supply(shop_id: u64) -> Balance;
+    /// 代币余额查询 trait (向后兼容别名)
+    pub trait GovernanceTokenProvider<AccountId, Balance> {
+        /// 获取用户在实体的代币余额
+        fn token_balance(entity_id: u64, holder: &AccountId) -> Balance;
+        /// 获取实体代币总供应量
+        fn total_supply(entity_id: u64) -> Balance;
         /// 检查店铺代币是否启用
         fn is_enabled(shop_id: u64) -> bool;
         /// Phase 8: 获取代币类型
@@ -697,7 +700,7 @@ pub mod pallet {
             ensure!(T::ShopProvider::shop_exists(shop_id), Error::<T>::ShopNotFound);
 
             // 验证代币已启用
-            ensure!(T::TokenProvider::is_enabled(shop_id), Error::<T>::TokenNotEnabled);
+            ensure!(T::TokenProvider::is_token_enabled(shop_id), Error::<T>::TokenNotEnabled);
 
             // 验证持有足够代币
             let balance = T::TokenProvider::token_balance(shop_id, &who);
@@ -1036,7 +1039,7 @@ pub mod pallet {
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            let owner = T::ShopProvider::shop_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
+            let owner = T::EntityProvider::entity_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
             ensure!(owner == who, Error::<T>::NotShopOwner);
 
             GovernanceConfigs::<T>::mutate(entity_id, |maybe_config| {
@@ -1066,7 +1069,7 @@ pub mod pallet {
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            let owner = T::ShopProvider::shop_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
+            let owner = T::EntityProvider::entity_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
             ensure!(owner == who, Error::<T>::NotShopOwner);
 
             CommitteeMembers::<T>::try_mutate(entity_id, |members| -> DispatchResult {
@@ -1092,7 +1095,7 @@ pub mod pallet {
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            let owner = T::ShopProvider::shop_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
+            let owner = T::EntityProvider::entity_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
             ensure!(owner == who, Error::<T>::NotShopOwner);
 
             CommitteeMembers::<T>::try_mutate(entity_id, |members| -> DispatchResult {

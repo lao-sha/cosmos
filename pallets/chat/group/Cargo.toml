@@ -27,7 +27,7 @@ sp-core = { workspace = true }
 # 本地依赖
 pallet-chat-common = { path = "../common", default-features = false }
 pallet-chat-permission = { path = "../permission", default-features = false }
-pallet-storage-service = { path = "../../storage-service", default-features = false }
+pallet-storage-service = { path = "../../storage/service", default-features = false }
 pallet-trading-common = { path = "../../trading/common", default-features = false }
 media-utils = { path = "../../../media-utils", default-features = false }
 

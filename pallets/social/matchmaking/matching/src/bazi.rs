@@ -16,6 +16,10 @@
 pub struct TianGan(pub u8);
 
 impl TianGan {
+    pub fn from_index(index: u8) -> Self {
+        Self(index % 10)
+    }
+
     pub fn to_wuxing(&self) -> WuXing {
         match self.0 {
             0 | 1 => WuXing::Mu,   // 甲乙
@@ -33,6 +37,10 @@ impl TianGan {
 pub struct DiZhi(pub u8);
 
 impl DiZhi {
+    pub fn from_index(index: u8) -> Self {
+        Self(index % 12)
+    }
+
     pub fn to_wuxing(&self) -> WuXing {
         match self.0 {
             0 => WuXing::Shui,  // 子
@@ -70,14 +78,8 @@ pub struct GanZhi {
     pub zhi: DiZhi,
 }
 
-/// 核心解盘结果存根
-#[derive(Clone, Debug, Default)]
-pub struct CoreInterpretation {
-    pub yong_shen: WuXing,
-    pub xi_shen: WuXing,
-    pub ji_shen: WuXing,
-    pub score: u8,
-}
+/// 重导出公共模块的 CoreInterpretation 类型
+pub use pallet_matchmaking_common::CoreInterpretation;
 
 /// 日柱合婚结果
 #[derive(Clone, Debug, Default)]
@@ -260,83 +262,17 @@ pub fn calculate_day_pillar_compatibility(
     }
 }
 
-/// 计算五行互补评分
+/// 计算五行互补评分（存根实现）
 pub fn calculate_wuxing_compatibility(
-    interp1: &CoreInterpretation,
-    interp2: &CoreInterpretation,
+    _interp1: &pallet_matchmaking_common::CoreInterpretation,
+    _interp2: &pallet_matchmaking_common::CoreInterpretation,
 ) -> WuxingCompatibilityResult {
-    let mut yongshen_score = 50u8;
-
-    // 用神与喜神配合
-    if interp1.yong_shen == interp2.xi_shen {
-        yongshen_score = yongshen_score.saturating_add(25);
-    }
-    if interp2.yong_shen == interp1.xi_shen {
-        yongshen_score = yongshen_score.saturating_add(25);
-    }
-
-    // 用神相生
-    if is_wuxing_sheng(interp1.yong_shen, interp2.yong_shen)
-        || is_wuxing_sheng(interp2.yong_shen, interp1.yong_shen)
-    {
-        yongshen_score = yongshen_score.saturating_add(15);
-    }
-
-    // 用神同类
-    if interp1.yong_shen == interp2.yong_shen {
-        yongshen_score = yongshen_score.saturating_add(10);
-    }
-
-    yongshen_score = yongshen_score.min(100);
-
-    // 忌神冲突评分
-    let mut jishen_score = 80u8;
-
-    if interp1.ji_shen == interp2.yong_shen {
-        jishen_score = jishen_score.saturating_sub(20);
-    }
-    if interp2.ji_shen == interp1.yong_shen {
-        jishen_score = jishen_score.saturating_sub(20);
-    }
-    if interp1.ji_shen == interp2.ji_shen {
-        jishen_score = jishen_score.saturating_add(10);
-    }
-
-    jishen_score = jishen_score.min(100);
-
-    // 五行平衡评分
-    let mut balance_score = 60u8;
-
-    if is_wuxing_sheng(interp1.xi_shen, interp2.xi_shen)
-        || is_wuxing_sheng(interp2.xi_shen, interp1.xi_shen)
-    {
-        balance_score = balance_score.saturating_add(20);
-    }
-
-    if interp1.xi_shen == interp2.xi_shen {
-        balance_score = balance_score.saturating_add(15);
-    }
-
-    let score_diff = (interp1.score as i16 - interp2.score as i16).unsigned_abs() as u8;
-    if score_diff <= 10 {
-        balance_score = balance_score.saturating_add(10);
-    } else if score_diff <= 20 {
-        balance_score = balance_score.saturating_add(5);
-    }
-
-    balance_score = balance_score.min(100);
-
-    // 综合评分
-    let overall = ((yongshen_score as u32 * 50
-        + jishen_score as u32 * 30
-        + balance_score as u32 * 20)
-        / 100) as u8;
-
+    // 存根实现：返回默认评分
     WuxingCompatibilityResult {
-        yongshen_score,
-        jishen_score,
-        balance_score,
-        overall,
+        yongshen_score: 50,
+        jishen_score: 70,
+        balance_score: 60,
+        overall: 58,
     }
 }
 

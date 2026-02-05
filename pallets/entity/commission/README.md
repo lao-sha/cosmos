@@ -117,10 +117,10 @@ impl CommissionModes {
 }
 ```
 
-### ShopCommissionConfig - 店铺返佣配置
+### EntityCommissionConfig - 实体返佣配置
 
 ```rust
-pub struct ShopCommissionConfig<Balance> {
+pub struct EntityCommissionConfig<Balance> {
     pub enabled_modes: CommissionModes,   // 启用的模式（位标志）
     pub source: CommissionSource,         // 返佣来源
     pub max_commission_rate: u16,         // 返佣上限比例（基点）
@@ -525,8 +525,8 @@ pub struct WithdrawalTierConfig {
     pub repurchase_rate: u16,   // 复购比例（基点，4000 = 40%）
 }
 
-// 店铺提现配置
-pub struct ShopWithdrawalConfig<MaxLevels> {
+// 实体提现配置
+pub struct EntityWithdrawalConfig<MaxLevels> {
     pub tier_configs: BoundedVec<WithdrawalTierConfig, MaxLevels>,
     pub enabled: bool,
     pub shopping_balance_generates_commission: bool,

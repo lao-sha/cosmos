@@ -111,10 +111,10 @@ impl pallet_entity_member::Config for Runtime {
 
 ## 📊 数据结构
 
-### ShopMember - 店铺会员
+### EntityMember - 实体会员
 
 ```rust
-pub struct ShopMember<AccountId, Balance, BlockNumber> {
+pub struct EntityMember<AccountId, Balance, BlockNumber> {
     pub referrer: Option<AccountId>,      // 推荐人（上级）
     pub direct_referrals: u32,            // 直接推荐人数
     pub team_size: u32,                   // 团队总人数
@@ -170,10 +170,10 @@ pub struct CustomLevel<Balance> {
 }
 ```
 
-### ShopLevelSystem - 店铺等级系统
+### EntityLevelSystem - 实体等级系统
 
 ```rust
-pub struct ShopLevelSystem<Balance, MaxLevels> {
+pub struct EntityLevelSystem<Balance, MaxLevels> {
     pub levels: BoundedVec<CustomLevel<Balance>, MaxLevels>, // 自定义等级列表
     pub use_custom: bool,                                     // 是否启用自定义等级
     pub upgrade_mode: LevelUpgradeMode,                       // 等级升级方式

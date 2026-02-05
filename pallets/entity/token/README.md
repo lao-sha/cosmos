@@ -79,12 +79,12 @@ impl pallet_entity_token::Config for Runtime {
 
 ## 📊 数据结构
 
-### ShopTokenConfig
+### EntityTokenConfig
 
-店铺代币配置结构：
+实体代币配置结构：
 
 ```rust
-pub struct ShopTokenConfig<Balance, BlockNumber> {
+pub struct EntityTokenConfig<Balance, BlockNumber> {
     /// 是否已启用代币
     pub enabled: bool,
     /// 购物返积分比例（基点，500 = 5%）
@@ -274,7 +274,7 @@ Pallet::<T>::get_total_supply(shop_id) -> Balance
 Pallet::<T>::is_token_enabled(shop_id) -> bool
 
 // 获取店铺代币配置
-Pallet::<T>::shop_token_configs(shop_id) -> Option<ShopTokenConfig>
+Pallet::<T>::shop_token_configs(shop_id) -> Option<EntityTokenConfig>
 ```
 
 ## 💡 使用示例

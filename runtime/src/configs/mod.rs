@@ -46,7 +46,7 @@ use super::{
 	System, Timestamp, EXISTENTIAL_DEPOSIT, SLOT_DURATION, VERSION, UNIT, MINUTES, HOURS, DAYS,
 	TechnicalCommittee, ArbitrationCommittee, TreasuryCouncil, ContentCommittee,
 	// Entity types (原 ShareMall)
-	Assets, Escrow, EntityRegistry, EntityService, EntityTransaction, EntityToken,
+	Assets, Escrow, EntityRegistry, EntityShop, EntityService, EntityTransaction, EntityToken,
 };
 
 const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(75);
@@ -1358,12 +1358,28 @@ impl pallet_entity_registry::Config for Runtime {
 	type MinOperatingBalance = ConstU128<{ UNIT / 10 }>;
 	type FundWarningThreshold = ConstU128<{ UNIT }>;
 	type MaxAdmins = ConstU32<10>;
+	type MaxShopsPerEntity = ConstU32<100>;
+	type ShopProvider = EntityShop;
+}
+
+impl pallet_entity_shop::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type EntityProvider = EntityRegistry;
+	type MaxShopNameLength = ConstU32<64>;
+	type MaxCidLength = ConstU32<64>;
+	type MaxManagers = ConstU32<10>;
+	type MaxPointsNameLength = ConstU32<32>;
+	type MaxPointsSymbolLength = ConstU32<8>;
+	type MinOperatingBalance = ConstU128<{ UNIT / 10 }>;
+	type WarningThreshold = ConstU128<{ UNIT }>;
 }
 
 impl pallet_entity_service::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type Currency = Balances;
-	type ShopProvider = EntityRegistry;
+	type EntityProvider = EntityRegistry;
+	type ShopProvider = EntityShop;
 	type PricingProvider = EntityPricingProvider;
 	type MaxProductsPerShop = ConstU32<1000>;
 	type MaxCidLength = ConstU32<64>;
@@ -1376,9 +1392,10 @@ impl pallet_entity_transaction::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type Currency = Balances;
 	type Escrow = Escrow;
-	type ShopProvider = EntityRegistry;
+	type EntityProvider = EntityRegistry;
+	type ShopProvider = EntityShop;
 	type ProductProvider = EntityService;
-	type ShopToken = EntityToken;
+	type EntityToken = EntityToken;
 	type PlatformAccount = EntityPlatformAccount;
 	type PlatformFeeRate = EntityPlatformFeeRate;
 	type ShipTimeout = EntityShipTimeout;
@@ -1390,34 +1407,31 @@ impl pallet_entity_transaction::Config for Runtime {
 impl pallet_entity_review::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type OrderProvider = EntityTransaction;
-	type ShopProvider = EntityRegistry;
+	type ShopProvider = EntityShop;
 	type MaxCidLength = ConstU32<64>;
 }
+
+// 使用 pallet-entity-token 内置的 Null 实现
+pub type TokenKycProvider = pallet_entity_token::pallet::NullKycProvider;
+pub type TokenMemberProvider = pallet_entity_token::pallet::NullMemberProvider;
 
 impl pallet_entity_token::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type AssetId = u64;
 	type AssetBalance = Balance;
 	type Assets = Assets;
-	type ShopProvider = EntityRegistry;
+	type EntityProvider = EntityRegistry;
+	type ShopProvider = EntityShop;
 	type ShopTokenOffset = ConstU64<1_000_000>;  // 店铺代币 ID 从 1,000,000 开始
 	type MaxTokenNameLength = ConstU32<64>;
 	type MaxTokenSymbolLength = ConstU32<8>;
+	type MaxTransferListSize = ConstU32<1000>;
+	type KycProvider = TokenKycProvider;
+	type MemberProvider = TokenMemberProvider;
 }
 
-// Entity Token Provider 实现
-pub struct EntityTokenProvider;
-impl pallet_entity_governance::pallet::ShopTokenProvider<AccountId, Balance> for EntityTokenProvider {
-	fn token_balance(entity_id: u64, holder: &AccountId) -> Balance {
-		pallet_entity_token::Pallet::<Runtime>::get_balance(entity_id, holder)
-	}
-	fn total_supply(entity_id: u64) -> Balance {
-		pallet_entity_token::Pallet::<Runtime>::get_total_supply(entity_id)
-	}
-	fn is_enabled(entity_id: u64) -> bool {
-		pallet_entity_token::Pallet::<Runtime>::is_token_enabled(entity_id)
-	}
-}
+// EntityTokenProvider 使用 EntityToken pallet 直接实现
+pub type EntityTokenProvider = EntityToken;
 
 /// Entity PricingProvider 适配器
 pub struct EntityPricingProvider;
@@ -1437,7 +1451,8 @@ pub type EntityMemberProvider = pallet_entity_commission::NullMemberProvider;
 impl pallet_entity_governance::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type Balance = Balance;
-	type ShopProvider = EntityRegistry;
+	type EntityProvider = EntityRegistry;
+	type ShopProvider = EntityShop;
 	type TokenProvider = EntityTokenProvider;
 	type CommissionProvider = EntityCommissionProvider;
 	type MemberProvider = EntityMemberProvider;
@@ -1455,7 +1470,8 @@ impl pallet_entity_governance::Config for Runtime {
 impl pallet_entity_member::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type Currency = Balances;
-	type ShopProvider = EntityRegistry;
+	type EntityProvider = EntityRegistry;
+	type ShopProvider = EntityShop;
 	type MaxDirectReferrals = ConstU32<1000>;
 	type MaxCustomLevels = ConstU32<10>;
 	type SilverThreshold = ConstU64<100_000_000>;    // 100 USDT
@@ -1469,7 +1485,8 @@ impl pallet_entity_member::Config for Runtime {
 impl pallet_entity_commission::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type Currency = Balances;
-	type ShopProvider = EntityRegistry;
+	type EntityProvider = EntityRegistry;
+	type ShopProvider = EntityShop;
 	type MemberProvider = EntityMemberProvider;
 	type MaxCommissionRecordsPerOrder = ConstU32<20>;
 	type MaxSingleLineLength = ConstU32<50>;
@@ -1477,12 +1494,17 @@ impl pallet_entity_commission::Config for Runtime {
 	type MaxCustomLevels = ConstU32<10>;
 }
 
+parameter_types! {
+	pub MarketTreasuryAccount: AccountId = AccountId::from([0u8; 32]);
+}
+
 impl pallet_entity_market::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type Currency = Balances;
 	type Balance = Balance;
 	type TokenBalance = Balance;
-	type ShopProvider = EntityRegistry;
+	type EntityProvider = EntityRegistry;
+	type ShopProvider = EntityShop;
 	type TokenProvider = EntityToken;
 	type DefaultOrderTTL = ConstU32<{ 7 * 24 * 600 }>;  // 7 天
 	type MaxActiveOrdersPerUser = ConstU32<100>;
@@ -1492,6 +1514,13 @@ impl pallet_entity_market::Config for Runtime {
 	type BlocksPerDay = ConstU32<{ 24 * 600 }>;
 	type BlocksPerWeek = ConstU32<{ 7 * 24 * 600 }>;
 	type CircuitBreakerDuration = ConstU32<600>;  // 1 小时
+	type VerificationReward = ConstU128<{ UNIT / 10 }>;  // 0.1 COS
+	type RewardSource = MarketTreasuryAccount;
+	type BuyerDepositRate = ConstU16<1000>;  // 10%
+	type MinBuyerDeposit = ConstU128<{ UNIT }>;  // 1 COS
+	type DepositForfeitRate = ConstU16<5000>;  // 50%
+	type UsdtToCosRate = ConstU64<100_000>;  // 1 USDT = 0.1 COS
+	type TreasuryAccount = MarketTreasuryAccount;
 }
 
 // ============================================================================

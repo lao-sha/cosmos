@@ -21,7 +21,7 @@ sp-offchain = { workspace = true }
 sp-application-crypto = { workspace = true }
 sp-api = { workspace = true }
 pallet-balances = { workspace = true }
-pallet-trading-common = { path = "../trading/common", default-features = false }
+pallet-trading-common = { path = "../../trading/common", default-features = false }
 ## endowment 下线：移除依赖
 ## pallet-memo-endowment = { path = "../memo-endowment", default-features = false }
 serde = { workspace = true, default-features = false, features = ["derive", "alloc"] }
