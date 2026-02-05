@@ -47,7 +47,7 @@ pub mod pallet {
         BoundedVec,
     };
     use frame_system::pallet_prelude::*;
-    use pallet_entity_common::{DividendConfig, ShopProvider, TokenType};
+    use pallet_entity_common::{DividendConfig, ShopProvider, TokenType, TransferRestrictionMode};
     use sp_runtime::traits::{AtLeast32BitUnsigned, Saturating, Zero};
 
     /// 实体通证配置（原 ShopTokenConfig，Phase 2 扩展）
@@ -74,6 +74,11 @@ pub mod pallet {
         pub max_supply: Balance,
         /// 分红配置
         pub dividend_config: DividendConfig<Balance, BlockNumber>,
+        // ========== Phase 8 新增字段：转账限制 ==========
+        /// 转账限制模式
+        pub transfer_restriction: TransferRestrictionMode,
+        /// 接收方最低 KYC 级别 (0-4)
+        pub min_receiver_kyc: u8,
     }
 
     /// 向后兼容：ShopTokenConfig 类型别名
@@ -123,6 +128,43 @@ pub mod pallet {
         /// 代币符号最大长度
         #[pallet::constant]
         type MaxTokenSymbolLength: Get<u32>;
+
+        /// 白名单/黑名单最大地址数
+        #[pallet::constant]
+        type MaxTransferListSize: Get<u32>;
+
+        /// KYC 查询接口（可选）
+        type KycProvider: KycLevelProvider<Self::AccountId>;
+
+        /// 成员查询接口（可选）
+        type MemberProvider: EntityMemberProvider<Self::AccountId>;
+    }
+
+    /// KYC 级别查询 Trait
+    pub trait KycLevelProvider<AccountId> {
+        /// 获取用户 KYC 级别 (0-4)
+        fn get_kyc_level(account: &AccountId) -> u8;
+        /// 检查是否满足 KYC 要求
+        fn meets_kyc_requirement(account: &AccountId, min_level: u8) -> bool;
+    }
+
+    /// 实体成员查询 Trait
+    pub trait EntityMemberProvider<AccountId> {
+        /// 检查是否为实体成员
+        fn is_member(entity_id: u64, account: &AccountId) -> bool;
+    }
+
+    /// 空 KYC 提供者（默认实现）
+    pub struct NullKycProvider;
+    impl<AccountId> KycLevelProvider<AccountId> for NullKycProvider {
+        fn get_kyc_level(_account: &AccountId) -> u8 { 0 }
+        fn meets_kyc_requirement(_account: &AccountId, min_level: u8) -> bool { min_level == 0 }
+    }
+
+    /// 空成员提供者（默认实现）
+    pub struct NullMemberProvider;
+    impl<AccountId> EntityMemberProvider<AccountId> for NullMemberProvider {
+        fn is_member(_entity_id: u64, _account: &AccountId) -> bool { true }
     }
 
     #[pallet::pallet]
@@ -196,6 +238,30 @@ pub mod pallet {
         Blake2_128Concat,
         T::AccountId,
         T::AssetBalance,
+        ValueQuery,
+    >;
+
+    // ========== Phase 8 新增存储项：转账限制 ==========
+
+    /// 转账白名单 entity_id -> Vec<AccountId>
+    #[pallet::storage]
+    #[pallet::getter(fn transfer_whitelist)]
+    pub type TransferWhitelist<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,  // entity_id
+        BoundedVec<T::AccountId, T::MaxTransferListSize>,
+        ValueQuery,
+    >;
+
+    /// 转账黑名单 entity_id -> Vec<AccountId>
+    #[pallet::storage]
+    #[pallet::getter(fn transfer_blacklist)]
+    pub type TransferBlacklist<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,  // entity_id
+        BoundedVec<T::AccountId, T::MaxTransferListSize>,
         ValueQuery,
     >;
 
@@ -283,6 +349,25 @@ pub mod pallet {
             old_type: TokenType,
             new_type: TokenType,
         },
+        // ========== Phase 8 新增事件：转账限制 ==========
+        /// 转账限制模式已设置
+        TransferRestrictionSet {
+            entity_id: u64,
+            mode: TransferRestrictionMode,
+            min_receiver_kyc: u8,
+        },
+        /// 白名单已更新
+        WhitelistUpdated {
+            entity_id: u64,
+            added: u32,
+            removed: u32,
+        },
+        /// 黑名单已更新
+        BlacklistUpdated {
+            entity_id: u64,
+            added: u32,
+            removed: u32,
+        },
     }
 
     // ==================== 错误 ====================
@@ -334,6 +419,21 @@ pub mod pallet {
         TokenTypeNotSupported,
         /// 不允许该通证类型
         TokenTypeNotAllowed,
+        // ========== Phase 8 新增错误：转账限制 ==========
+        /// 接收方不在白名单
+        ReceiverNotInWhitelist,
+        /// 接收方在黑名单
+        ReceiverInBlacklist,
+        /// 接收方 KYC 级别不足
+        ReceiverKycInsufficient,
+        /// 接收方不是实体成员
+        ReceiverNotMember,
+        /// 白名单/黑名单已满
+        TransferListFull,
+        /// 地址已在列表中
+        AddressAlreadyInList,
+        /// 地址不在列表中
+        AddressNotInList,
     }
 
     // ==================== Extrinsics ====================
@@ -393,6 +493,7 @@ pub mod pallet {
 
             // 保存配置
             let now = <frame_system::Pallet<T>>::block_number();
+            let token_type = TokenType::Points;
             let config = EntityTokenConfig {
                 enabled: true,
                 reward_rate,
@@ -402,7 +503,7 @@ pub mod pallet {
                 transferable: true,
                 created_at: now,
                 // Phase 2 新增字段（默认值）
-                token_type: TokenType::Points,
+                token_type,
                 max_supply: Zero::zero(),  // 0 = 无限制
                 dividend_config: DividendConfig {
                     enabled: false,
@@ -410,6 +511,9 @@ pub mod pallet {
                     last_distribution: Zero::zero(),
                     accumulated: Zero::zero(),
                 },
+                // Phase 8 新增字段（默认值）
+                transfer_restriction: TransferRestrictionMode::from_u8(token_type.default_transfer_restriction()),
+                min_receiver_kyc: token_type.required_kyc_level().1,
             };
             ShopTokenConfigs::<T>::insert(shop_id, config);
             ShopTokenMetadata::<T>::insert(shop_id, (name_bounded, symbol_bounded, decimals));
@@ -522,6 +626,9 @@ pub mod pallet {
             let config = ShopTokenConfigs::<T>::get(shop_id).ok_or(Error::<T>::TokenNotEnabled)?;
             ensure!(config.enabled, Error::<T>::TokenNotEnabled);
             ensure!(config.transferable, Error::<T>::TransferNotAllowed);
+
+            // Phase 8: 检查转账限制
+            Self::check_transfer_restriction(shop_id, &config, &to)?;
 
             // 检查余额
             let asset_id = Self::shop_to_asset_id(shop_id);
@@ -805,6 +912,168 @@ pub mod pallet {
             Self::deposit_event(Event::TokenConfigUpdated { shop_id: entity_id });
             Ok(())
         }
+
+        // ==================== Phase 8 新增 Extrinsics：转账限制 ====================
+
+        /// 设置转账限制模式
+        #[pallet::call_index(11)]
+        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        pub fn set_transfer_restriction(
+            origin: OriginFor<T>,
+            entity_id: u64,
+            mode: TransferRestrictionMode,
+            min_receiver_kyc: u8,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            // 验证所有者
+            let owner = T::ShopProvider::shop_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
+            ensure!(owner == who, Error::<T>::NotShopOwner);
+
+            ShopTokenConfigs::<T>::try_mutate(entity_id, |maybe_config| -> DispatchResult {
+                let config = maybe_config.as_mut().ok_or(Error::<T>::TokenNotEnabled)?;
+                config.transfer_restriction = mode;
+                config.min_receiver_kyc = min_receiver_kyc.min(4); // 0-4
+                Ok(())
+            })?;
+
+            Self::deposit_event(Event::TransferRestrictionSet {
+                entity_id,
+                mode,
+                min_receiver_kyc,
+            });
+            Ok(())
+        }
+
+        /// 添加白名单地址
+        #[pallet::call_index(12)]
+        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        pub fn add_to_whitelist(
+            origin: OriginFor<T>,
+            entity_id: u64,
+            accounts: Vec<T::AccountId>,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            // 验证所有者
+            let owner = T::ShopProvider::shop_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
+            ensure!(owner == who, Error::<T>::NotShopOwner);
+
+            let mut added = 0u32;
+            TransferWhitelist::<T>::try_mutate(entity_id, |list| -> DispatchResult {
+                for account in accounts.iter() {
+                    if !list.contains(account) {
+                        list.try_push(account.clone()).map_err(|_| Error::<T>::TransferListFull)?;
+                        added = added.saturating_add(1);
+                    }
+                }
+                Ok(())
+            })?;
+
+            Self::deposit_event(Event::WhitelistUpdated {
+                entity_id,
+                added,
+                removed: 0,
+            });
+            Ok(())
+        }
+
+        /// 移除白名单地址
+        #[pallet::call_index(13)]
+        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        pub fn remove_from_whitelist(
+            origin: OriginFor<T>,
+            entity_id: u64,
+            accounts: Vec<T::AccountId>,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            // 验证所有者
+            let owner = T::ShopProvider::shop_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
+            ensure!(owner == who, Error::<T>::NotShopOwner);
+
+            let mut removed = 0u32;
+            TransferWhitelist::<T>::mutate(entity_id, |list| {
+                for account in accounts.iter() {
+                    if let Some(pos) = list.iter().position(|x| x == account) {
+                        list.swap_remove(pos);
+                        removed = removed.saturating_add(1);
+                    }
+                }
+            });
+
+            Self::deposit_event(Event::WhitelistUpdated {
+                entity_id,
+                added: 0,
+                removed,
+            });
+            Ok(())
+        }
+
+        /// 添加黑名单地址
+        #[pallet::call_index(14)]
+        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        pub fn add_to_blacklist(
+            origin: OriginFor<T>,
+            entity_id: u64,
+            accounts: Vec<T::AccountId>,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            // 验证所有者
+            let owner = T::ShopProvider::shop_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
+            ensure!(owner == who, Error::<T>::NotShopOwner);
+
+            let mut added = 0u32;
+            TransferBlacklist::<T>::try_mutate(entity_id, |list| -> DispatchResult {
+                for account in accounts.iter() {
+                    if !list.contains(account) {
+                        list.try_push(account.clone()).map_err(|_| Error::<T>::TransferListFull)?;
+                        added = added.saturating_add(1);
+                    }
+                }
+                Ok(())
+            })?;
+
+            Self::deposit_event(Event::BlacklistUpdated {
+                entity_id,
+                added,
+                removed: 0,
+            });
+            Ok(())
+        }
+
+        /// 移除黑名单地址
+        #[pallet::call_index(15)]
+        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        pub fn remove_from_blacklist(
+            origin: OriginFor<T>,
+            entity_id: u64,
+            accounts: Vec<T::AccountId>,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            // 验证所有者
+            let owner = T::ShopProvider::shop_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
+            ensure!(owner == who, Error::<T>::NotShopOwner);
+
+            let mut removed = 0u32;
+            TransferBlacklist::<T>::mutate(entity_id, |list| {
+                for account in accounts.iter() {
+                    if let Some(pos) = list.iter().position(|x| x == account) {
+                        list.swap_remove(pos);
+                        removed = removed.saturating_add(1);
+                    }
+                }
+            });
+
+            Self::deposit_event(Event::BlacklistUpdated {
+                entity_id,
+                added: 0,
+                removed,
+            });
+            Ok(())
+        }
     }
 
     // ==================== 内部函数 ====================
@@ -813,6 +1082,45 @@ pub mod pallet {
         /// 店铺 ID 转资产 ID
         pub fn shop_to_asset_id(shop_id: u64) -> T::AssetId {
             (T::ShopTokenOffset::get() + shop_id).into()
+        }
+
+        /// Phase 8: 检查转账限制
+        fn check_transfer_restriction(
+            entity_id: u64,
+            config: &ShopTokenConfigOf<T>,
+            to: &T::AccountId,
+        ) -> DispatchResult {
+            match config.transfer_restriction {
+                TransferRestrictionMode::None => Ok(()),
+                
+                TransferRestrictionMode::Whitelist => {
+                    let whitelist = TransferWhitelist::<T>::get(entity_id);
+                    ensure!(whitelist.contains(to), Error::<T>::ReceiverNotInWhitelist);
+                    Ok(())
+                }
+                
+                TransferRestrictionMode::Blacklist => {
+                    let blacklist = TransferBlacklist::<T>::get(entity_id);
+                    ensure!(!blacklist.contains(to), Error::<T>::ReceiverInBlacklist);
+                    Ok(())
+                }
+                
+                TransferRestrictionMode::KycRequired => {
+                    ensure!(
+                        T::KycProvider::meets_kyc_requirement(to, config.min_receiver_kyc),
+                        Error::<T>::ReceiverKycInsufficient
+                    );
+                    Ok(())
+                }
+                
+                TransferRestrictionMode::MembersOnly => {
+                    ensure!(
+                        T::MemberProvider::is_member(entity_id, to),
+                        Error::<T>::ReceiverNotMember
+                    );
+                    Ok(())
+                }
+            }
         }
 
         /// 资产 ID 转店铺 ID
@@ -938,7 +1246,7 @@ impl<T: Config> Pallet<T> {
 
 // ==================== ShopTokenProvider 实现 ====================
 
-use pallet_entity_common::ShopTokenProvider;
+use pallet_entity_common::{ShopTokenProvider, TokenType};
 
 impl<T: Config> ShopTokenProvider<T::AccountId, T::AssetBalance> for Pallet<T> {
     fn is_token_enabled(shop_id: u64) -> bool {
@@ -1017,5 +1325,15 @@ impl<T: Config> ShopTokenProvider<T::AccountId, T::AssetBalance> for Pallet<T> {
         // 直接转账（简化实现）
         Self::transfer(shop_id, from, to, amount)?;
         Ok(amount)
+    }
+
+    fn get_token_type(shop_id: u64) -> TokenType {
+        ShopTokenConfigs::<T>::get(shop_id)
+            .map(|c| c.token_type)
+            .unwrap_or_default()
+    }
+
+    fn total_supply(shop_id: u64) -> T::AssetBalance {
+        Pallet::<T>::get_total_supply(shop_id)
     }
 }

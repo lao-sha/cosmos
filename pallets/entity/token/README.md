@@ -367,11 +367,92 @@ cargo test -p pallet-entity-token
 cargo test -p pallet-entity-token test_create_shop_token
 ```
 
-## 📝 版本历史
+## � Phase 8: 转账限制与 KYC 集成
+
+### 转账限制模式 (TransferRestrictionMode)
+
+| 模式 | 说明 |
+|------|------|
+| `None` | 无限制（默认） |
+| `Whitelist` | 只能转给白名单地址 |
+| `Blacklist` | 禁止转给黑名单地址 |
+| `KycRequired` | 接收方需满足 KYC 要求 |
+| `MembersOnly` | 只能在实体成员间转账 |
+
+### 代币类型默认限制
+
+| TokenType | 转账模式 | 接收方 KYC |
+|-----------|---------|-----------|
+| Points | None | None |
+| Membership | MembersOnly | Basic |
+| Governance | KycRequired | Standard |
+| Share/Bond | KycRequired | Standard |
+| Equity | Whitelist | Enhanced |
+
+### 新增 Extrinsics
+
+#### set_transfer_restriction
+
+设置转账限制模式。
+
+```rust
+fn set_transfer_restriction(
+    origin: OriginFor<T>,
+    entity_id: u64,
+    mode: TransferRestrictionMode,
+    min_receiver_kyc: u8,
+) -> DispatchResult
+```
+
+#### add_to_whitelist / remove_from_whitelist
+
+管理转账白名单。
+
+```rust
+fn add_to_whitelist(
+    origin: OriginFor<T>,
+    entity_id: u64,
+    accounts: Vec<T::AccountId>,
+) -> DispatchResult
+```
+
+#### add_to_blacklist / remove_from_blacklist
+
+管理转账黑名单。
+
+```rust
+fn add_to_blacklist(
+    origin: OriginFor<T>,
+    entity_id: u64,
+    accounts: Vec<T::AccountId>,
+) -> DispatchResult
+```
+
+### 新增 Events
+
+| 事件 | 说明 |
+|------|------|
+| `TransferRestrictionSet` | 转账限制模式已设置 |
+| `WhitelistUpdated` | 白名单已更新 |
+| `BlacklistUpdated` | 黑名单已更新 |
+
+### 新增 Errors
+
+| 错误 | 说明 |
+|------|------|
+| `ReceiverNotInWhitelist` | 接收方不在白名单 |
+| `ReceiverInBlacklist` | 接收方在黑名单 |
+| `ReceiverKycInsufficient` | 接收方 KYC 级别不足 |
+| `ReceiverNotMember` | 接收方不是实体成员 |
+| `TransferListFull` | 白名单/黑名单已满 |
+
+## �📝 版本历史
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
 | v0.1.0 | 2026-01-31 | 初始版本 |
+| v0.2.0 | 2026-02-03 | Phase 2: 多种通证类型和分红 |
+| v0.3.0 | 2026-02-04 | Phase 8: 转账限制与 KYC 集成 |
 
 ## 📄 许可证
 

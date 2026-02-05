@@ -458,6 +458,8 @@ pub mod pallet {
         fn total_supply(shop_id: u64) -> Balance;
         /// 检查店铺代币是否启用
         fn is_enabled(shop_id: u64) -> bool;
+        /// Phase 8: 获取代币类型
+        fn get_token_type(shop_id: u64) -> TokenType;
     }
 
     #[pallet::pallet]
@@ -788,6 +790,10 @@ pub mod pallet {
                 !VoteRecords::<T>::contains_key(proposal_id, &who),
                 Error::<T>::AlreadyVoted
             );
+
+            // Phase 8: 检查代币类型是否具有投票权
+            let token_type = T::TokenProvider::get_token_type(proposal.shop_id);
+            ensure!(token_type.has_voting_power(), Error::<T>::TokenTypeNoVotingPower);
 
             // P1 安全修复: 使用快照机制防止闪电贷攻击
             // 检查用户是否在提案创建前就持有代币

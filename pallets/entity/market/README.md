@@ -47,29 +47,160 @@
 │                    USDT 通道交易流程                             │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│   流程 A: 吃 USDT 卖单                                          │
+│   流程 A: 吃 USDT 卖单（两阶段安全模式）🆕                      │
 │   ┌─────────────────────────────────────────────────────────┐  │
 │   │  1. Alice 挂 USDT 卖单 (锁定 Token, 提供 TRON 地址)      │  │
-│   │  2. Bob 链下转 USDT → Alice 的 TRON 地址                 │  │
-│   │  3. Bob 调用 take_usdt_sell_order (提交 tx_hash)        │  │
-│   │  4. OCW 验证 TRON 交易                                   │  │
-│   │  5. 验证通过 → Token 转给 Bob                            │  │
-│   │  6. 验证失败 → Token 退还 Alice                          │  │
-│   └─────────────────────────────────────────────────────────┘  │
-│                                                                 │
-│   流程 B: 接受 USDT 买单                                        │
-│   ┌─────────────────────────────────────────────────────────┐  │
-│   │  1. Bob 挂 USDT 买单                                     │  │
-│   │  2. Alice 调用 accept_usdt_buy_order (锁定 Token)       │  │
+│   │  2. Bob 调用 reserve_usdt_sell_order (预锁定)           │  │
+│   │     ├── 锁定 Bob 的 COS 保证金                           │  │
+│   │     └── 锁定订单份额 (防止他人抢占)                      │  │
 │   │  3. Bob 链下转 USDT → Alice 的 TRON 地址                 │  │
 │   │  4. Bob 调用 confirm_usdt_payment (提交 tx_hash)        │  │
-│   │  5. OCW 验证 TRON 交易                                   │  │
-│   │  6. 验证通过 → Token 转给 Bob                            │  │
-│   │  7. 超时未支付 → Token 退还 Alice                        │  │
+│   │  5. OCW 验证 TRON 交易 + 金额多档判定                    │  │
+│   │  6. 结果处理:                                            │  │
+│   │     ├── 全额付款 → Token 全部转 Bob, 退还保证金          │  │
+│   │     ├── 少付 → 按比例分配 Token, 保证金全归国库          │  │
+│   │     └── 超时 → Token 退 Alice, 保证金归国库              │  │
+│   └─────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│   流程 B: 接受 USDT 买单（含买家保证金 + 多档判定）🆕            │
+│   ┌─────────────────────────────────────────────────────────┐  │
+│   │  1. Bob 挂 USDT 买单                                     │  │
+│   │  2. Alice 调用 accept_usdt_buy_order                    │  │
+│   │     ├── 锁定 Bob 的 COS 保证金                           │  │
+│   │     └── 锁定 Alice 的 Token                              │  │
+│   │  3. Bob 链下转 USDT → Alice 的 TRON 地址                 │  │
+│   │  4. Bob 调用 confirm_usdt_payment (提交 tx_hash)        │  │
+│   │  5. OCW 验证 TRON 交易 + 金额多档判定                    │  │
+│   │  6. 结果处理:                                            │  │
+│   │     ├── 全额付款 → Token 全部转 Bob, 退还保证金          │  │
+│   │     ├── 少付 → 按比例分配 Token, 保证金全归国库          │  │
+│   │     └── 超时 → Token 退 Alice, 保证金归国库              │  │
 │   └─────────────────────────────────────────────────────────┘  │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+### 3. OCW 验证激励机制 🆕
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    OCW 验证激励流程                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   1. offchain_worker 每区块执行                                 │
+│      └── 检查 PendingUsdtTrades 队列                           │
+│                     │                                           │
+│                     ▼                                           │
+│   2. 调用 TronGrid API 验证 TRC20 交易                          │
+│      ├── 多端点故障转移 + 健康评分                              │
+│      └── 🆕 获取实际付款金额 (actual_amount)                    │
+│                     │                                           │
+│                     ▼                                           │
+│   3. submit_ocw_result (无签名交易)                             │
+│      ├── ValidateUnsigned 验证                                  │
+│      ├── 🆕 计算多档判定结果 (PaymentVerificationResult)        │
+│      └── 存储 (判定结果, 实际金额) 到 OcwVerificationResults    │
+│                     │                                           │
+│                     ▼                                           │
+│   4. 任何人调用 claim_verification_reward                       │
+│      ├── 读取 OcwVerificationResults                            │
+│      ├── 🆕 根据判定结果执行不同处理逻辑                        │
+│      │     ├── Exact/Overpaid → 全额释放                        │
+│      │     └── Underpaid/SeverelyUnderpaid/Invalid → 按比例处理 │
+│      ├── 支付 VerificationReward 给调用者                       │
+│      └── 清理存储                                               │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**安全机制**：
+- `submit_ocw_result` 通过 `ValidateUnsigned` 验证
+- 只有 `AwaitingVerification` 状态的交易可提交
+- 防止重复提交（已有结果则拒绝）
+- `claim_verification_reward` 根据链上 OCW 结果自动处理
+
+### 4. 买家保证金机制 🆕
+
+防止 USDT 买单场景下买家不付款的风险。
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    买家保证金流程                                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   保证金计算公式:                                               │
+│   deposit = max(MinBuyerDeposit, USDT金额 × DepositRate × Rate) │
+│                                                                 │
+│   ┌──────────────────────────────────────────────────────────┐ │
+│   │  卖家接受买单 (accept_usdt_buy_order)                     │ │
+│   │       │                                                   │ │
+│   │       ├── 计算保证金金额                                  │ │
+│   │       ├── 锁定买家 COS (T::Currency::reserve)            │ │
+│   │       └── 锁定卖家 Token                                  │ │
+│   │       │                                                   │ │
+│   │       ▼                                                   │ │
+│   │  等待买家链下打款...                                      │ │
+│   │       │                                                   │ │
+│   │       ├──────────────┬─────────────────┐                 │ │
+│   │       │              │                 │                 │ │
+│   │       ▼              ▼                 ▼                 │ │
+│   │   验证通过        验证失败          超时未付款           │ │
+│   │       │              │                 │                 │ │
+│   │       ▼              ▼                 ▼                 │ │
+│   │   退还保证金      退还保证金      没收保证金→卖家        │ │
+│   │   Token→买家      Token→卖家      Token→卖家             │ │
+│   └──────────────────────────────────────────────────────────┘ │
+│                                                                 │
+│   保证金状态: None → Locked → Released / PartiallyForfeited / Forfeited │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**设计要点**：
+- 适用于 **流程 A（吃 USDT 卖单）** 和 **流程 B（接受 USDT 买单）**
+- 保证金为 COS，非店铺代币，价值稳定
+- 没收比例可配置（`DepositForfeitRate`），支持部分没收
+- 验证失败时保证金退还（可能是 OCW 验证错误）
+- 超时时保证金全部归国库（买家未付款或提交假 tx_hash）
+
+### 5. 付款金额多档判定 🆕
+
+防止买家少付 USDT 的诈骗行为，自动按比例处理。
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    金额多档判定机制                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   OCW 验证后计算付款比例:                                       │
+│                                                                 │
+│   ┌──────────────────────────────────────────────────────────┐ │
+│   │  实际金额 / 期望金额                                      │ │
+│   │       │                                                   │ │
+│   │       ├── ≥ 100.5%  → Overpaid     → ✅ 全额释放          │ │
+│   │       ├── 99.5%-100.5% → Exact     → ✅ 全额释放          │ │
+│   │       ├── 50%-99.5% → Underpaid    → ⚠️ 按比例自动处理   │ │
+│   │       ├── < 50%     → SeverelyUnderpaid → ⚠️ 按比例自动处理│ │
+│   │       └── = 0       → Invalid      → ⚠️ 按比例自动处理   │ │
+│   └──────────────────────────────────────────────────────────┘ │
+│                                                                 │
+│   Underpaid 自动处理逻辑:                                       │
+│   ┌──────────────────────────────────────────────────────────┐ │
+│   │  例: 期望 100 USDT，实际 80 USDT (80%)                    │ │
+│   │       │                                                   │ │
+│   │       ├── Token: 80% 释放给买家，20% 退还卖家             │ │
+│   │       └── 保证金: 全部归国库 🆕                           │ │
+│   └──────────────────────────────────────────────────────────┘ │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**设计要点**：
+- ±0.5% 容差处理汇率波动和手续费
+- **所有少付情况 Token 按比例自动处理**，无需人工仲裁
+- 买家获得与付款比例相等的 Token
+- **少付/超时/无效时，保证金全部归国库** 🆕
+- 只有全额付款时，保证金才退还买家
 
 ## 数据结构
 
@@ -100,6 +231,36 @@ pub struct TradeOrder<T: Config> {
 | `Filled` | 完全成交 |
 | `Cancelled` | 已取消 |
 | `Expired` | 已过期 |
+
+### 买家保证金状态 (BuyerDepositStatus) 🆕
+
+| 状态 | 说明 |
+|------|------|
+| `None` | 无保证金（流程 A 或零保证金） |
+| `Locked` | 已锁定（等待交易完成） |
+| `Released` | 已退还（交易完成或验证失败） |
+| `Forfeited` | 已没收（超时未付款） |
+| `PartiallyForfeited` | 部分没收（少付场景）🆕 |
+
+### 付款验证结果 (PaymentVerificationResult) 🆕
+
+| 状态 | 说明 |
+|------|------|
+| `Exact` | 验证通过（99.5%-100.5%） |
+| `Overpaid` | 多付（≥100.5%） |
+| `Underpaid` | 少付（50%-99.5%）→ 按比例处理 |
+| `SeverelyUnderpaid` | 严重少付（<50%）→ 按比例处理 |
+| `Invalid` | 无效（0 或交易失败）→ 按比例处理 |
+
+### USDT 交易 (UsdtTrade) 🆕扩展
+
+```rust
+pub struct UsdtTrade<T: Config> {
+    // ... 原有字段 ...
+    pub buyer_deposit: BalanceOf<T>,      // 🆕 买家保证金金额（COS）
+    pub deposit_status: BuyerDepositStatus, // 🆕 保证金状态
+}
+```
 
 ### 市场配置 (MarketConfig)
 
@@ -195,18 +356,19 @@ fn place_usdt_buy_order(
 ) -> DispatchResult;
 ```
 
-#### 7. `take_usdt_sell_order`
+#### 7. `reserve_usdt_sell_order` 🆕
 
-吃 USDT 卖单（买家发起，提交已支付的 TRON 交易哈希）
+预锁定 USDT 卖单（买家发起，两阶段安全模式）
 
 ```rust
-fn take_usdt_sell_order(
+fn reserve_usdt_sell_order(
     origin: OriginFor<T>,
     order_id: u64,
     amount: Option<TokenBalance>,
-    tron_tx_hash: Vec<u8>,     // 64 字符 hex
 ) -> DispatchResult;
 ```
+
+> **注意**: 买家先调用此函数锁定订单份额和保证金，然后链下支付 USDT，最后调用 `confirm_usdt_payment` 提交 tx_hash。
 
 #### 8. `accept_usdt_buy_order`
 
@@ -235,7 +397,7 @@ fn confirm_usdt_payment(
 
 #### 10. `verify_usdt_payment`
 
-OCW 验证 USDT 支付结果
+OCW 验证 USDT 支付结果（已废弃，使用 `claim_verification_reward` 替代）
 
 ```rust
 fn verify_usdt_payment(
@@ -256,6 +418,37 @@ fn process_usdt_timeout(
     trade_id: u64,
 ) -> DispatchResult;
 ```
+
+### OCW 激励机制 🆕
+
+#### 18. `submit_ocw_result`
+
+OCW 提交验证结果（无签名交易）
+
+```rust
+fn submit_ocw_result(
+    origin: OriginFor<T>,
+    trade_id: u64,
+    verified: bool,
+    actual_amount: u64,
+) -> DispatchResult;
+```
+
+#### 19. `claim_verification_reward`
+
+领取验证奖励（任何人可调用）
+
+```rust
+fn claim_verification_reward(
+    origin: OriginFor<T>,
+    trade_id: u64,
+) -> DispatchResult;
+```
+
+**激励机制说明**：
+- OCW 验证完成后，通过 `submit_ocw_result` 提交结果到链上
+- 任何人可调用 `claim_verification_reward` 确认验证并获取奖励
+- 奖励金额由 `VerificationReward` 配置，从 `RewardSource` 账户支付
 
 ### 市价单
 
@@ -319,6 +512,12 @@ fn configure_market(
 | `UsdtTradeCompleted` | USDT 交易已完成 |
 | `UsdtTradeVerificationFailed` | USDT 交易验证失败 |
 | `UsdtTradeRefunded` | USDT 交易已超时退款 |
+| `VerificationRewardClaimed` | 验证奖励已领取 |
+| `OcwResultSubmitted` | OCW 验证结果已提交 |
+| `BuyerDepositLocked` | 买家保证金已锁定 🆕 |
+| `BuyerDepositReleased` | 买家保证金已退还 🆕 |
+| `BuyerDepositForfeited` | 买家保证金已没收 🆕 |
+| `UnderpaidAutoProcessed` | 少付自动处理（按比例释放）🆕 |
 | `MarketOrderExecuted` | 市价单已执行 |
 | `BestPricesUpdated` | 最优价格已更新 |
 | `TwapUpdated` | TWAP 价格已更新 |
@@ -352,7 +551,9 @@ fn configure_market(
 | `SlippageExceeded` | 滑点超限 |
 | `PriceDeviationTooHigh` | 价格偏离 TWAP 过大 |
 | `MarketCircuitBreakerActive` | 市场处于熔断状态 |
+| `OcwResultNotFound` | OCW 验证结果不存在 |
 | `InsufficientTwapData` | TWAP 数据不足 |
+| `InsufficientDepositBalance` | 买家保证金余额不足 🆕 |
 
 ## 存储项
 
@@ -368,6 +569,7 @@ fn configure_market(
 | `NextUsdtTradeId` | 下一个 USDT 交易 ID |
 | `UsdtTrades` | USDT 交易记录存储 |
 | `PendingUsdtTrades` | 待验证的 USDT 交易列表 |
+| `OcwVerificationResults` | OCW 验证结果存储 🆕 |
 | `BestAsk` | 店铺最优卖价 |
 | `BestBid` | 店铺最优买价 |
 | `LastTradePrice` | 店铺最新成交价 |
@@ -387,6 +589,13 @@ fn configure_market(
 | `BlocksPerDay` | 24小时对应区块数 | 14400 区块 |
 | `BlocksPerWeek` | 7天对应区块数 | 100800 区块 |
 | `CircuitBreakerDuration` | 熔断持续时间 | 600 区块（约1小时） |
+| `VerificationReward` | 验证奖励金额 | 0.1 COS |
+| `RewardSource` | 奖励来源账户 | 财库账户 |
+| `BuyerDepositRate` | 买家保证金比例（bps） | 1000（10%）🆕 |
+| `MinBuyerDeposit` | 最低买家保证金 | 10 COS 🆕 |
+| `DepositForfeitRate` | 保证金没收比例（bps） | 10000（100%）🆕 |
+| `UsdtToCosRate` | USDT→COS 汇率（精度 10^9） | 10_000_000_000 🆕 |
+| `TreasuryAccount` | 国库账户（没收保证金归入）| 系统财库 🆕 |
 
 ## 使用示例
 
@@ -442,17 +651,27 @@ EntityMarket::place_usdt_sell_order(
 )?;
 ```
 
-### 5. USDT 通道 - 吃卖单
+### 5. USDT 通道 - 吃卖单（两阶段安全模式）🆕
 
 ```rust
-// Bob 先链下转 USDT 到 Alice 的 TRON 地址，然后提交交易哈希
-EntityMarket::take_usdt_sell_order(
+// 步骤 1: Bob 预锁定订单（锁定保证金 + 订单份额）
+EntityMarket::reserve_usdt_sell_order(
     Origin::signed(bob),
     order_id,
     None,                                           // amount (全部)
+)?;
+
+// 步骤 2: Bob 链下转 USDT 到 Alice 的 TRON 地址
+// (链下操作，获得 tron_tx_hash)
+
+// 步骤 3: Bob 提交交易哈希
+EntityMarket::confirm_usdt_payment(
+    Origin::signed(bob),
+    trade_id,
     b"abc123...".to_vec(),                         // tron_tx_hash (64 字符)
 )?;
-// 等待 OCW 验证...
+
+// 步骤 4: 等待 OCW 验证 + 任何人调用 claim_verification_reward
 ```
 
 ### 6. USDT 通道 - 接受买单
@@ -601,6 +820,9 @@ EntityMarket::set_initial_price(
 - **v0.3.0** (2026-02-01): Phase 3，实现市价单支持
 - **v0.4.0** (2026-02-01): Phase 4，实现订单簿深度优化
 - **v0.5.0** (2026-02-01): Phase 5，实现三周期 TWAP 价格预言机
+- **v0.6.0** (2026-02-04): Phase 6，实现 OCW 验证激励机制 + ValidateUnsigned
+- **v0.7.0** (2026-02-04): Phase 7，实现买家保证金机制（固定比例 COS 保证金）
+- **v0.8.0** (2026-02-04): Phase 8，实现付款金额多档判定 + 自动按比例处理
 
 ## 后续计划
 
@@ -609,3 +831,6 @@ EntityMarket::set_initial_price(
 - [x] Phase 3: 市价单支持 ✅
 - [x] Phase 4: 订单簿深度优化 ✅
 - [x] Phase 5: 价格预言机集成 ✅
+- [x] Phase 6: OCW 验证激励机制 ✅
+- [x] Phase 7: 买家保证金机制 ✅
+- [x] Phase 8: 付款金额多档判定 ✅

@@ -30,6 +30,8 @@ mod mock;
 #[cfg(test)]
 mod tests;
 
+pub mod ocw;
+
 #[frame_support::pallet]
 pub mod pallet {
     use super::*;
@@ -41,7 +43,11 @@ pub mod pallet {
     };
     use frame_system::pallet_prelude::*;
     use pallet_entity_common::{ShopProvider, ShopTokenProvider};
-    use sp_runtime::traits::{CheckedAdd, CheckedMul, CheckedSub, Saturating, SaturatedConversion, Zero};
+    use sp_runtime::traits::{CheckedAdd, CheckedMul, CheckedSub, Saturating, Zero};
+    use sp_runtime::SaturatedConversion;
+    use sp_runtime::transaction_validity::{
+        InvalidTransaction, TransactionSource, TransactionValidity, ValidTransaction,
+    };
 
     /// Balance 类型别名
     pub type BalanceOf<T> = <T as Config>::Balance;
@@ -106,6 +112,37 @@ pub mod pallet {
         Cancelled,
         /// 已退款（超时）
         Refunded,
+    }
+
+    /// 🆕 买家保证金状态
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    pub enum BuyerDepositStatus {
+        /// 无保证金
+        #[default]
+        None,
+        /// 已锁定
+        Locked,
+        /// 已退还（交易完成）
+        Released,
+        /// 已没收（超时/违约）
+        Forfeited,
+        /// 🆕 部分没收（少付场景）
+        PartiallyForfeited,
+    }
+
+    /// 🆕 付款金额验证结果（多档判定）
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    pub enum PaymentVerificationResult {
+        /// 验证通过（≥99.5%）
+        Exact,
+        /// 多付（≥100.5%）
+        Overpaid,
+        /// 少付（50%-99.5%）→ 按比例处理
+        Underpaid,
+        /// 严重少付（<50%）→ 验证失败
+        SeverelyUnderpaid,
+        /// 无效（0 或交易失败）
+        Invalid,
     }
 
     /// TRON 地址类型（34 字节 Base58）
@@ -177,6 +214,10 @@ pub mod pallet {
         pub created_at: BlockNumberFor<T>,
         /// 超时区块
         pub timeout_at: BlockNumberFor<T>,
+        /// 🆕 买家保证金金额（COS）
+        pub buyer_deposit: BalanceOf<T>,
+        /// 🆕 保证金状态
+        pub deposit_status: BuyerDepositStatus,
     }
 
     /// 店铺市场配置
@@ -430,10 +471,75 @@ pub mod pallet {
         /// 熔断持续时间（区块数，默认 600 = 1小时）
         #[pallet::constant]
         type CircuitBreakerDuration: Get<u32>;
+
+        /// 验证确认奖励（激励任何人调用 claim_verification_reward）
+        /// 默认 0.1 COS
+        #[pallet::constant]
+        type VerificationReward: Get<BalanceOf<Self>>;
+
+        /// 奖励来源账户（通常是店铺账户或财库）
+        type RewardSource: Get<Self::AccountId>;
+
+        // ==================== 🆕 买家保证金配置 ====================
+
+        /// 买家保证金比例（bps，1000 = 10%）
+        /// USDT 金额 × 此比例 = 需锁定的 COS 保证金
+        #[pallet::constant]
+        type BuyerDepositRate: Get<u16>;
+
+        /// 最低买家保证金金额（COS）
+        /// 保证金 = max(MinBuyerDeposit, usdt_amount × BuyerDepositRate)
+        #[pallet::constant]
+        type MinBuyerDeposit: Get<BalanceOf<Self>>;
+
+        /// 保证金没收比例（bps，10000 = 100%）
+        /// 超时时没收的保证金比例，剩余退还买家
+        #[pallet::constant]
+        type DepositForfeitRate: Get<u16>;
+
+        /// USDT 转 COS 价格（精度 10^6，用于保证金计算）
+        /// 例如：100_000 表示 1 USDT = 0.1 COS
+        /// 实际应从 pricing 模块获取，这里简化为常量
+        #[pallet::constant]
+        type UsdtToCosRate: Get<u64>;
+
+        /// 🆕 国库账户（没收的保证金归入国库）
+        type TreasuryAccount: Get<Self::AccountId>;
     }
 
     #[pallet::pallet]
     pub struct Pallet<T>(_);
+
+    // ==================== Hooks ====================
+
+    #[pallet::hooks]
+    impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+        /// OCW: 自动验证待处理的 USDT 交易
+        fn offchain_worker(block_number: BlockNumberFor<T>) {
+            log::info!(target: "entity-market-ocw", 
+                "Running offchain worker at block {:?}", block_number);
+
+            // 获取待验证队列
+            let pending = PendingUsdtTrades::<T>::get();
+            
+            if pending.is_empty() {
+                return;
+            }
+
+            log::info!(target: "entity-market-ocw", 
+                "Processing {} pending USDT trades", pending.len());
+
+            for trade_id in pending.iter() {
+                if let Some(trade) = UsdtTrades::<T>::get(trade_id) {
+                    if trade.status == UsdtTradeStatus::AwaitingVerification {
+                        if let Some(ref tx_hash) = trade.tron_tx_hash {
+                            Self::process_verification(*trade_id, &trade, tx_hash.as_slice());
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // ==================== 存储项 ====================
 
@@ -506,6 +612,24 @@ pub mod pallet {
     #[pallet::storage]
     #[pallet::getter(fn pending_usdt_trades)]
     pub type PendingUsdtTrades<T: Config> = StorageValue<_, BoundedVec<u64, ConstU32<100>>, ValueQuery>;
+
+    /// OCW 验证结果（链上存储，用于 claim_verification_reward）
+    /// 
+    /// ## 安全说明
+    /// - OCW 通过 submit_ocw_result 提交验证结果
+    /// - claim_verification_reward 必须匹配此存储的结果
+    /// - 防止伪造验证结果
+    /// 
+    /// 🆕 存储格式: (PaymentVerificationResult, actual_amount)
+    #[pallet::storage]
+    #[pallet::getter(fn ocw_verification_results)]
+    pub type OcwVerificationResults<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        u64,  // trade_id
+        (PaymentVerificationResult, u64),  // 🆕 (验证结果, 实际金额)
+        OptionQuery,
+    >;
 
     // ==================== Phase 4: 订单簿深度存储 ====================
 
@@ -668,6 +792,46 @@ pub mod pallet {
             shop_id: u64,
             initial_price: BalanceOf<T>,
         },
+        /// 验证奖励已领取
+        VerificationRewardClaimed {
+            trade_id: u64,
+            claimer: T::AccountId,
+            reward: BalanceOf<T>,
+        },
+        /// OCW 验证结果已提交（🆕 多档判定）
+        OcwResultSubmitted {
+            trade_id: u64,
+            verification_result: PaymentVerificationResult,
+            actual_amount: u64,
+        },
+        /// 🆕 少付自动处理（按比例释放）
+        UnderpaidAutoProcessed {
+            trade_id: u64,
+            expected_amount: u64,
+            actual_amount: u64,
+            payment_ratio: u16,  // 实际付款比例 (bps)
+            token_released: T::TokenBalance,
+            deposit_forfeited: BalanceOf<T>,
+        },
+        /// 🆕 买家保证金已锁定
+        BuyerDepositLocked {
+            trade_id: u64,
+            buyer: T::AccountId,
+            deposit: BalanceOf<T>,
+        },
+        /// 🆕 买家保证金已退还
+        BuyerDepositReleased {
+            trade_id: u64,
+            buyer: T::AccountId,
+            deposit: BalanceOf<T>,
+        },
+        /// 🆕 买家保证金已没收（归入国库）
+        BuyerDepositForfeited {
+            trade_id: u64,
+            buyer: T::AccountId,
+            forfeited: BalanceOf<T>,
+            to_treasury: BalanceOf<T>,
+        },
     }
 
     // ==================== 错误 ====================
@@ -734,8 +898,12 @@ pub mod pallet {
         PriceDeviationTooHigh,
         /// 市场处于熔断状态
         MarketCircuitBreakerActive,
+        /// OCW 验证结果不存在
+        OcwResultNotFound,
         /// TWAP 数据不足
         InsufficientTwapData,
+        /// 🆕 买家保证金余额不足
+        InsufficientDepositBalance,
     }
 
     // ==================== Extrinsics ====================
@@ -1354,19 +1522,24 @@ pub mod pallet {
             Ok(())
         }
 
-        /// 吃 USDT 卖单（买家发起，提交已支付的 TRON 交易哈希）
+        /// 预锁定 USDT 卖单（买家发起）🆕
         ///
-        /// # 流程
-        /// 1. 买家链下转 USDT 到卖家 TRON 地址
-        /// 2. 买家调用此函数提交交易哈希
-        /// 3. 创建 USDT 交易记录，等待 OCW 验证
+        /// # 流程（两阶段安全模式）
+        /// 1. 买家调用此函数预锁定订单份额
+        /// 2. 锁定买家的 COS 保证金
+        /// 3. 锁定订单对应的 Token 份额
+        /// 4. 创建 UsdtTrade (status: AwaitingPayment)
+        /// 5. 买家链下支付 USDT
+        /// 6. 买家调用 confirm_usdt_payment 提交 tx_hash
+        ///
+        /// # 安全
+        /// 先链上锁定，后链下支付，避免多人同时支付的并发问题
         #[pallet::call_index(7)]
         #[pallet::weight(Weight::from_parts(100_000, 0))]
-        pub fn take_usdt_sell_order(
+        pub fn reserve_usdt_sell_order(
             origin: OriginFor<T>,
             order_id: u64,
             amount: Option<T::TokenBalance>,
-            tron_tx_hash: Vec<u8>,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -1381,10 +1554,6 @@ pub mod pallet {
                 Error::<T>::OrderClosed
             );
             ensure!(order.maker != who, Error::<T>::CannotTakeOwnOrder);
-
-            // 验证交易哈希格式（64 字符 hex）
-            ensure!(tron_tx_hash.len() == 64, Error::<T>::InvalidTxHash);
-            let tx_hash: TronTxHash = tron_tx_hash.try_into().map_err(|_| Error::<T>::InvalidTxHash)?;
 
             // 计算成交数量
             let available = order.token_amount.checked_sub(&order.filled_amount)
@@ -1402,8 +1571,16 @@ pub mod pallet {
             let seller_tron_address = order.tron_address.clone()
                 .ok_or(Error::<T>::InvalidTronAddress)?;
 
-            // 创建 USDT 交易记录
-            let trade_id = Self::do_create_usdt_trade(
+            // 计算并锁定买家保证金
+            let buyer_deposit = Self::calculate_buyer_deposit(usdt_amount);
+            if !buyer_deposit.is_zero() {
+                let buyer_balance = T::Currency::free_balance(&who);
+                ensure!(buyer_balance >= buyer_deposit, Error::<T>::InsufficientDepositBalance);
+                T::Currency::reserve(&who, buyer_deposit)?;
+            }
+
+            // 创建 USDT 交易记录（含保证金信息，状态为 AwaitingPayment）
+            let trade_id = Self::do_create_usdt_trade_with_deposit(
                 order_id,
                 order.shop_id,
                 order.maker.clone(),
@@ -1411,20 +1588,10 @@ pub mod pallet {
                 fill_amount,
                 usdt_amount,
                 seller_tron_address,
+                buyer_deposit,
             )?;
 
-            // 更新交易记录，添加交易哈希，状态改为等待验证
-            UsdtTrades::<T>::mutate(trade_id, |maybe_trade| {
-                if let Some(trade) = maybe_trade {
-                    trade.tron_tx_hash = Some(tx_hash.clone());
-                    trade.status = UsdtTradeStatus::AwaitingVerification;
-                }
-            });
-
-            // 添加到待验证队列
-            PendingUsdtTrades::<T>::try_mutate(|pending| {
-                pending.try_push(trade_id).map_err(|_| Error::<T>::PendingQueueFull)
-            })?;
+            // 注意：状态保持为 AwaitingPayment，等待买家支付后调用 confirm_usdt_payment
 
             // 更新订单已成交数量（Token 仍锁定，等待验证通过后释放）
             order.filled_amount = order.filled_amount.checked_add(&fill_amount)
@@ -1439,16 +1606,20 @@ pub mod pallet {
             Self::deposit_event(Event::UsdtTradeCreated {
                 trade_id,
                 order_id,
-                seller: order.maker,
-                buyer: who,
+                seller: order.maker.clone(),
+                buyer: who.clone(),
                 token_amount: fill_amount,
                 usdt_amount,
             });
 
-            Self::deposit_event(Event::UsdtPaymentSubmitted {
-                trade_id,
-                tron_tx_hash: tx_hash,
-            });
+            // 发出保证金锁定事件
+            if !buyer_deposit.is_zero() {
+                Self::deposit_event(Event::BuyerDepositLocked {
+                    trade_id,
+                    buyer: who,
+                    deposit: buyer_deposit,
+                });
+            }
 
             Ok(())
         }
@@ -1457,8 +1628,9 @@ pub mod pallet {
         ///
         /// # 流程
         /// 1. 卖家看到买单，调用此函数接受
-        /// 2. 锁定卖家的 Token
-        /// 3. 创建 USDT 交易记录，等待买家支付
+        /// 2. 🆕 锁定买家的 COS 保证金
+        /// 3. 锁定卖家的 Token
+        /// 4. 创建 USDT 交易记录，等待买家支付
         #[pallet::call_index(8)]
         #[pallet::weight(Weight::from_parts(100_000, 0))]
         pub fn accept_usdt_buy_order(
@@ -1471,6 +1643,7 @@ pub mod pallet {
 
             // 获取订单
             let mut order = Orders::<T>::get(order_id).ok_or(Error::<T>::OrderNotFound)?;
+            let buyer = order.maker.clone();
 
             // 验证订单
             ensure!(order.channel == PaymentChannel::USDT, Error::<T>::ChannelMismatch);
@@ -1479,7 +1652,7 @@ pub mod pallet {
                 order.status == OrderStatus::Open || order.status == OrderStatus::PartiallyFilled,
                 Error::<T>::OrderClosed
             );
-            ensure!(order.maker != who, Error::<T>::CannotTakeOwnOrder);
+            ensure!(buyer != who, Error::<T>::CannotTakeOwnOrder);
 
             // 验证 TRON 地址
             ensure!(tron_address.len() == 34, Error::<T>::InvalidTronAddress);
@@ -1492,26 +1665,37 @@ pub mod pallet {
             let fill_amount = amount.unwrap_or(available).min(available);
             ensure!(!fill_amount.is_zero(), Error::<T>::AmountTooSmall);
 
-            // 检查卖家 Token 余额并锁定
-            let seller_balance = T::TokenProvider::token_balance(order.shop_id, &who);
-            ensure!(seller_balance >= fill_amount, Error::<T>::InsufficientTokenBalance);
-            T::TokenProvider::reserve(order.shop_id, &who, fill_amount)?;
-
             // 计算 USDT 金额
             let fill_u128: u128 = fill_amount.into();
             let usdt_amount = fill_u128
                 .checked_mul(order.usdt_price as u128)
                 .ok_or(Error::<T>::ArithmeticOverflow)? as u64;
 
-            // 创建 USDT 交易记录（等待买家支付）
-            let trade_id = Self::do_create_usdt_trade(
+            // 🆕 计算并锁定买家保证金
+            let buyer_deposit = Self::calculate_buyer_deposit(usdt_amount);
+            if !buyer_deposit.is_zero() {
+                // 检查买家 COS 余额
+                let buyer_balance = T::Currency::free_balance(&buyer);
+                ensure!(buyer_balance >= buyer_deposit, Error::<T>::InsufficientDepositBalance);
+                // 锁定保证金
+                T::Currency::reserve(&buyer, buyer_deposit)?;
+            }
+
+            // 检查卖家 Token 余额并锁定
+            let seller_balance = T::TokenProvider::token_balance(order.shop_id, &who);
+            ensure!(seller_balance >= fill_amount, Error::<T>::InsufficientTokenBalance);
+            T::TokenProvider::reserve(order.shop_id, &who, fill_amount)?;
+
+            // 创建 USDT 交易记录（等待买家支付，含保证金信息）
+            let trade_id = Self::do_create_usdt_trade_with_deposit(
                 order_id,
                 order.shop_id,
                 who.clone(),        // 卖家
-                order.maker.clone(), // 买家
+                buyer.clone(),      // 买家
                 fill_amount,
                 usdt_amount,
                 tron_addr,
+                buyer_deposit,
             )?;
 
             // 更新订单已成交数量
@@ -1528,10 +1712,19 @@ pub mod pallet {
                 trade_id,
                 order_id,
                 seller: who,
-                buyer: order.maker,
+                buyer: buyer.clone(),
                 token_amount: fill_amount,
                 usdt_amount,
             });
+
+            // 🆕 发出保证金锁定事件
+            if !buyer_deposit.is_zero() {
+                Self::deposit_event(Event::BuyerDepositLocked {
+                    trade_id,
+                    buyer,
+                    deposit: buyer_deposit,
+                });
+            }
 
             Ok(())
         }
@@ -1587,16 +1780,19 @@ pub mod pallet {
         ///
         /// # 说明
         /// 由 OCW 调用，验证 TRON 交易是否有效
+        /// 
+        /// # 安全
+        /// 使用 ValidateUnsigned 验证，只有 OCW 可以提交
         #[pallet::call_index(10)]
         #[pallet::weight(Weight::from_parts(80_000, 0))]
         pub fn verify_usdt_payment(
             origin: OriginFor<T>,
             trade_id: u64,
             verified: bool,
-            _actual_amount: u64,
+            actual_amount: u64,
         ) -> DispatchResult {
-            // TODO: 实际应该使用 ensure_none 或 ValidateUnsigned
-            let _who = ensure_signed(origin)?;
+            // 确保是无签名交易（由 OCW 提交）
+            ensure_none(origin)?;
 
             let mut trade = UsdtTrades::<T>::get(trade_id).ok_or(Error::<T>::UsdtTradeNotFound)?;
 
@@ -1648,6 +1844,8 @@ pub mod pallet {
         }
 
         /// 处理超时的 USDT 交易（任何人可调用）
+        /// 
+        /// 🆕 超时时买家保证金将按 DepositForfeitRate 比例没收给卖家
         #[pallet::call_index(11)]
         #[pallet::weight(Weight::from_parts(50_000, 0))]
         pub fn process_usdt_timeout(
@@ -1672,6 +1870,45 @@ pub mod pallet {
             // 退还锁定的 Token 给卖家
             T::TokenProvider::unreserve(trade.shop_id, &trade.seller, trade.token_amount);
 
+            // 🆕 处理买家保证金没收
+            if !trade.buyer_deposit.is_zero() && trade.deposit_status == BuyerDepositStatus::Locked {
+                let forfeit_rate = T::DepositForfeitRate::get();  // bps, 10000 = 100%
+                
+                // 计算没收金额: deposit * forfeit_rate / 10000
+                // 使用 u128 中间计算（Balance 实现了 From<u128> 和 Into<u128>）
+                let deposit_u128: u128 = trade.buyer_deposit.into();
+                let forfeit_u128 = deposit_u128
+                    .saturating_mul(forfeit_rate as u128)
+                    .saturating_div(10000);
+                let forfeit_amount: BalanceOf<T> = forfeit_u128.into();
+                
+                // 🆕 将没收金额转入国库
+                if !forfeit_amount.is_zero() {
+                    let treasury = T::TreasuryAccount::get();
+                    let _ = T::Currency::repatriate_reserved(
+                        &trade.buyer,
+                        &treasury,
+                        forfeit_amount,
+                        frame_support::traits::BalanceStatus::Free,
+                    );
+                }
+                
+                // 剩余部分退还买家
+                let refund = trade.buyer_deposit.saturating_sub(forfeit_amount);
+                if !refund.is_zero() {
+                    T::Currency::unreserve(&trade.buyer, refund);
+                }
+                
+                trade.deposit_status = BuyerDepositStatus::Forfeited;
+
+                Self::deposit_event(Event::BuyerDepositForfeited {
+                    trade_id,
+                    buyer: trade.buyer.clone(),
+                    forfeited: forfeit_amount,
+                    to_treasury: forfeit_amount,
+                });
+            }
+
             trade.status = UsdtTradeStatus::Refunded;
             UsdtTrades::<T>::insert(trade_id, &trade);
 
@@ -1683,6 +1920,64 @@ pub mod pallet {
             Self::deposit_event(Event::UsdtTradeRefunded { trade_id });
 
             Ok(())
+        }
+
+        // ==================== 激励机制 ====================
+
+        /// 提交 OCW 验证结果（无签名交易）
+        /// 
+        /// OCW 验证完成后调用此函数将结果提交到链上
+        /// 🆕 支持多档判定结果
+        #[pallet::call_index(18)]
+        #[pallet::weight(Weight::from_parts(50_000, 0))]
+        pub fn submit_ocw_result(
+            origin: OriginFor<T>,
+            trade_id: u64,
+            actual_amount: u64,
+        ) -> DispatchResult {
+            ensure_none(origin)?;
+
+            // 验证 trade 存在且状态正确
+            let trade = UsdtTrades::<T>::get(trade_id).ok_or(Error::<T>::UsdtTradeNotFound)?;
+            ensure!(trade.status == UsdtTradeStatus::AwaitingVerification, Error::<T>::InvalidTradeStatus);
+
+            // 🆕 计算多档判定结果
+            let verification_result = Self::calculate_payment_verification_result(
+                trade.usdt_amount,
+                actual_amount,
+            );
+
+            // 存储验证结果
+            OcwVerificationResults::<T>::insert(trade_id, (verification_result, actual_amount));
+
+            Self::deposit_event(Event::OcwResultSubmitted {
+                trade_id,
+                verification_result,
+                actual_amount,
+            });
+
+            Ok(())
+        }
+
+        /// 领取验证奖励（任何人可调用）
+        /// 
+        /// ## 功能说明
+        /// 当 OCW 验证结果已提交到链上后，任何人可调用此函数：
+        /// 1. 完成验证确认（调用 verify_usdt_payment 逻辑）
+        /// 2. 获得 VerificationReward 奖励
+        /// 
+        /// ## 安全机制
+        /// - 验证结果必须已存储在 OcwVerificationResults
+        /// - 调用者无法伪造验证结果
+        /// - 只有 AwaitingVerification 状态的交易可以确认
+        #[pallet::call_index(19)]
+        #[pallet::weight(Weight::from_parts(100_000, 0))]
+        pub fn claim_verification_reward(
+            origin: OriginFor<T>,
+            trade_id: u64,
+        ) -> DispatchResult {
+            let caller = ensure_signed(origin)?;
+            Self::do_claim_verification_reward(&caller, trade_id)
         }
 
         // ==================== Phase 3: 市价单 ====================
@@ -1788,6 +2083,96 @@ pub mod pallet {
             });
 
             Ok(())
+        }
+    }
+
+    // ==================== ValidateUnsigned ====================
+
+    #[pallet::validate_unsigned]
+    impl<T: Config> ValidateUnsigned for Pallet<T> {
+        type Call = Call<T>;
+
+        fn validate_unsigned(source: TransactionSource, call: &Self::Call) -> TransactionValidity {
+            match call {
+                Call::verify_usdt_payment { trade_id, verified: _, actual_amount: _ } => {
+                    // 安全检查 1: 验证交易来源
+                    match source {
+                        TransactionSource::Local | TransactionSource::InBlock => {},
+                        TransactionSource::External => {
+                            log::warn!(target: "entity-market-ocw", 
+                                "External unsigned tx for trade {}", trade_id);
+                        }
+                    }
+
+                    // 安全检查 2: 验证 trade 存在且状态正确
+                    let trade = match UsdtTrades::<T>::get(trade_id) {
+                        Some(t) => t,
+                        None => {
+                            log::warn!(target: "entity-market-ocw", "Trade {} not found", trade_id);
+                            return InvalidTransaction::Custom(1).into();
+                        }
+                    };
+
+                    if trade.status != UsdtTradeStatus::AwaitingVerification {
+                        log::warn!(target: "entity-market-ocw", 
+                            "Trade {} invalid status: {:?}", trade_id, trade.status);
+                        return InvalidTransaction::Custom(2).into();
+                    }
+
+                    // 安全检查 3: 验证待验证队列包含该 trade
+                    let pending = PendingUsdtTrades::<T>::get();
+                    if !pending.contains(trade_id) {
+                        log::warn!(target: "entity-market-ocw", 
+                            "Trade {} not in pending queue", trade_id);
+                        return InvalidTransaction::Custom(3).into();
+                    }
+
+                    let priority = match source {
+                        TransactionSource::Local => 100,
+                        TransactionSource::InBlock => 80,
+                        TransactionSource::External => 50,
+                    };
+
+                    ValidTransaction::with_tag_prefix("EntityMarketTRC20")
+                        .priority(priority)
+                        .longevity(10)
+                        .and_provides([&(b"verify", trade_id)])
+                        .propagate(true)
+                        .build()
+                },
+                Call::submit_ocw_result { trade_id, actual_amount: _ } => {
+                    // 安全检查：验证 trade 存在且状态正确
+                    let trade = match UsdtTrades::<T>::get(trade_id) {
+                        Some(t) => t,
+                        None => {
+                            return InvalidTransaction::Custom(10).into();
+                        }
+                    };
+
+                    if trade.status != UsdtTradeStatus::AwaitingVerification {
+                        return InvalidTransaction::Custom(11).into();
+                    }
+
+                    // 检查是否已有验证结果
+                    if OcwVerificationResults::<T>::contains_key(trade_id) {
+                        return InvalidTransaction::Custom(12).into();
+                    }
+
+                    let priority = match source {
+                        TransactionSource::Local => 100,
+                        TransactionSource::InBlock => 80,
+                        TransactionSource::External => 50,
+                    };
+
+                    ValidTransaction::with_tag_prefix("EntityMarketOcwResult")
+                        .priority(priority)
+                        .longevity(10)
+                        .and_provides([&(b"ocw_result", trade_id)])
+                        .propagate(true)
+                        .build()
+                },
+                _ => InvalidTransaction::Call.into(),
+            }
         }
     }
 
@@ -1915,7 +2300,273 @@ pub mod pallet {
                 .unwrap_or_else(|| T::DefaultUsdtTimeout::get())
         }
 
-        /// 创建 USDT 交易记录
+        /// OCW: 处理单笔 USDT 交易验证
+        /// 
+        /// 验证结果存储在 offchain storage，供外部服务读取并提交
+        fn process_verification(trade_id: u64, trade: &UsdtTrade<T>, tx_hash: &[u8]) {
+            use crate::ocw;
+
+            log::info!(target: "entity-market-ocw", 
+                "Verifying trade {} with tx_hash len={}", trade_id, tx_hash.len());
+
+            // 调用 OCW 验证 TRC20 交易
+            let result = ocw::verify_trc20_transaction(
+                tx_hash,
+                trade.seller_tron_address.as_slice(),
+                trade.usdt_amount,
+            );
+
+            match result {
+                Ok(verification) => {
+                    let verified = verification.is_valid;
+                    let actual_amount = verification.actual_amount.unwrap_or(0);
+
+                    log::info!(target: "entity-market-ocw", 
+                        "Trade {} verification result: verified={}, actual_amount={}", 
+                        trade_id, verified, actual_amount);
+
+                    // 存储验证结果到 offchain storage
+                    // 外部服务可读取并调用 verify_usdt_payment
+                    let key = Self::ocw_result_key(trade_id);
+                    let value = (verified, actual_amount);
+                    sp_io::offchain::local_storage_set(
+                        sp_core::offchain::StorageKind::PERSISTENT,
+                        &key,
+                        &codec::Encode::encode(&value),
+                    );
+
+                    log::info!(target: "entity-market-ocw", 
+                        "Stored verification result for trade {}", trade_id);
+                },
+                Err(e) => {
+                    log::error!(target: "entity-market-ocw", 
+                        "Verification failed for trade {}: {}", trade_id, e);
+                }
+            }
+        }
+
+        /// 生成 OCW 结果存储键
+        fn ocw_result_key(trade_id: u64) -> alloc::vec::Vec<u8> {
+            let mut key = b"entity_market_ocw_result::".to_vec();
+            key.extend_from_slice(&trade_id.to_le_bytes());
+            key
+        }
+
+        /// 获取 OCW 验证结果（供外部服务调用）
+        pub fn get_ocw_result(trade_id: u64) -> Option<(bool, u64)> {
+            let key = Self::ocw_result_key(trade_id);
+            sp_io::offchain::local_storage_get(
+                sp_core::offchain::StorageKind::PERSISTENT,
+                &key,
+            ).and_then(|data| codec::Decode::decode(&mut &data[..]).ok())
+        }
+
+        /// 领取验证奖励内部实现
+        /// 
+        /// ## 流程
+        /// 1. 验证 trade 存在且状态正确
+        /// 2. 从链上存储读取 OCW 验证结果
+        /// 3. 执行验证确认逻辑
+        /// 4. 支付奖励给调用者
+        /// 🆕 多档判定 + 自动处理
+        fn do_claim_verification_reward(
+            caller: &T::AccountId,
+            trade_id: u64,
+        ) -> DispatchResult {
+            // 1. 获取交易记录
+            let mut trade = UsdtTrades::<T>::get(trade_id)
+                .ok_or(Error::<T>::UsdtTradeNotFound)?;
+
+            // 2. 验证状态必须是 AwaitingVerification
+            ensure!(
+                trade.status == UsdtTradeStatus::AwaitingVerification,
+                Error::<T>::InvalidTradeStatus
+            );
+
+            // 3. 从链上存储读取 OCW 验证结果（🆕 多档判定）
+            let (verification_result, actual_amount) = OcwVerificationResults::<T>::get(trade_id)
+                .ok_or(Error::<T>::OcwResultNotFound)?;
+
+            // 4. 🆕 根据多档判定结果执行不同处理（全部按比例自动处理）
+            match verification_result {
+                PaymentVerificationResult::Exact | PaymentVerificationResult::Overpaid => {
+                    // ✅ 验证通过，全额释放
+                    Self::process_full_payment(&mut trade, trade_id)?;
+                }
+                PaymentVerificationResult::Underpaid | 
+                PaymentVerificationResult::SeverelyUnderpaid => {
+                    // ⚠️ 少付，按比例自动处理（包括严重少付）
+                    Self::process_underpaid(&mut trade, trade_id, actual_amount)?;
+                }
+                PaymentVerificationResult::Invalid => {
+                    // ❌ 无效（actual_amount = 0），按 0% 处理
+                    Self::process_underpaid(&mut trade, trade_id, 0)?;
+                }
+            }
+
+            // 5. 从待验证队列移除
+            PendingUsdtTrades::<T>::mutate(|pending| {
+                pending.retain(|&id| id != trade_id);
+            });
+
+            // 6. 清理 OCW 验证结果存储
+            OcwVerificationResults::<T>::remove(trade_id);
+
+            // 7. 支付奖励给调用者
+            let reward = T::VerificationReward::get();
+            if reward > BalanceOf::<T>::zero() {
+                let reward_source = T::RewardSource::get();
+                
+                let _ = T::Currency::transfer(
+                    &reward_source,
+                    caller,
+                    reward,
+                    ExistenceRequirement::KeepAlive,
+                );
+
+                log::info!(target: "entity-market", 
+                    "Paid verification reward to {:?} for trade {}", caller, trade_id);
+            }
+
+            // 8. 发出事件
+            Self::deposit_event(Event::VerificationRewardClaimed {
+                trade_id,
+                claimer: caller.clone(),
+                reward,
+            });
+
+            Ok(())
+        }
+
+        /// 🆕 处理全额付款（验证通过）
+        fn process_full_payment(
+            trade: &mut UsdtTrade<T>,
+            trade_id: u64,
+        ) -> DispatchResult {
+            // 全额释放 Token 给买家
+            T::TokenProvider::repatriate_reserved(
+                trade.shop_id,
+                &trade.seller,
+                &trade.buyer,
+                trade.token_amount,
+            )?;
+
+            // 退还买家保证金
+            if !trade.buyer_deposit.is_zero() && trade.deposit_status == BuyerDepositStatus::Locked {
+                T::Currency::unreserve(&trade.buyer, trade.buyer_deposit);
+                trade.deposit_status = BuyerDepositStatus::Released;
+
+                Self::deposit_event(Event::BuyerDepositReleased {
+                    trade_id,
+                    buyer: trade.buyer.clone(),
+                    deposit: trade.buyer_deposit,
+                });
+            }
+
+            trade.status = UsdtTradeStatus::Completed;
+            
+            // 先提取需要的值
+            let shop_id = trade.shop_id;
+            let usdt_amount = trade.usdt_amount;
+            let order_id = trade.order_id;
+            
+            UsdtTrades::<T>::insert(trade_id, trade);
+
+            // 更新统计
+            MarketStatsStorage::<T>::mutate(shop_id, |stats| {
+                stats.total_trades = stats.total_trades.saturating_add(1);
+                stats.total_volume_usdt = stats.total_volume_usdt.saturating_add(usdt_amount);
+            });
+
+            Self::deposit_event(Event::UsdtTradeCompleted {
+                trade_id,
+                order_id,
+            });
+
+            Ok(())
+        }
+
+        /// 🆕 处理少付 - 按比例自动处理（包括严重少付）
+        fn process_underpaid(
+            trade: &mut UsdtTrade<T>,
+            trade_id: u64,
+            actual_amount: u64,
+        ) -> DispatchResult {
+            // 计算付款比例 (bps)
+            let payment_ratio = if trade.usdt_amount > 0 {
+                ((actual_amount as u128) * 10000 / (trade.usdt_amount as u128)) as u16
+            } else {
+                0
+            };
+
+            // 按比例计算释放的 Token 数量
+            // 使用 u128 中间计算（TokenBalance 实现了 From<u128> 和 Into<u128>）
+            let token_u128: u128 = trade.token_amount.into();
+            let token_to_release_u128 = token_u128
+                .saturating_mul(payment_ratio as u128)
+                .saturating_div(10000);
+            let token_to_release: T::TokenBalance = token_to_release_u128.into();
+            let token_to_refund = trade.token_amount.saturating_sub(token_to_release);
+
+            // 释放部分 Token 给买家
+            if !token_to_release.is_zero() {
+                T::TokenProvider::repatriate_reserved(
+                    trade.shop_id,
+                    &trade.seller,
+                    &trade.buyer,
+                    token_to_release,
+                )?;
+            }
+
+            // 退还剩余 Token 给卖家
+            if !token_to_refund.is_zero() {
+                T::TokenProvider::unreserve(trade.shop_id, &trade.seller, token_to_refund);
+            }
+
+            // 🆕 少付时保证金全部没收归国库（不按比例，全额没收）
+            let mut deposit_forfeited = BalanceOf::<T>::zero();
+            if !trade.buyer_deposit.is_zero() && trade.deposit_status == BuyerDepositStatus::Locked {
+                deposit_forfeited = trade.buyer_deposit;
+                
+                // 保证金全部转入国库
+                let treasury = T::TreasuryAccount::get();
+                let _ = T::Currency::repatriate_reserved(
+                    &trade.buyer,
+                    &treasury,
+                    deposit_forfeited,
+                    frame_support::traits::BalanceStatus::Free,
+                );
+
+                trade.deposit_status = BuyerDepositStatus::Forfeited;
+            }
+
+            trade.status = UsdtTradeStatus::Completed;
+            
+            // 先提取需要的值
+            let shop_id = trade.shop_id;
+            let expected_amount = trade.usdt_amount;
+            
+            UsdtTrades::<T>::insert(trade_id, trade);
+
+            // 更新统计（按实际付款金额）
+            MarketStatsStorage::<T>::mutate(shop_id, |stats| {
+                stats.total_trades = stats.total_trades.saturating_add(1);
+                stats.total_volume_usdt = stats.total_volume_usdt.saturating_add(actual_amount);
+            });
+
+            Self::deposit_event(Event::UnderpaidAutoProcessed {
+                trade_id,
+                expected_amount,
+                actual_amount,
+                payment_ratio,
+                token_released: token_to_release,
+                deposit_forfeited,
+            });
+
+            Ok(())
+        }
+
+        /// 创建 USDT 交易记录（无保证金版本，用于 take_usdt_sell_order）
         fn do_create_usdt_trade(
             order_id: u64,
             shop_id: u64,
@@ -1925,12 +2576,41 @@ pub mod pallet {
             usdt_amount: u64,
             seller_tron_address: TronAddress,
         ) -> Result<u64, DispatchError> {
+            Self::do_create_usdt_trade_with_deposit(
+                order_id,
+                shop_id,
+                seller,
+                buyer,
+                token_amount,
+                usdt_amount,
+                seller_tron_address,
+                Zero::zero(), // 无保证金
+            )
+        }
+
+        /// 🆕 创建 USDT 交易记录（含保证金版本，用于 accept_usdt_buy_order）
+        fn do_create_usdt_trade_with_deposit(
+            order_id: u64,
+            shop_id: u64,
+            seller: T::AccountId,
+            buyer: T::AccountId,
+            token_amount: T::TokenBalance,
+            usdt_amount: u64,
+            seller_tron_address: TronAddress,
+            buyer_deposit: BalanceOf<T>,
+        ) -> Result<u64, DispatchError> {
             let trade_id = NextUsdtTradeId::<T>::get();
             NextUsdtTradeId::<T>::put(trade_id.saturating_add(1));
 
             let now = <frame_system::Pallet<T>>::block_number();
             let timeout = Self::get_usdt_timeout(shop_id);
             let timeout_at = now.saturating_add(timeout.into());
+
+            let deposit_status = if buyer_deposit.is_zero() {
+                BuyerDepositStatus::None
+            } else {
+                BuyerDepositStatus::Locked
+            };
 
             let trade = UsdtTrade {
                 trade_id,
@@ -1945,11 +2625,57 @@ pub mod pallet {
                 status: UsdtTradeStatus::AwaitingPayment,
                 created_at: now,
                 timeout_at,
+                buyer_deposit,
+                deposit_status,
             };
 
             UsdtTrades::<T>::insert(trade_id, trade);
 
             Ok(trade_id)
+        }
+
+        /// 🆕 计算买家保证金金额
+        /// 
+        /// 简化版：使用 MinBuyerDeposit 作为固定保证金
+        /// 实际项目中应从 pricing 模块获取实时汇率
+        fn calculate_buyer_deposit(_usdt_amount: u64) -> BalanceOf<T> {
+            // 返回最低保证金（简化实现）
+            // 复杂的比例计算可在后续版本中通过 pricing 模块实现
+            T::MinBuyerDeposit::get()
+        }
+
+        /// 🆕 计算付款金额验证结果（多档判定）
+        /// 
+        /// | 实际金额        | 结果              |
+        /// |-----------------|-------------------|
+        /// | ≥ 100.5%        | Overpaid          |
+        /// | 99.5% ~ 100.5%  | Exact             |
+        /// | 50% ~ 99.5%     | Underpaid         |
+        /// | < 50%           | SeverelyUnderpaid |
+        /// | = 0             | Invalid           |
+        fn calculate_payment_verification_result(
+            expected_amount: u64,
+            actual_amount: u64,
+        ) -> PaymentVerificationResult {
+            if actual_amount == 0 {
+                return PaymentVerificationResult::Invalid;
+            }
+
+            if expected_amount == 0 {
+                return PaymentVerificationResult::Overpaid;
+            }
+
+            // 计算实际付款比例 (bps, 10000 = 100%)
+            let ratio = (actual_amount as u128)
+                .saturating_mul(10000)
+                .saturating_div(expected_amount as u128) as u16;
+
+            match ratio {
+                r if r >= 10050 => PaymentVerificationResult::Overpaid,      // ≥ 100.5%
+                r if r >= 9950 => PaymentVerificationResult::Exact,          // 99.5% ~ 100.5%
+                r if r >= 5000 => PaymentVerificationResult::Underpaid,      // 50% ~ 99.5%
+                _ => PaymentVerificationResult::SeverelyUnderpaid,           // < 50%
+            }
         }
 
         /// 从订单簿移除订单

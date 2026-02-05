@@ -14,6 +14,9 @@ frame-support = { workspace = true }
 frame-system = { workspace = true }
 sp-runtime = { workspace = true }
 sp-std = { workspace = true }
+sp-io = { workspace = true }
+sp-core = { workspace = true }
+log = { workspace = true }
 pallet-entity-common = { workspace = true }
 pallet-entity-registry = { workspace = true }
 pallet-entity-token = { workspace = true }
@@ -33,6 +36,9 @@ std = [
 	"frame-system/std",
 	"sp-runtime/std",
 	"sp-std/std",
+	"sp-io/std",
+	"sp-core/std",
+	"log/std",
 	"pallet-entity-common/std",
 	"pallet-entity-registry/std",
 	"pallet-entity-token/std",

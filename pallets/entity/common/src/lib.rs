@@ -115,6 +115,71 @@ impl TokenType {
     pub fn is_transferable_by_default(&self) -> bool {
         !matches!(self, Self::Membership)
     }
+    
+    /// 获取默认要求的 KYC 级别
+    /// 返回 (持有者 KYC, 接收方 KYC)
+    pub fn required_kyc_level(&self) -> (u8, u8) {
+        match self {
+            Self::Points => (0, 0),           // None, None
+            Self::Membership => (1, 1),       // Basic, Basic
+            Self::Governance => (2, 2),       // Standard, Standard
+            Self::Share | Self::Bond => (2, 2), // Standard, Standard
+            Self::Equity => (3, 3),           // Enhanced, Enhanced
+            Self::Hybrid(_) => (2, 2),        // Standard, Standard (默认)
+        }
+    }
+    
+    /// 是否为证券类型（需要严格合规）
+    pub fn is_security(&self) -> bool {
+        matches!(self, Self::Equity | Self::Share | Self::Bond)
+    }
+    
+    /// 是否需要强制披露
+    pub fn requires_disclosure(&self) -> bool {
+        matches!(self, Self::Equity | Self::Share | Self::Bond)
+    }
+    
+    /// 默认转账限制模式
+    /// 0 = None, 1 = Whitelist, 2 = Blacklist, 3 = KycRequired, 4 = MembersOnly
+    pub fn default_transfer_restriction(&self) -> u8 {
+        match self {
+            Self::Points => 0,       // None
+            Self::Membership => 4,   // MembersOnly
+            Self::Governance => 3,   // KycRequired
+            Self::Share | Self::Bond => 3, // KycRequired
+            Self::Equity => 1,       // Whitelist
+            Self::Hybrid(_) => 0,    // None (可配置)
+        }
+    }
+}
+
+/// 转账限制模式
+#[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+pub enum TransferRestrictionMode {
+    /// 无限制（默认）
+    #[default]
+    None,
+    /// 白名单模式 - 只能转给白名单地址
+    Whitelist,
+    /// 黑名单模式 - 禁止转给黑名单地址
+    Blacklist,
+    /// KYC 模式 - 接收方需满足 KYC 要求
+    KycRequired,
+    /// 闭环模式 - 只能在实体成员间转账
+    MembersOnly,
+}
+
+impl TransferRestrictionMode {
+    /// 从 u8 转换
+    pub fn from_u8(v: u8) -> Self {
+        match v {
+            1 => Self::Whitelist,
+            2 => Self::Blacklist,
+            3 => Self::KycRequired,
+            4 => Self::MembersOnly,
+            _ => Self::None,
+        }
+    }
 }
 
 /// 分红配置
@@ -411,6 +476,12 @@ pub trait ShopTokenProvider<AccountId, Balance> {
         to: &AccountId,
         amount: Balance,
     ) -> Result<Balance, DispatchError>;
+    
+    /// Phase 8: 获取代币类型
+    fn get_token_type(shop_id: u64) -> TokenType;
+    
+    /// Phase 8: 获取代币总供应量
+    fn total_supply(shop_id: u64) -> Balance;
 }
 
 /// 空店铺代币提供者（测试用或未启用代币时）
@@ -462,5 +533,11 @@ impl<AccountId, Balance: Default> ShopTokenProvider<AccountId, Balance> for Null
     }
     fn repatriate_reserved(_: u64, _: &AccountId, _: &AccountId, _: Balance) -> Result<Balance, DispatchError> {
         Ok(Default::default())
+    }
+    fn get_token_type(_shop_id: u64) -> TokenType {
+        TokenType::default()
+    }
+    fn total_supply(_shop_id: u64) -> Balance {
+        Default::default()
     }
 }
