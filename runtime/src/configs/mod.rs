@@ -1348,7 +1348,7 @@ impl frame_support::traits::Get<AccountId> for EntityPlatformAccount {
 impl pallet_entity_registry::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type Currency = Balances;
-	type MaxShopNameLength = ConstU32<64>;
+	type MaxEntityNameLength = ConstU32<64>;
 	type MaxCidLength = ConstU32<64>;
 	type GovernanceOrigin = EnsureRoot<AccountId>;
 	type PricingProvider = EntityPricingProvider;
@@ -1444,9 +1444,85 @@ impl pallet_entity_common::PricingProvider for EntityPricingProvider {
 	}
 }
 
-/// 使用 Null 实现
-pub type EntityCommissionProvider = pallet_entity_commission::NullCommissionProvider;
-pub type EntityMemberProvider = pallet_entity_commission::NullMemberProvider;
+/// 桥接实现：将 EntityMember pallet 桥接到 commission 模块的 MemberProvider trait
+pub struct MemberProviderBridge;
+
+impl pallet_entity_commission::MemberProvider<AccountId> for MemberProviderBridge {
+	fn get_referrer(shop_id: u64, account: &AccountId) -> Option<AccountId> {
+		pallet_entity_member::EntityMembers::<Runtime>::get(shop_id, account)
+			.and_then(|m| m.referrer)
+	}
+
+	fn member_level(shop_id: u64, account: &AccountId) -> Option<pallet_entity_common::MemberLevel> {
+		pallet_entity_member::EntityMembers::<Runtime>::get(shop_id, account)
+			.map(|m| m.level)
+	}
+
+	fn get_member_stats(shop_id: u64, account: &AccountId) -> (u32, u32, u128) {
+		pallet_entity_member::EntityMembers::<Runtime>::get(shop_id, account)
+			.map(|m| {
+				let spent_usdt: u128 = sp_runtime::SaturatedConversion::saturated_into(m.total_spent);
+				(m.direct_referrals, m.team_size, spent_usdt)
+			})
+			.unwrap_or((0, 0, 0))
+	}
+
+	fn uses_custom_levels(shop_id: u64) -> bool {
+		pallet_entity_member::Pallet::<Runtime>::uses_custom_levels(shop_id)
+	}
+
+	fn custom_level_id(shop_id: u64, account: &AccountId) -> u8 {
+		pallet_entity_member::EntityMembers::<Runtime>::get(shop_id, account)
+			.map(|m| m.custom_level_id)
+			.unwrap_or(0)
+	}
+
+	fn set_custom_levels_enabled(shop_id: u64, enabled: bool) -> sp_runtime::DispatchResult {
+		pallet_entity_member::Pallet::<Runtime>::governance_set_custom_levels_enabled(shop_id, enabled)
+	}
+
+	fn set_upgrade_mode(shop_id: u64, mode: u8) -> sp_runtime::DispatchResult {
+		pallet_entity_member::Pallet::<Runtime>::governance_set_upgrade_mode(shop_id, mode)
+	}
+
+	fn add_custom_level(
+		shop_id: u64,
+		level_id: u8,
+		name: &[u8],
+		threshold: u128,
+		discount_rate: u16,
+		commission_bonus: u16,
+	) -> sp_runtime::DispatchResult {
+		pallet_entity_member::Pallet::<Runtime>::governance_add_custom_level(
+			shop_id, level_id, name, threshold, discount_rate, commission_bonus,
+		)
+	}
+
+	fn update_custom_level(
+		shop_id: u64,
+		level_id: u8,
+		name: Option<&[u8]>,
+		threshold: Option<u128>,
+		discount_rate: Option<u16>,
+		commission_bonus: Option<u16>,
+	) -> sp_runtime::DispatchResult {
+		pallet_entity_member::Pallet::<Runtime>::governance_update_custom_level(
+			shop_id, level_id, name, threshold, discount_rate, commission_bonus,
+		)
+	}
+
+	fn remove_custom_level(shop_id: u64, level_id: u8) -> sp_runtime::DispatchResult {
+		pallet_entity_member::Pallet::<Runtime>::governance_remove_custom_level(shop_id, level_id)
+	}
+
+	fn custom_level_count(shop_id: u64) -> u8 {
+		pallet_entity_member::Pallet::<Runtime>::custom_level_count(shop_id)
+	}
+}
+
+/// 桥接实现：CommissionCore pallet 作为 CommissionProvider
+pub type EntityCommissionProvider = pallet_commission_core::Pallet<Runtime>;
+pub type EntityMemberProvider = MemberProviderBridge;
 
 impl pallet_entity_governance::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
@@ -1482,16 +1558,47 @@ impl pallet_entity_member::Config for Runtime {
 	type MaxUpgradeHistory = ConstU32<100>;
 }
 
-impl pallet_entity_commission::Config for Runtime {
+impl pallet_commission_core::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type Currency = Balances;
-	type EntityProvider = EntityRegistry;
 	type ShopProvider = EntityShop;
 	type MemberProvider = EntityMemberProvider;
+	type ReferralPlugin = crate::CommissionReferral;
+	type LevelDiffPlugin = crate::CommissionLevelDiff;
+	type SingleLinePlugin = crate::CommissionSingleLine;
+	type TeamPlugin = ();
 	type MaxCommissionRecordsPerOrder = ConstU32<20>;
-	type MaxSingleLineLength = ConstU32<50>;
-	type MaxMultiLevels = ConstU32<15>;
 	type MaxCustomLevels = ConstU32<10>;
+}
+
+impl pallet_commission_referral::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type MemberProvider = EntityMemberProvider;
+	type MaxMultiLevels = ConstU32<15>;
+}
+
+impl pallet_commission_level_diff::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type MemberProvider = EntityMemberProvider;
+	type MaxCustomLevels = ConstU32<10>;
+}
+
+/// 桥接：CommissionCore 的 MemberCommissionStats 作为 SingleLine 的 StatsProvider
+pub struct SingleLineStatsFromCore;
+
+impl pallet_commission_single_line::pallet::SingleLineStatsProvider<AccountId, Balance> for SingleLineStatsFromCore {
+	fn get_member_stats(shop_id: u64, account: &AccountId) -> pallet_commission_common::MemberCommissionStatsData<Balance> {
+		pallet_commission_core::MemberCommissionStats::<Runtime>::get(shop_id, account)
+	}
+}
+
+impl pallet_commission_single_line::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type StatsProvider = SingleLineStatsFromCore;
+	type MaxSingleLineLength = ConstU32<50>;
 }
 
 parameter_types! {

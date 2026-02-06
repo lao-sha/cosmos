@@ -51,8 +51,8 @@ pub mod pallet {
         SaturatedConversion,
     };
 
-    /// 店铺派生账户 PalletId
-    const SHOP_PALLET_ID: PalletId = PalletId(*b"et/shop/");
+    /// 实体金库派生账户 PalletId
+    const ENTITY_PALLET_ID: PalletId = PalletId(*b"et/enty/");
 
     /// 资金健康状态
     #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
@@ -61,7 +61,7 @@ pub mod pallet {
         Healthy,
         /// 预警（最低余额 < 余额 ≤ 预警阈值）
         Warning,
-        /// 危险（余额 ≤ 最低余额，店铺暂停）
+        /// 危险（余额 ≤ 最低余额，实体暂停）
         Critical,
         /// 耗尽（余额 = 0）
         Depleted,
@@ -120,9 +120,7 @@ pub mod pallet {
         // ========== Entity-Shop 关联 ==========
         /// 下属 Shop ID 列表
         pub shop_ids: BoundedVec<u64, MaxShops>,
-        /// 主 Shop ID（创建 Entity 时自动创建）
-        pub primary_shop_id: u64,
-        // ========== 汇总统计（从 Shops 聚合） ==========
+        // ========== 汇总统计 ===========
         /// 累计销售额（所有 Shop 汇总）
         pub total_sales: Balance,
         /// 累计订单数（所有 Shop 汇总）
@@ -134,22 +132,19 @@ pub mod pallet {
         <T as frame_system::Config>::AccountId,
         BalanceOf<T>,
         BlockNumberFor<T>,
-        <T as Config>::MaxShopNameLength,
+        <T as Config>::MaxEntityNameLength,
         <T as Config>::MaxCidLength,
         <T as Config>::MaxAdmins,
         <T as Config>::MaxShopsPerEntity,
     >;
 
-    /// 向后兼容：ShopOf 类型别名（指向 EntityOf）
-    pub type ShopOf<T> = EntityOf<T>;
-
-    /// 店铺统计
+    /// 实体统计
     #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
-    pub struct ShopStatistics {
-        /// 总店铺数
-        pub total_shops: u64,
-        /// 活跃店铺数
-        pub active_shops: u64,
+    pub struct EntityStatistics {
+        /// 总实体数
+        pub total_entities: u64,
+        /// 活跃实体数
+        pub active_entities: u64,
     }
 
     #[pallet::config]
@@ -160,9 +155,9 @@ pub mod pallet {
         /// 货币类型
         type Currency: Currency<Self::AccountId> + ReservableCurrency<Self::AccountId>;
 
-        /// 店铺名称最大长度
+        /// 实体名称最大长度
         #[pallet::constant]
-        type MaxShopNameLength: Get<u32>;
+        type MaxEntityNameLength: Get<u32>;
 
         /// CID 最大长度
         #[pallet::constant]
@@ -186,7 +181,7 @@ pub mod pallet {
         #[pallet::constant]
         type MaxInitialFundCos: Get<BalanceOf<Self>>;
 
-        /// 最低运营余额（低于此值店铺暂停）
+        /// 最低运营余额（低于此值实体暂停）
         #[pallet::constant]
         type MinOperatingBalance: Get<BalanceOf<Self>>;
 
@@ -220,50 +215,25 @@ pub mod pallet {
     #[pallet::getter(fn next_entity_id)]
     pub type NextEntityId<T> = StorageValue<_, u64, ValueQuery>;
 
-    /// 向后兼容：NextShopId 别名
-    #[pallet::storage]
-    #[pallet::getter(fn next_shop_id)]
-    pub type NextShopId<T> = StorageValue<_, u64, ValueQuery>;
-
     /// Entity 存储 entity_id -> Entity
     #[pallet::storage]
     #[pallet::getter(fn entities)]
     pub type Entities<T: Config> = StorageMap<_, Blake2_128Concat, u64, EntityOf<T>>;
-
-    /// 向后兼容：Shops 别名（指向 Entities）
-    #[pallet::storage]
-    #[pallet::getter(fn shops)]
-    pub type Shops<T: Config> = StorageMap<_, Blake2_128Concat, u64, EntityOf<T>>;
 
     /// 用户 Entity 索引（一个用户可以有多个 Entity，但这里保留单个映射以保持兼容）
     #[pallet::storage]
     #[pallet::getter(fn user_entity)]
     pub type UserEntity<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, u64>;
 
-    /// 向后兼容：UserShop 别名
-    #[pallet::storage]
-    #[pallet::getter(fn user_shop)]
-    pub type UserShop<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, u64>;
-
     /// Entity 统计
     #[pallet::storage]
     #[pallet::getter(fn entity_stats)]
-    pub type EntityStats<T: Config> = StorageValue<_, ShopStatistics, ValueQuery>;
-
-    /// 向后兼容：ShopStats 别名
-    #[pallet::storage]
-    #[pallet::getter(fn shop_stats)]
-    pub type ShopStats<T: Config> = StorageValue<_, ShopStatistics, ValueQuery>;
+    pub type EntityStats<T: Config> = StorageValue<_, EntityStatistics, ValueQuery>;
 
     /// Entity 关闭申请时间
     #[pallet::storage]
     #[pallet::getter(fn entity_close_requests)]
     pub type EntityCloseRequests<T: Config> = StorageMap<_, Blake2_128Concat, u64, BlockNumberFor<T>>;
-
-    /// 向后兼容：ShopCloseRequests 别名
-    #[pallet::storage]
-    #[pallet::getter(fn shop_close_requests)]
-    pub type ShopCloseRequests<T: Config> = StorageMap<_, Blake2_128Concat, u64, BlockNumberFor<T>>;
 
     /// Entity -> Shops 索引 entity_id -> Vec<shop_id>
     #[pallet::storage]
@@ -281,72 +251,64 @@ pub mod pallet {
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
     pub enum Event<T: Config> {
-        /// Entity 已创建（含 Primary Shop）
+        /// Entity 已创建
         EntityCreated {
             entity_id: u64,
             owner: T::AccountId,
             treasury_account: T::AccountId,
-            primary_shop_id: u64,
             treasury_fund: BalanceOf<T>,
-        },
-        /// 向后兼容：店铺已创建
-        ShopCreated {
-            shop_id: u64,
-            owner: T::AccountId,
-            shop_account: T::AccountId,
-            initial_fund: BalanceOf<T>,
         },
         /// Shop 已添加到 Entity
         ShopAddedToEntity {
             entity_id: u64,
             shop_id: u64,
         },
-        /// 店铺已更新
-        ShopUpdated { shop_id: u64 },
-        /// 店铺状态已变更
-        ShopStatusChanged { shop_id: u64, status: ShopStatus },
+        /// 实体已更新
+        EntityUpdated { entity_id: u64 },
+        /// 实体状态已变更
+        EntityStatusChanged { entity_id: u64, status: ShopStatus },
         /// 运营资金已充值
         FundToppedUp {
-            shop_id: u64,
+            entity_id: u64,
             amount: BalanceOf<T>,
             new_balance: BalanceOf<T>,
         },
         /// 运营费用已扣除
         OperatingFeeDeducted {
-            shop_id: u64,
+            entity_id: u64,
             fee: BalanceOf<T>,
             fee_type: FeeType,
             remaining_balance: BalanceOf<T>,
         },
         /// 资金预警
         FundWarning {
-            shop_id: u64,
+            entity_id: u64,
             current_balance: BalanceOf<T>,
             warning_threshold: BalanceOf<T>,
         },
-        /// 店铺因资金不足暂停
-        ShopSuspendedLowFund {
-            shop_id: u64,
+        /// 实体因资金不足暂停
+        EntitySuspendedLowFund {
+            entity_id: u64,
             current_balance: BalanceOf<T>,
             minimum_balance: BalanceOf<T>,
         },
-        /// 充值后店铺恢复
-        ShopResumedAfterFunding { shop_id: u64 },
-        /// 店主申请关闭店铺
-        ShopCloseRequested { shop_id: u64 },
-        /// 店铺已关闭（资金已退还）
-        ShopClosed {
-            shop_id: u64,
+        /// 充值后实体恢复
+        EntityResumedAfterFunding { entity_id: u64 },
+        /// 所有者申请关闭实体
+        EntityCloseRequested { entity_id: u64 },
+        /// 实体已关闭（资金已退还）
+        EntityClosed {
+            entity_id: u64,
             fund_refunded: BalanceOf<T>,
         },
-        /// 店铺被封禁
-        ShopBanned {
-            shop_id: u64,
+        /// 实体被封禁
+        EntityBanned {
+            entity_id: u64,
             fund_confiscated: bool,
         },
         /// 资金被没收
         FundConfiscated {
-            shop_id: u64,
+            entity_id: u64,
             amount: BalanceOf<T>,
         },
         // ========== Phase 3 新增事件 ==========
@@ -388,20 +350,20 @@ pub mod pallet {
 
     #[pallet::error]
     pub enum Error<T> {
-        /// 店铺不存在
-        ShopNotFound,
-        /// 用户已有店铺
-        ShopAlreadyExists,
-        /// 不是店主
-        NotShopOwner,
-        /// 店铺未激活
-        ShopNotActive,
-        /// 店铺有进行中的订单
-        ShopHasPendingOrders,
+        /// 实体不存在
+        EntityNotFound,
+        /// 用户已有实体
+        EntityAlreadyExists,
+        /// 不是实体所有者
+        NotEntityOwner,
+        /// 实体未激活
+        EntityNotActive,
+        /// 实体有进行中的订单
+        EntityHasPendingOrders,
         /// 运营资金不足
         InsufficientOperatingFund,
-        /// 无效的店铺状态
-        InvalidShopStatus,
+        /// 无效的实体状态
+        InvalidEntityStatus,
         /// 名称过长
         NameTooLong,
         /// CID 过长
@@ -439,15 +401,12 @@ pub mod pallet {
 
     #[pallet::call]
     impl<T: Config> Pallet<T> {
-        /// 创建 Entity（自动创建 Primary Shop）
+        /// 创建 Entity（组织身份）
         /// 
-        /// Entity-Shop 分离架构：
-        /// 1. 创建 Entity（组织层）
-        /// 2. 自动创建 Primary Shop（业务层）
-        /// 3. 资金转入 Entity 金库
+        /// 创建实体并转入金库资金，Shop 按需另行创建
         #[pallet::call_index(0)]
         #[pallet::weight(Weight::from_parts(50_000, 0))]
-        pub fn create_shop(
+        pub fn create_entity(
             origin: OriginFor<T>,
             name: Vec<u8>,
             logo_cid: Option<Vec<u8>>,
@@ -455,9 +414,9 @@ pub mod pallet {
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            ensure!(!UserEntity::<T>::contains_key(&who), Error::<T>::ShopAlreadyExists);
+            ensure!(!UserEntity::<T>::contains_key(&who), Error::<T>::EntityAlreadyExists);
 
-            let name: BoundedVec<u8, T::MaxShopNameLength> =
+            let name: BoundedVec<u8, T::MaxEntityNameLength> =
                 name.try_into().map_err(|_| Error::<T>::NameTooLong)?;
 
             let logo_cid: Option<BoundedVec<u8, T::MaxCidLength>> = logo_cid
@@ -484,14 +443,7 @@ pub mod pallet {
 
             let now = <frame_system::Pallet<T>>::block_number();
 
-            // Primary Shop ID（暂时使用 entity_id，实际由 Shop 模块分配）
-            // TODO: 调用 Shop 模块创建 Primary Shop
-            let primary_shop_id = entity_id; // 简化：使用相同 ID
-
-            // 创建 Entity
-            let mut shop_ids: BoundedVec<u64, T::MaxShopsPerEntity> = BoundedVec::default();
-            let _ = shop_ids.try_push(primary_shop_id);
-
+            // 创建 Entity（Shop 列表初始为空，用户按需创建）
             let entity = Entity {
                 id: entity_id,
                 owner: who.clone(),
@@ -506,8 +458,7 @@ pub mod pallet {
                 verified: false,
                 metadata_uri: None,
                 treasury_fund,
-                shop_ids,
-                primary_shop_id,
+                shop_ids: BoundedVec::default(),
                 total_sales: Zero::zero(),
                 total_orders: 0,
             };
@@ -518,39 +469,25 @@ pub mod pallet {
 
             // 更新统计
             EntityStats::<T>::mutate(|stats| {
-                stats.total_shops = stats.total_shops.saturating_add(1);
-            });
-
-            // 建立 Entity-Shop 关联
-            EntityShops::<T>::mutate(entity_id, |shops| {
-                let _ = shops.try_push(primary_shop_id);
+                stats.total_entities = stats.total_entities.saturating_add(1);
             });
 
             Self::deposit_event(Event::EntityCreated {
                 entity_id,
-                owner: who.clone(),
-                treasury_account: treasury_account.clone(),
-                primary_shop_id,
-                treasury_fund,
-            });
-
-            // 向后兼容事件
-            Self::deposit_event(Event::ShopCreated {
-                shop_id: entity_id,
                 owner: who,
-                shop_account: treasury_account,
-                initial_fund: treasury_fund,
+                treasury_account,
+                treasury_fund,
             });
 
             Ok(())
         }
 
-        /// 更新店铺信息
+        /// 更新实体信息
         #[pallet::call_index(1)]
         #[pallet::weight(Weight::from_parts(30_000, 0))]
-        pub fn update_shop(
+        pub fn update_entity(
             origin: OriginFor<T>,
-            shop_id: u64,
+            entity_id: u64,
             name: Option<Vec<u8>>,
             logo_cid: Option<Vec<u8>>,
             description_cid: Option<Vec<u8>>,
@@ -558,18 +495,18 @@ pub mod pallet {
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            Shops::<T>::try_mutate(shop_id, |maybe_shop| -> DispatchResult {
-                let shop = maybe_shop.as_mut().ok_or(Error::<T>::ShopNotFound)?;
-                ensure!(shop.owner == who, Error::<T>::NotShopOwner);
+            Entities::<T>::try_mutate(entity_id, |maybe_entity| -> DispatchResult {
+                let entity = maybe_entity.as_mut().ok_or(Error::<T>::EntityNotFound)?;
+                ensure!(entity.owner == who, Error::<T>::NotEntityOwner);
 
                 if let Some(n) = name {
-                    shop.name = n.try_into().map_err(|_| Error::<T>::NameTooLong)?;
+                    entity.name = n.try_into().map_err(|_| Error::<T>::NameTooLong)?;
                 }
                 if let Some(c) = logo_cid {
-                    shop.logo_cid = Some(c.try_into().map_err(|_| Error::<T>::CidTooLong)?);
+                    entity.logo_cid = Some(c.try_into().map_err(|_| Error::<T>::CidTooLong)?);
                 }
                 if let Some(c) = description_cid {
-                    shop.description_cid = Some(c.try_into().map_err(|_| Error::<T>::CidTooLong)?);
+                    entity.description_cid = Some(c.try_into().map_err(|_| Error::<T>::CidTooLong)?);
                 }
                 // Note: customer_service 已移动到 Shop 层级
                 let _ = customer_service; // 保持 API 兼容但忽略此参数
@@ -577,80 +514,80 @@ pub mod pallet {
                 Ok(())
             })?;
 
-            Self::deposit_event(Event::ShopUpdated { shop_id });
+            Self::deposit_event(Event::EntityUpdated { entity_id });
             Ok(())
         }
 
-        /// 申请关闭店铺（需治理审批）
+        /// 申请关闭实体（需治理审批）
         #[pallet::call_index(2)]
         #[pallet::weight(Weight::from_parts(20_000, 0))]
-        pub fn request_close_shop(origin: OriginFor<T>, shop_id: u64) -> DispatchResult {
+        pub fn request_close_entity(origin: OriginFor<T>, entity_id: u64) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            Shops::<T>::try_mutate(shop_id, |maybe_shop| -> DispatchResult {
-                let shop = maybe_shop.as_mut().ok_or(Error::<T>::ShopNotFound)?;
-                ensure!(shop.owner == who, Error::<T>::NotShopOwner);
+            Entities::<T>::try_mutate(entity_id, |maybe_entity| -> DispatchResult {
+                let entity = maybe_entity.as_mut().ok_or(Error::<T>::EntityNotFound)?;
+                ensure!(entity.owner == who, Error::<T>::NotEntityOwner);
                 ensure!(
-                    shop.status == ShopStatus::Active || shop.status == ShopStatus::Suspended,
-                    Error::<T>::InvalidShopStatus
+                    entity.status == ShopStatus::Active || entity.status == ShopStatus::Suspended,
+                    Error::<T>::InvalidEntityStatus
                 );
 
-                shop.status = ShopStatus::Pending;  // 复用 Pending 状态表示待关闭审批
+                entity.status = ShopStatus::Pending;  // 复用 Pending 状态表示待关闭审批
                 Ok(())
             })?;
 
             // 记录申请时间
             let now = <frame_system::Pallet<T>>::block_number();
-            ShopCloseRequests::<T>::insert(shop_id, now);
+            EntityCloseRequests::<T>::insert(entity_id, now);
 
-            Self::deposit_event(Event::ShopCloseRequested { shop_id });
+            Self::deposit_event(Event::EntityCloseRequested { entity_id });
             Ok(())
         }
 
-        /// 充值运营资金
+        /// 充值金库资金
         #[pallet::call_index(3)]
         #[pallet::weight(Weight::from_parts(30_000, 0))]
         pub fn top_up_fund(
             origin: OriginFor<T>,
-            shop_id: u64,
+            entity_id: u64,
             amount: BalanceOf<T>,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            let shop = Shops::<T>::get(shop_id).ok_or(Error::<T>::ShopNotFound)?;
-            ensure!(shop.owner == who, Error::<T>::NotShopOwner);
+            let entity = Entities::<T>::get(entity_id).ok_or(Error::<T>::EntityNotFound)?;
+            ensure!(entity.owner == who, Error::<T>::NotEntityOwner);
             ensure!(
-                shop.status != ShopStatus::Closed && shop.status != ShopStatus::Banned,
-                Error::<T>::InvalidShopStatus
+                entity.status != ShopStatus::Closed && entity.status != ShopStatus::Banned,
+                Error::<T>::InvalidEntityStatus
             );
 
-            let shop_account = Self::shop_account(shop_id);
+            let treasury_account = Self::entity_treasury_account(entity_id);
 
             T::Currency::transfer(
                 &who,
-                &shop_account,
+                &treasury_account,
                 amount,
                 ExistenceRequirement::KeepAlive,
             )?;
 
-            let new_balance = T::Currency::free_balance(&shop_account);
+            let new_balance = T::Currency::free_balance(&treasury_account);
             let min_balance = T::MinOperatingBalance::get();
 
-            // 如果店铺因资金不足暂停，检查是否可以恢复
-            if shop.status == ShopStatus::Suspended && new_balance >= min_balance {
-                Shops::<T>::mutate(shop_id, |s| {
-                    if let Some(shop) = s {
-                        shop.status = ShopStatus::Active;
+            // 如果实体因资金不足暂停，检查是否可以恢复
+            if entity.status == ShopStatus::Suspended && new_balance >= min_balance {
+                Entities::<T>::mutate(entity_id, |s| {
+                    if let Some(e) = s {
+                        e.status = ShopStatus::Active;
                     }
                 });
-                ShopStats::<T>::mutate(|stats| {
-                    stats.active_shops = stats.active_shops.saturating_add(1);
+                EntityStats::<T>::mutate(|stats| {
+                    stats.active_entities = stats.active_entities.saturating_add(1);
                 });
-                Self::deposit_event(Event::ShopResumedAfterFunding { shop_id });
+                Self::deposit_event(Event::EntityResumedAfterFunding { entity_id });
             }
 
             Self::deposit_event(Event::FundToppedUp {
-                shop_id,
+                entity_id,
                 amount,
                 new_balance,
             });
@@ -658,182 +595,174 @@ pub mod pallet {
             Ok(())
         }
 
-        /// 审核通过店铺（治理）
+        /// 审核通过实体（治理）
         #[pallet::call_index(4)]
         #[pallet::weight(Weight::from_parts(20_000, 0))]
-        pub fn approve_shop(origin: OriginFor<T>, shop_id: u64) -> DispatchResult {
+        pub fn approve_entity(origin: OriginFor<T>, entity_id: u64) -> DispatchResult {
             T::GovernanceOrigin::ensure_origin(origin)?;
 
-            Shops::<T>::try_mutate(shop_id, |maybe_shop| -> DispatchResult {
-                let shop = maybe_shop.as_mut().ok_or(Error::<T>::ShopNotFound)?;
-                // 只有新创建的店铺（无关闭申请记录）才能审批通过
-                ensure!(shop.status == ShopStatus::Pending, Error::<T>::InvalidShopStatus);
-                ensure!(!ShopCloseRequests::<T>::contains_key(shop_id), Error::<T>::InvalidShopStatus);
+            Entities::<T>::try_mutate(entity_id, |maybe_entity| -> DispatchResult {
+                let entity = maybe_entity.as_mut().ok_or(Error::<T>::EntityNotFound)?;
+                ensure!(entity.status == ShopStatus::Pending, Error::<T>::InvalidEntityStatus);
+                ensure!(!EntityCloseRequests::<T>::contains_key(entity_id), Error::<T>::InvalidEntityStatus);
 
-                shop.status = ShopStatus::Active;
+                entity.status = ShopStatus::Active;
                 Ok(())
             })?;
 
-            ShopStats::<T>::mutate(|stats| {
-                stats.active_shops = stats.active_shops.saturating_add(1);
+            EntityStats::<T>::mutate(|stats| {
+                stats.active_entities = stats.active_entities.saturating_add(1);
             });
 
-            Self::deposit_event(Event::ShopStatusChanged {
-                shop_id,
+            Self::deposit_event(Event::EntityStatusChanged {
+                entity_id,
                 status: ShopStatus::Active,
             });
             Ok(())
         }
 
-        /// 审批关闭店铺（治理，退还全部余额）
+        /// 审批关闭实体（治理，退还全部余额）
         #[pallet::call_index(5)]
         #[pallet::weight(Weight::from_parts(40_000, 0))]
-        pub fn approve_close_shop(origin: OriginFor<T>, shop_id: u64) -> DispatchResult {
+        pub fn approve_close_entity(origin: OriginFor<T>, entity_id: u64) -> DispatchResult {
             T::GovernanceOrigin::ensure_origin(origin)?;
 
-            let shop = Shops::<T>::get(shop_id).ok_or(Error::<T>::ShopNotFound)?;
-            // 必须有关闭申请记录
-            ensure!(ShopCloseRequests::<T>::contains_key(shop_id), Error::<T>::InvalidShopStatus);
+            let entity = Entities::<T>::get(entity_id).ok_or(Error::<T>::EntityNotFound)?;
+            ensure!(EntityCloseRequests::<T>::contains_key(entity_id), Error::<T>::InvalidEntityStatus);
 
-            let shop_account = Self::shop_account(shop_id);
-            let balance = T::Currency::free_balance(&shop_account);
+            let treasury_account = Self::entity_treasury_account(entity_id);
+            let balance = T::Currency::free_balance(&treasury_account);
 
-            // 退还全部余额给店主
+            // 退还全部余额给所有者
             if !balance.is_zero() {
                 T::Currency::transfer(
-                    &shop_account,
-                    &shop.owner,
+                    &treasury_account,
+                    &entity.owner,
                     balance,
                     ExistenceRequirement::AllowDeath,
                 )?;
             }
 
             // 更新状态
-            Shops::<T>::mutate(shop_id, |s| {
-                if let Some(shop) = s {
-                    shop.status = ShopStatus::Closed;
+            Entities::<T>::mutate(entity_id, |s| {
+                if let Some(e) = s {
+                    e.status = ShopStatus::Closed;
                 }
             });
 
-            // 清理关闭申请记录
-            ShopCloseRequests::<T>::remove(shop_id);
+            EntityCloseRequests::<T>::remove(entity_id);
 
-            // 更新统计
-            if shop.status == ShopStatus::Active {
-                ShopStats::<T>::mutate(|stats| {
-                    stats.active_shops = stats.active_shops.saturating_sub(1);
+            if entity.status == ShopStatus::Active {
+                EntityStats::<T>::mutate(|stats| {
+                    stats.active_entities = stats.active_entities.saturating_sub(1);
                 });
             }
 
-            Self::deposit_event(Event::ShopClosed {
-                shop_id,
+            Self::deposit_event(Event::EntityClosed {
+                entity_id,
                 fund_refunded: balance,
             });
             Ok(())
         }
 
-        /// 暂停店铺（治理）
+        /// 暂停实体（治理）
         #[pallet::call_index(6)]
         #[pallet::weight(Weight::from_parts(20_000, 0))]
-        pub fn suspend_shop(origin: OriginFor<T>, shop_id: u64) -> DispatchResult {
+        pub fn suspend_entity(origin: OriginFor<T>, entity_id: u64) -> DispatchResult {
             T::GovernanceOrigin::ensure_origin(origin)?;
 
-            Shops::<T>::try_mutate(shop_id, |maybe_shop| -> DispatchResult {
-                let shop = maybe_shop.as_mut().ok_or(Error::<T>::ShopNotFound)?;
-                ensure!(shop.status == ShopStatus::Active, Error::<T>::InvalidShopStatus);
+            Entities::<T>::try_mutate(entity_id, |maybe_entity| -> DispatchResult {
+                let entity = maybe_entity.as_mut().ok_or(Error::<T>::EntityNotFound)?;
+                ensure!(entity.status == ShopStatus::Active, Error::<T>::InvalidEntityStatus);
 
-                shop.status = ShopStatus::Suspended;
+                entity.status = ShopStatus::Suspended;
                 Ok(())
             })?;
 
-            ShopStats::<T>::mutate(|stats| {
-                stats.active_shops = stats.active_shops.saturating_sub(1);
+            EntityStats::<T>::mutate(|stats| {
+                stats.active_entities = stats.active_entities.saturating_sub(1);
             });
 
-            Self::deposit_event(Event::ShopStatusChanged {
-                shop_id,
+            Self::deposit_event(Event::EntityStatusChanged {
+                entity_id,
                 status: ShopStatus::Suspended,
             });
             Ok(())
         }
 
-        /// 恢复店铺（治理，需资金充足）
+        /// 恢复实体（治理，需资金充足）
         #[pallet::call_index(7)]
         #[pallet::weight(Weight::from_parts(20_000, 0))]
-        pub fn resume_shop(origin: OriginFor<T>, shop_id: u64) -> DispatchResult {
+        pub fn resume_entity(origin: OriginFor<T>, entity_id: u64) -> DispatchResult {
             T::GovernanceOrigin::ensure_origin(origin)?;
 
-            // 检查资金是否充足
-            let shop_account = Self::shop_account(shop_id);
-            let balance = T::Currency::free_balance(&shop_account);
+            let treasury_account = Self::entity_treasury_account(entity_id);
+            let balance = T::Currency::free_balance(&treasury_account);
             let min_balance = T::MinOperatingBalance::get();
             ensure!(balance >= min_balance, Error::<T>::InsufficientOperatingFund);
 
-            Shops::<T>::try_mutate(shop_id, |maybe_shop| -> DispatchResult {
-                let shop = maybe_shop.as_mut().ok_or(Error::<T>::ShopNotFound)?;
-                ensure!(shop.status == ShopStatus::Suspended, Error::<T>::InvalidShopStatus);
+            Entities::<T>::try_mutate(entity_id, |maybe_entity| -> DispatchResult {
+                let entity = maybe_entity.as_mut().ok_or(Error::<T>::EntityNotFound)?;
+                ensure!(entity.status == ShopStatus::Suspended, Error::<T>::InvalidEntityStatus);
 
-                shop.status = ShopStatus::Active;
+                entity.status = ShopStatus::Active;
                 Ok(())
             })?;
 
-            ShopStats::<T>::mutate(|stats| {
-                stats.active_shops = stats.active_shops.saturating_add(1);
+            EntityStats::<T>::mutate(|stats| {
+                stats.active_entities = stats.active_entities.saturating_add(1);
             });
 
-            Self::deposit_event(Event::ShopStatusChanged {
-                shop_id,
+            Self::deposit_event(Event::EntityStatusChanged {
+                entity_id,
                 status: ShopStatus::Active,
             });
             Ok(())
         }
 
-        /// 封禁店铺（治理，可选没收资金）
+        /// 封禁实体（治理，可选没收资金）
         #[pallet::call_index(8)]
         #[pallet::weight(Weight::from_parts(40_000, 0))]
-        pub fn ban_shop(
+        pub fn ban_entity(
             origin: OriginFor<T>,
-            shop_id: u64,
+            entity_id: u64,
             confiscate_fund: bool,
         ) -> DispatchResult {
             T::GovernanceOrigin::ensure_origin(origin)?;
 
-            let shop = Shops::<T>::get(shop_id).ok_or(Error::<T>::ShopNotFound)?;
+            let entity = Entities::<T>::get(entity_id).ok_or(Error::<T>::EntityNotFound)?;
 
-            let shop_account = Self::shop_account(shop_id);
-            let balance = T::Currency::free_balance(&shop_account);
+            let treasury_account = Self::entity_treasury_account(entity_id);
+            let balance = T::Currency::free_balance(&treasury_account);
 
             if !balance.is_zero() {
                 if confiscate_fund {
-                    // 没收资金（销毁或转入国库，这里简化为销毁）
-                    // 实际项目中应转入国库
-                    let _ = T::Currency::slash(&shop_account, balance);
-                    Self::deposit_event(Event::FundConfiscated { shop_id, amount: balance });
+                    let _ = T::Currency::slash(&treasury_account, balance);
+                    Self::deposit_event(Event::FundConfiscated { entity_id, amount: balance });
                 } else {
-                    // 退还给店主
                     T::Currency::transfer(
-                        &shop_account,
-                        &shop.owner,
+                        &treasury_account,
+                        &entity.owner,
                         balance,
                         ExistenceRequirement::AllowDeath,
                     )?;
                 }
             }
 
-            Shops::<T>::mutate(shop_id, |maybe_shop| {
-                if let Some(s) = maybe_shop {
-                    s.status = ShopStatus::Banned;
+            Entities::<T>::mutate(entity_id, |maybe| {
+                if let Some(e) = maybe {
+                    e.status = ShopStatus::Banned;
                 }
             });
 
-            if shop.status == ShopStatus::Active {
-                ShopStats::<T>::mutate(|stats| {
-                    stats.active_shops = stats.active_shops.saturating_sub(1);
+            if entity.status == ShopStatus::Active {
+                EntityStats::<T>::mutate(|stats| {
+                    stats.active_entities = stats.active_entities.saturating_sub(1);
                 });
             }
 
-            Self::deposit_event(Event::ShopBanned {
-                shop_id,
+            Self::deposit_event(Event::EntityBanned {
+                entity_id,
                 fund_confiscated: confiscate_fund,
             });
             Ok(())
@@ -851,11 +780,11 @@ pub mod pallet {
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
             
-            Shops::<T>::try_mutate(entity_id, |maybe_entity| -> DispatchResult {
-                let entity = maybe_entity.as_mut().ok_or(Error::<T>::ShopNotFound)?;
+            Entities::<T>::try_mutate(entity_id, |maybe_entity| -> DispatchResult {
+                let entity = maybe_entity.as_mut().ok_or(Error::<T>::EntityNotFound)?;
                 
                 // 只有所有者可以添加管理员
-                ensure!(entity.owner == who, Error::<T>::NotShopOwner);
+                ensure!(entity.owner == who, Error::<T>::NotEntityOwner);
                 
                 // 检查是否已是管理员
                 ensure!(!entity.admins.contains(&new_admin), Error::<T>::AdminAlreadyExists);
@@ -885,11 +814,11 @@ pub mod pallet {
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
             
-            Shops::<T>::try_mutate(entity_id, |maybe_entity| -> DispatchResult {
-                let entity = maybe_entity.as_mut().ok_or(Error::<T>::ShopNotFound)?;
+            Entities::<T>::try_mutate(entity_id, |maybe_entity| -> DispatchResult {
+                let entity = maybe_entity.as_mut().ok_or(Error::<T>::EntityNotFound)?;
                 
                 // 只有所有者可以移除管理员
-                ensure!(entity.owner == who, Error::<T>::NotShopOwner);
+                ensure!(entity.owner == who, Error::<T>::NotEntityOwner);
                 
                 // 不能移除所有者
                 ensure!(admin != entity.owner, Error::<T>::CannotRemoveOwner);
@@ -919,11 +848,11 @@ pub mod pallet {
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
             
-            let old_owner = Shops::<T>::try_mutate(entity_id, |maybe_entity| -> Result<T::AccountId, DispatchError> {
-                let entity = maybe_entity.as_mut().ok_or(Error::<T>::ShopNotFound)?;
+            let old_owner = Entities::<T>::try_mutate(entity_id, |maybe_entity| -> Result<T::AccountId, DispatchError> {
+                let entity = maybe_entity.as_mut().ok_or(Error::<T>::EntityNotFound)?;
                 
                 // 只有所有者可以转移所有权
-                ensure!(entity.owner == who, Error::<T>::NotShopOwner);
+                ensure!(entity.owner == who, Error::<T>::NotEntityOwner);
                 
                 let old = entity.owner.clone();
                 entity.owner = new_owner.clone();
@@ -936,9 +865,9 @@ pub mod pallet {
                 Ok(old)
             })?;
 
-            // 更新用户店铺索引
-            UserShop::<T>::remove(&old_owner);
-            UserShop::<T>::insert(&new_owner, entity_id);
+            // 更新用户实体索引
+            UserEntity::<T>::remove(&old_owner);
+            UserEntity::<T>::insert(&new_owner, entity_id);
 
             Self::deposit_event(Event::OwnershipTransferred {
                 entity_id,
@@ -965,12 +894,12 @@ pub mod pallet {
                 None
             };
             
-            let old_type = Shops::<T>::try_mutate(entity_id, |maybe_entity| -> Result<EntityType, DispatchError> {
-                let entity = maybe_entity.as_mut().ok_or(Error::<T>::ShopNotFound)?;
+            let old_type = Entities::<T>::try_mutate(entity_id, |maybe_entity| -> Result<EntityType, DispatchError> {
+                let entity = maybe_entity.as_mut().ok_or(Error::<T>::EntityNotFound)?;
                 
                 // 非治理操作需要是所有者
                 if let Some(ref caller) = who {
-                    ensure!(entity.owner == *caller, Error::<T>::NotShopOwner);
+                    ensure!(entity.owner == *caller, Error::<T>::NotEntityOwner);
                 }
                 
                 // 验证升级规则
@@ -1013,8 +942,8 @@ pub mod pallet {
         ) -> DispatchResult {
             T::GovernanceOrigin::ensure_origin(origin)?;
             
-            let old_mode = Shops::<T>::try_mutate(entity_id, |maybe_entity| -> Result<GovernanceMode, DispatchError> {
-                let entity = maybe_entity.as_mut().ok_or(Error::<T>::ShopNotFound)?;
+            let old_mode = Entities::<T>::try_mutate(entity_id, |maybe_entity| -> Result<GovernanceMode, DispatchError> {
+                let entity = maybe_entity.as_mut().ok_or(Error::<T>::EntityNotFound)?;
                 
                 // DAO 类型不能设为无治理
                 if entity.entity_type == EntityType::DAO {
@@ -1044,8 +973,8 @@ pub mod pallet {
         ) -> DispatchResult {
             T::GovernanceOrigin::ensure_origin(origin)?;
             
-            Shops::<T>::try_mutate(entity_id, |maybe_entity| -> DispatchResult {
-                let entity = maybe_entity.as_mut().ok_or(Error::<T>::ShopNotFound)?;
+            Entities::<T>::try_mutate(entity_id, |maybe_entity| -> DispatchResult {
+                let entity = maybe_entity.as_mut().ok_or(Error::<T>::EntityNotFound)?;
                 entity.verified = true;
                 Ok(())
             })?;
@@ -1060,12 +989,7 @@ pub mod pallet {
     impl<T: Config> Pallet<T> {
         /// 获取 Entity 金库派生账户
         pub fn entity_treasury_account(entity_id: u64) -> T::AccountId {
-            SHOP_PALLET_ID.into_sub_account_truncating(entity_id)
-        }
-
-        /// 向后兼容：获取店铺派生账户
-        pub fn shop_account(shop_id: u64) -> T::AccountId {
-            Self::entity_treasury_account(shop_id)
+            ENTITY_PALLET_ID.into_sub_account_truncating(entity_id)
         }
 
         /// 计算初始运营资金（USDT 等值 COS）
@@ -1112,59 +1036,59 @@ pub mod pallet {
             }
         }
 
-        /// 获取店铺运营资金余额
-        pub fn get_shop_fund_balance(shop_id: u64) -> BalanceOf<T> {
-            let shop_account = Self::shop_account(shop_id);
-            T::Currency::free_balance(&shop_account)
+        /// 获取实体金库资金余额
+        pub fn get_entity_fund_balance(entity_id: u64) -> BalanceOf<T> {
+            let treasury_account = Self::entity_treasury_account(entity_id);
+            T::Currency::free_balance(&treasury_account)
         }
 
         /// 扣除运营费用（供其他模块调用）
         pub fn deduct_operating_fee(
-            shop_id: u64,
+            entity_id: u64,
             fee: BalanceOf<T>,
             fee_type: FeeType,
         ) -> sp_runtime::DispatchResult {
-            let shop_account = Self::shop_account(shop_id);
-            let balance = T::Currency::free_balance(&shop_account);
+            let treasury_account = Self::entity_treasury_account(entity_id);
+            let balance = T::Currency::free_balance(&treasury_account);
 
             ensure!(balance >= fee, Error::<T>::InsufficientOperatingFund);
 
             // 销毁费用（实际项目中应转入国库或服务提供者）
-            let _ = T::Currency::slash(&shop_account, fee);
+            let _ = T::Currency::slash(&treasury_account, fee);
 
-            let new_balance = T::Currency::free_balance(&shop_account);
+            let new_balance = T::Currency::free_balance(&treasury_account);
             let min_balance = T::MinOperatingBalance::get();
             let warning_threshold = T::FundWarningThreshold::get();
 
             // 检查资金健康状态
             if new_balance <= min_balance {
-                // 低于最低余额，暂停店铺
-                Shops::<T>::mutate(shop_id, |s| {
-                    if let Some(shop) = s {
-                        if shop.status == ShopStatus::Active {
-                            shop.status = ShopStatus::Suspended;
-                            ShopStats::<T>::mutate(|stats| {
-                                stats.active_shops = stats.active_shops.saturating_sub(1);
+                // 低于最低余额，暂停实体
+                Entities::<T>::mutate(entity_id, |s| {
+                    if let Some(entity) = s {
+                        if entity.status == ShopStatus::Active {
+                            entity.status = ShopStatus::Suspended;
+                            EntityStats::<T>::mutate(|stats| {
+                                stats.active_entities = stats.active_entities.saturating_sub(1);
                             });
                         }
                     }
                 });
-                Self::deposit_event(Event::ShopSuspendedLowFund {
-                    shop_id,
+                Self::deposit_event(Event::EntitySuspendedLowFund {
+                    entity_id,
                     current_balance: new_balance,
                     minimum_balance: min_balance,
                 });
             } else if new_balance <= warning_threshold {
                 // 发出预警
                 Self::deposit_event(Event::FundWarning {
-                    shop_id,
+                    entity_id,
                     current_balance: new_balance,
                     warning_threshold,
                 });
             }
 
             Self::deposit_event(Event::OperatingFeeDeducted {
-                shop_id,
+                entity_id,
                 fee,
                 fee_type,
                 remaining_balance: new_balance,
@@ -1199,7 +1123,7 @@ pub mod pallet {
 
         /// 检查是否是管理员（所有者或管理员列表中）
         pub fn is_admin(entity_id: u64, who: &T::AccountId) -> bool {
-            Shops::<T>::get(entity_id)
+            Entities::<T>::get(entity_id)
                 .map(|entity| {
                     entity.owner == *who || entity.admins.contains(who)
                 })
@@ -1241,24 +1165,24 @@ pub mod pallet {
 
         /// 获取实体类型
         pub fn get_entity_type(entity_id: u64) -> Option<EntityType> {
-            Shops::<T>::get(entity_id).map(|e| e.entity_type)
+            Entities::<T>::get(entity_id).map(|e| e.entity_type)
         }
 
         /// 获取治理模式
         pub fn get_governance_mode(entity_id: u64) -> Option<GovernanceMode> {
-            Shops::<T>::get(entity_id).map(|e| e.governance_mode)
+            Entities::<T>::get(entity_id).map(|e| e.governance_mode)
         }
 
         /// 检查实体是否已验证
         pub fn is_verified(entity_id: u64) -> bool {
-            Shops::<T>::get(entity_id)
+            Entities::<T>::get(entity_id)
                 .map(|e| e.verified)
                 .unwrap_or(false)
         }
 
         /// 获取管理员列表
         pub fn get_admins(entity_id: u64) -> Vec<T::AccountId> {
-            Shops::<T>::get(entity_id)
+            Entities::<T>::get(entity_id)
                 .map(|e| e.admins.into_inner())
                 .unwrap_or_default()
         }
@@ -1268,26 +1192,26 @@ pub mod pallet {
 
     impl<T: Config> EntityProvider<T::AccountId> for Pallet<T> {
         fn entity_exists(entity_id: u64) -> bool {
-            Shops::<T>::contains_key(entity_id)
+            Entities::<T>::contains_key(entity_id)
         }
 
         fn is_entity_active(entity_id: u64) -> bool {
-            Shops::<T>::get(entity_id)
+            Entities::<T>::get(entity_id)
                 .map(|s| s.status == ShopStatus::Active)
                 .unwrap_or(false)
         }
 
         fn entity_owner(entity_id: u64) -> Option<T::AccountId> {
-            Shops::<T>::get(entity_id).map(|s| s.owner)
+            Entities::<T>::get(entity_id).map(|s| s.owner)
         }
 
         fn entity_account(entity_id: u64) -> T::AccountId {
-            Self::shop_account(entity_id)
+            Self::entity_treasury_account(entity_id)
         }
 
         fn update_entity_stats(entity_id: u64, sales_amount: u128, order_count: u32) -> Result<(), sp_runtime::DispatchError> {
             Entities::<T>::try_mutate(entity_id, |maybe_entity| -> Result<(), sp_runtime::DispatchError> {
-                let entity = maybe_entity.as_mut().ok_or(Error::<T>::ShopNotFound)?;
+                let entity = maybe_entity.as_mut().ok_or(Error::<T>::EntityNotFound)?;
                 entity.total_sales = entity.total_sales.saturating_add(sales_amount.saturated_into());
                 entity.total_orders = entity.total_orders.saturating_add(order_count as u64);
                 Ok(())

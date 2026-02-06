@@ -21,7 +21,7 @@ members = [
     "pallets/trading/swap",
     "pallets/trading/otc",
     "pallets/dispute/escrow",
-    "pallets/referral",
+    "pallets/affiliate/referral",
     "pallets/storage/service",
     "pallets/dispute/evidence",
     "pallets/dispute/arbitration",
@@ -39,6 +39,11 @@ members = [
     "pallets/entity/token",
     "pallets/entity/governance",
     "pallets/entity/member",
+    "pallets/entity/commission/common",
+    "pallets/entity/commission/core",
+    "pallets/entity/commission/referral",
+    "pallets/entity/commission/level-diff",
+    "pallets/entity/commission/single-line",
     "pallets/entity/commission",
     "pallets/entity/service",
     "pallets/entity/transaction",
@@ -71,7 +76,7 @@ pallet-trading-swap = { path = "./pallets/trading/swap", default-features = fals
 pallet-trading-otc = { path = "./pallets/trading/otc", default-features = false }
 # Escrow, Referral, IPFS pallets
 pallet-escrow = { path = "./pallets/dispute/escrow", default-features = false }
-pallet-referral = { path = "./pallets/referral", default-features = false }
+pallet-referral = { path = "./pallets/affiliate/referral", default-features = false }
 pallet-storage-service = { path = "./pallets/storage/service", default-features = false }
 # Cosmos common libraries
 media-utils = { path = "./media-utils", default-features = false }
@@ -95,6 +100,11 @@ pallet-entity-registry = { path = "./pallets/entity/registry", default-features 
 pallet-entity-token = { path = "./pallets/entity/token", default-features = false }
 pallet-entity-governance = { path = "./pallets/entity/governance", default-features = false }
 pallet-entity-member = { path = "./pallets/entity/member", default-features = false }
+pallet-commission-common = { path = "./pallets/entity/commission/common", default-features = false }
+pallet-commission-core = { path = "./pallets/entity/commission/core", default-features = false }
+pallet-commission-referral = { path = "./pallets/entity/commission/referral", default-features = false }
+pallet-commission-level-diff = { path = "./pallets/entity/commission/level-diff", default-features = false }
+pallet-commission-single-line = { path = "./pallets/entity/commission/single-line", default-features = false }
 pallet-entity-commission = { path = "./pallets/entity/commission", default-features = false }
 pallet-entity-service = { path = "./pallets/entity/service", default-features = false }
 pallet-entity-transaction = { path = "./pallets/entity/transaction", default-features = false }

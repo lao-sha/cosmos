@@ -1,7 +1,7 @@
 [package]
 name = "pallet-entity-commission"
-version = "0.1.0"
-description = "COSMOS Entity 返佣管理模块 - 支持多选返佣模式"
+version = "0.2.0"
+description = "COSMOS Entity 返佣管理模块 - 插件化架构 re-export wrapper"
 authors = ["COSMOS Team"]
 edition = "2021"
 license = "MIT"
@@ -10,38 +10,30 @@ license = "MIT"
 targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
-codec = { features = ["derive"], workspace = true }
-scale-info = { features = ["derive"], workspace = true }
-frame-support = { workspace = true }
-frame-system = { workspace = true }
-sp-runtime = { workspace = true }
-sp-std = { workspace = true }
-log = { workspace = true }
-
-# 内部依赖
-pallet-entity-common = { path = "../common", default-features = false }
-
-[dev-dependencies]
-pallet-balances = { workspace = true }
-sp-io = { workspace = true }
-sp-core = { workspace = true }
+pallet-commission-common = { path = "common", default-features = false }
+pallet-commission-core = { path = "core", default-features = false }
+pallet-commission-referral = { path = "referral", default-features = false }
+pallet-commission-level-diff = { path = "level-diff", default-features = false }
+pallet-commission-single-line = { path = "single-line", default-features = false }
 
 [features]
 default = ["std"]
 std = [
-    "codec/std",
-    "scale-info/std",
-    "frame-support/std",
-    "frame-system/std",
-    "sp-runtime/std",
-    "sp-std/std",
-    "pallet-entity-common/std",
+    "pallet-commission-common/std",
+    "pallet-commission-core/std",
+    "pallet-commission-referral/std",
+    "pallet-commission-level-diff/std",
+    "pallet-commission-single-line/std",
 ]
 runtime-benchmarks = [
-    "frame-support/runtime-benchmarks",
-    "frame-system/runtime-benchmarks",
+    "pallet-commission-core/runtime-benchmarks",
+    "pallet-commission-referral/runtime-benchmarks",
+    "pallet-commission-level-diff/runtime-benchmarks",
+    "pallet-commission-single-line/runtime-benchmarks",
 ]
 try-runtime = [
-    "frame-support/try-runtime",
-    "frame-system/try-runtime",
+    "pallet-commission-core/try-runtime",
+    "pallet-commission-referral/try-runtime",
+    "pallet-commission-level-diff/try-runtime",
+    "pallet-commission-single-line/try-runtime",
 ]

@@ -21,14 +21,14 @@ pub use pallet::*;
 #[frame_support::pallet]
 pub mod pallet {
     use super::*;
-    use alloc::vec::Vec;
     use frame_support::{
         pallet_prelude::*,
-        traits::{Currency, ExistenceRequirement, Get},
+        traits::{Currency, Get},
         BoundedVec,
     };
     use frame_system::pallet_prelude::*;
-    use pallet_entity_common::{EntityProvider, MemberMode};
+    use pallet_entity_common::EntityProvider;
+    pub use pallet_entity_common::MemberLevel;
     use sp_runtime::traits::{Saturating, Zero};
 
     // ============================================================================
@@ -52,26 +52,6 @@ pub mod pallet {
     // ============================================================================
     // 数据结构
     // ============================================================================
-
-    /// 会员等级
-    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
-    pub enum MemberLevel {
-        #[default]
-        Normal,     // 普通会员
-        Silver,     // 银卡会员
-        Gold,       // 金卡会员
-        Platinum,   // 白金会员
-        Diamond,    // 钻石会员
-    }
-
-    /// 返佣来源
-    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
-    pub enum CommissionSource {
-        #[default]
-        PlatformFee,    // 从平台费中扣除
-        ShopFund,       // 店铺运营资金承担
-        Mixed,          // 混合模式
-    }
 
     /// 等级升级方式
     #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
@@ -256,12 +236,6 @@ pub mod pallet {
         pub team_size: u32,
         /// 累计消费金额
         pub total_spent: Balance,
-        /// 累计获得返佣
-        pub total_commission: Balance,
-        /// 累计贡献返佣（下级消费产生的返佣）
-        pub total_contributed: Balance,
-        /// 待提取返佣
-        pub pending_commission: Balance,
         /// 会员等级（全局默认体系）
         pub level: MemberLevel,
         /// 自定义等级 ID（店铺自定义体系，0 表示最低级）
@@ -282,33 +256,6 @@ pub mod pallet {
         BalanceOf<T>,
         BlockNumberFor<T>,
     >;
-
-    /// 返佣配置
-    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
-    pub struct CommissionConfig {
-        /// 一级返佣率（基点，500 = 5%）
-        pub level1_rate: u16,
-        /// 二级返佣率（基点，200 = 2%）
-        pub level2_rate: u16,
-        /// 三级返佣率（基点，100 = 1%）
-        pub level3_rate: u16,
-        /// 返佣来源
-        pub source: CommissionSource,
-        /// 是否启用
-        pub enabled: bool,
-    }
-
-    impl Default for CommissionConfig {
-        fn default() -> Self {
-            Self {
-                level1_rate: 500,   // 5%
-                level2_rate: 200,   // 2%
-                level3_rate: 100,   // 1%
-                source: CommissionSource::PlatformFee,
-                enabled: true,
-            }
-        }
-    }
 
     // ============================================================================
     // Pallet 配置
@@ -391,25 +338,6 @@ pub mod pallet {
         Blake2_128Concat, u64,
         Blake2_128Concat, T::AccountId,
         BoundedVec<T::AccountId, T::MaxDirectReferrals>,
-        ValueQuery,
-    >;
-
-    /// 店铺返佣配置 shop_id -> CommissionConfig
-    #[pallet::storage]
-    #[pallet::getter(fn shop_commission_config)]
-    pub type ShopCommissionConfig<T: Config> = StorageMap<
-        _,
-        Blake2_128Concat, u64,
-        CommissionConfig,
-    >;
-
-    /// 店铺返佣统计 shop_id -> (total_commission, total_orders)
-    #[pallet::storage]
-    #[pallet::getter(fn shop_commission_stats)]
-    pub type ShopCommissionStats<T: Config> = StorageMap<
-        _,
-        Blake2_128Concat, u64,
-        (BalanceOf<T>, u64),
         ValueQuery,
     >;
 
@@ -502,19 +430,6 @@ pub mod pallet {
             account: T::AccountId,
             referrer: T::AccountId,
         },
-        /// 返佣发放
-        CommissionDistributed {
-            shop_id: u64,
-            referrer: T::AccountId,
-            amount: BalanceOf<T>,
-            level: u8,
-        },
-        /// 返佣提取
-        CommissionWithdrawn {
-            shop_id: u64,
-            account: T::AccountId,
-            amount: BalanceOf<T>,
-        },
         /// 会员升级
         MemberLevelUpgraded {
             shop_id: u64,
@@ -528,11 +443,6 @@ pub mod pallet {
             account: T::AccountId,
             old_level_id: u8,
             new_level_id: u8,
-        },
-        /// 返佣配置更新
-        CommissionConfigUpdated {
-            shop_id: u64,
-            config: CommissionConfig,
         },
         /// 等级系统初始化
         LevelSystemInitialized {
@@ -621,10 +531,6 @@ pub mod pallet {
         SelfReferral,
         /// 循环推荐
         CircularReferral,
-        /// 返佣未配置
-        CommissionNotConfigured,
-        /// 返佣余额不足
-        InsufficientCommission,
         /// 不是店主
         NotShopOwner,
         /// 店铺不存在
@@ -772,93 +678,6 @@ pub mod pallet {
             });
 
             Ok(())
-        }
-
-        /// 设置店铺返佣配置（店主）
-        ///
-        /// # 参数
-        /// - `shop_id`: 店铺 ID
-        /// - `level1_rate`: 一级返佣率（基点）
-        /// - `level2_rate`: 二级返佣率（基点）
-        /// - `level3_rate`: 三级返佣率（基点）
-        /// - `source`: 返佣来源
-        /// - `enabled`: 是否启用
-        #[pallet::call_index(2)]
-        #[pallet::weight(Weight::from_parts(20_000, 0))]
-        pub fn set_commission_config(
-            origin: OriginFor<T>,
-            shop_id: u64,
-            level1_rate: u16,
-            level2_rate: u16,
-            level3_rate: u16,
-            source: CommissionSource,
-            enabled: bool,
-        ) -> DispatchResult {
-            let who = ensure_signed(origin)?;
-
-            // 验证是店主
-            let owner = T::EntityProvider::entity_owner(shop_id)
-                .ok_or(Error::<T>::ShopNotFound)?;
-            ensure!(who == owner, Error::<T>::NotShopOwner);
-
-            let config = CommissionConfig {
-                level1_rate,
-                level2_rate,
-                level3_rate,
-                source,
-                enabled,
-            };
-
-            ShopCommissionConfig::<T>::insert(shop_id, config.clone());
-
-            Self::deposit_event(Event::CommissionConfigUpdated { shop_id, config });
-
-            Ok(())
-        }
-
-        /// 提取返佣
-        ///
-        /// # 参数
-        /// - `shop_id`: 店铺 ID
-        /// - `amount`: 提取金额（None 表示全部提取）
-        #[pallet::call_index(3)]
-        #[pallet::weight(Weight::from_parts(35_000, 0))]
-        pub fn withdraw_commission(
-            origin: OriginFor<T>,
-            shop_id: u64,
-            amount: Option<BalanceOf<T>>,
-        ) -> DispatchResult {
-            let who = ensure_signed(origin)?;
-
-            EntityMembers::<T>::try_mutate(shop_id, &who, |maybe_member| -> DispatchResult {
-                let member = maybe_member.as_mut().ok_or(Error::<T>::NotMember)?;
-
-                let withdraw_amount = amount.unwrap_or(member.pending_commission);
-                ensure!(
-                    member.pending_commission >= withdraw_amount,
-                    Error::<T>::InsufficientCommission
-                );
-
-                // 从店铺派生账户转账给会员
-                let shop_account = T::EntityProvider::entity_account(shop_id);
-
-                T::Currency::transfer(
-                    &shop_account,
-                    &who,
-                    withdraw_amount,
-                    ExistenceRequirement::KeepAlive,
-                )?;
-
-                member.pending_commission = member.pending_commission.saturating_sub(withdraw_amount);
-
-                Self::deposit_event(Event::CommissionWithdrawn {
-                    shop_id,
-                    account: who.clone(),
-                    amount: withdraw_amount,
-                });
-
-                Ok(())
-            })
         }
 
         /// 初始化店铺等级系统
@@ -1368,9 +1187,6 @@ pub mod pallet {
                 direct_referrals: 0,
                 team_size: 0,
                 total_spent: Zero::zero(),
-                total_commission: Zero::zero(),
-                total_contributed: Zero::zero(),
-                pending_commission: Zero::zero(),
                 level: MemberLevel::Normal,
                 custom_level_id: 0,
                 joined_at: now,
@@ -1716,6 +1532,140 @@ pub mod pallet {
                 .unwrap_or(false)
         }
 
+        // ========================================================================
+        // 治理调用内部函数（供跨模块桥接使用，无 origin 检查）
+        // ========================================================================
+
+        /// 启用/禁用自定义等级（治理调用）
+        pub fn governance_set_custom_levels_enabled(shop_id: u64, enabled: bool) -> DispatchResult {
+            EntityLevelSystems::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
+                let system = maybe_system.as_mut().ok_or(Error::<T>::LevelSystemNotInitialized)?;
+                system.use_custom = enabled;
+                Ok(())
+            })
+        }
+
+        /// 设置升级模式（治理调用）
+        /// mode: 0=AutoUpgrade, 1=ManualUpgrade, 2=PeriodReset
+        pub fn governance_set_upgrade_mode(shop_id: u64, mode: u8) -> DispatchResult {
+            EntityLevelSystems::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
+                let system = maybe_system.as_mut().ok_or(Error::<T>::LevelSystemNotInitialized)?;
+                system.upgrade_mode = match mode {
+                    0 => LevelUpgradeMode::AutoUpgrade,
+                    1 => LevelUpgradeMode::ManualUpgrade,
+                    2 => LevelUpgradeMode::PeriodReset,
+                    _ => return Err(Error::<T>::InvalidLevelId.into()),
+                };
+                Ok(())
+            })
+        }
+
+        /// 添加自定义等级（治理调用）
+        pub fn governance_add_custom_level(
+            shop_id: u64,
+            level_id: u8,
+            name: &[u8],
+            threshold: u128,
+            discount_rate: u16,
+            commission_bonus: u16,
+        ) -> DispatchResult {
+            let name: BoundedVec<u8, ConstU32<32>> = name.to_vec().try_into()
+                .map_err(|_| Error::<T>::EmptyLevelName)?;
+            ensure!(!name.is_empty(), Error::<T>::EmptyLevelName);
+
+            let threshold_balance: BalanceOf<T> = threshold.try_into()
+                .map_err(|_| Error::<T>::Overflow)?;
+
+            EntityLevelSystems::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
+                let system = maybe_system.as_mut().ok_or(Error::<T>::LevelSystemNotInitialized)?;
+
+                if let Some(last) = system.levels.last() {
+                    ensure!(threshold_balance > last.threshold, Error::<T>::InvalidThreshold);
+                }
+
+                let level = CustomLevel {
+                    id: level_id,
+                    name,
+                    threshold: threshold_balance,
+                    discount_rate,
+                    commission_bonus,
+                };
+
+                system.levels.try_push(level).map_err(|_| Error::<T>::LevelsFull)?;
+                Ok(())
+            })
+        }
+
+        /// 更新自定义等级（治理调用）
+        pub fn governance_update_custom_level(
+            shop_id: u64,
+            level_id: u8,
+            name: Option<&[u8]>,
+            threshold: Option<u128>,
+            discount_rate: Option<u16>,
+            commission_bonus: Option<u16>,
+        ) -> DispatchResult {
+            EntityLevelSystems::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
+                let system = maybe_system.as_mut().ok_or(Error::<T>::LevelSystemNotInitialized)?;
+                ensure!((level_id as usize) < system.levels.len(), Error::<T>::LevelNotFound);
+
+                if let Some(new_threshold_u128) = threshold {
+                    let new_threshold: BalanceOf<T> = new_threshold_u128.try_into()
+                        .map_err(|_| Error::<T>::Overflow)?;
+                    if level_id > 0 {
+                        if let Some(prev) = system.levels.get((level_id - 1) as usize) {
+                            ensure!(new_threshold > prev.threshold, Error::<T>::InvalidThreshold);
+                        }
+                    }
+                    if let Some(next) = system.levels.get((level_id + 1) as usize) {
+                        ensure!(new_threshold < next.threshold, Error::<T>::InvalidThreshold);
+                    }
+                }
+
+                let level = system.levels.get_mut(level_id as usize)
+                    .ok_or(Error::<T>::LevelNotFound)?;
+
+                if let Some(new_threshold_u128) = threshold {
+                    let new_threshold: BalanceOf<T> = new_threshold_u128.try_into()
+                        .map_err(|_| Error::<T>::Overflow)?;
+                    level.threshold = new_threshold;
+                }
+                if let Some(new_name) = name {
+                    let bounded_name: BoundedVec<u8, ConstU32<32>> = new_name.to_vec().try_into()
+                        .map_err(|_| Error::<T>::EmptyLevelName)?;
+                    ensure!(!bounded_name.is_empty(), Error::<T>::EmptyLevelName);
+                    level.name = bounded_name;
+                }
+                if let Some(rate) = discount_rate {
+                    level.discount_rate = rate;
+                }
+                if let Some(bonus) = commission_bonus {
+                    level.commission_bonus = bonus;
+                }
+                Ok(())
+            })
+        }
+
+        /// 删除自定义等级（治理调用）
+        pub fn governance_remove_custom_level(shop_id: u64, level_id: u8) -> DispatchResult {
+            EntityLevelSystems::<T>::try_mutate(shop_id, |maybe_system| -> DispatchResult {
+                let system = maybe_system.as_mut().ok_or(Error::<T>::LevelSystemNotInitialized)?;
+                ensure!(
+                    level_id as usize == system.levels.len().saturating_sub(1),
+                    Error::<T>::InvalidLevelId
+                );
+                system.levels.pop();
+                Ok(())
+            })
+        }
+
+        /// 获取自定义等级数量
+        pub fn custom_level_count(shop_id: u64) -> u8 {
+            EntityLevelSystems::<T>::get(shop_id)
+                .map(|s| s.levels.len() as u8)
+                .unwrap_or(0)
+        }
+
         /// 计算会员等级
         fn calculate_level(total_spent_usdt: u64) -> MemberLevel {
             if total_spent_usdt >= T::DiamondThreshold::get() {
@@ -1729,84 +1679,6 @@ pub mod pallet {
             } else {
                 MemberLevel::Normal
             }
-        }
-
-        /// 发放推荐返佣
-        pub fn distribute_commission(
-            shop_id: u64,
-            buyer: &T::AccountId,
-            order_amount: BalanceOf<T>,
-            available_commission: BalanceOf<T>,
-        ) -> DispatchResult {
-            let config = match ShopCommissionConfig::<T>::get(shop_id) {
-                Some(c) if c.enabled => c,
-                _ => return Ok(()), // 未配置或未启用，跳过
-            };
-
-            let member = match EntityMembers::<T>::get(shop_id, buyer) {
-                Some(m) => m,
-                None => return Ok(()), // 非会员，跳过
-            };
-
-            let mut remaining = available_commission;
-            let mut referrer = member.referrer;
-            let rates = [config.level1_rate, config.level2_rate, config.level3_rate];
-
-            for (level, rate) in rates.iter().enumerate() {
-                if let Some(ref ref_account) = referrer {
-                    if *rate == 0 {
-                        referrer = EntityMembers::<T>::get(shop_id, ref_account)
-                            .and_then(|m| m.referrer);
-                        continue;
-                    }
-
-                    let commission = order_amount
-                        .saturating_mul((*rate).into())
-                        / 10000u32.into();
-
-                    let actual_commission = commission.min(remaining);
-                    if actual_commission.is_zero() {
-                        break;
-                    }
-
-                    remaining = remaining.saturating_sub(actual_commission);
-
-                    // 记录返佣
-                    EntityMembers::<T>::mutate(shop_id, ref_account, |maybe_member| {
-                        if let Some(ref mut m) = maybe_member {
-                            m.total_commission = m.total_commission.saturating_add(actual_commission);
-                            m.pending_commission = m.pending_commission.saturating_add(actual_commission);
-                        }
-                    });
-
-                    // 更新买家的贡献
-                    EntityMembers::<T>::mutate(shop_id, buyer, |maybe_member| {
-                        if let Some(ref mut m) = maybe_member {
-                            m.total_contributed = m.total_contributed.saturating_add(actual_commission);
-                        }
-                    });
-
-                    // 更新店铺返佣统计
-                    ShopCommissionStats::<T>::mutate(shop_id, |(total, _)| {
-                        *total = total.saturating_add(actual_commission);
-                    });
-
-                    Self::deposit_event(Event::CommissionDistributed {
-                        shop_id,
-                        referrer: ref_account.clone(),
-                        amount: actual_commission,
-                        level: (level + 1) as u8,
-                    });
-
-                    // 获取上级的推荐人
-                    referrer = EntityMembers::<T>::get(shop_id, ref_account)
-                        .and_then(|m| m.referrer);
-                } else {
-                    break;
-                }
-            }
-
-            Ok(())
         }
 
         /// 更新会员消费金额
@@ -1927,14 +1799,6 @@ pub trait MemberProvider<AccountId, Balance> {
     /// 更新消费金额
     fn update_spent(shop_id: u64, account: &AccountId, amount: Balance, amount_usdt: u64) -> sp_runtime::DispatchResult;
 
-    /// 发放推荐返佣
-    fn distribute_commission(
-        shop_id: u64,
-        buyer: &AccountId,
-        order_amount: Balance,
-        available_commission: Balance,
-    ) -> sp_runtime::DispatchResult;
-
     /// 检查订单完成时的升级规则
     fn check_order_upgrade_rules(
         shop_id: u64,
@@ -1990,15 +1854,6 @@ impl<T: pallet::Config> MemberProvider<T::AccountId, pallet::BalanceOf<T>> for p
         pallet::Pallet::<T>::update_spent(shop_id, account, amount, amount_usdt)
     }
 
-    fn distribute_commission(
-        shop_id: u64,
-        buyer: &T::AccountId,
-        order_amount: pallet::BalanceOf<T>,
-        available_commission: pallet::BalanceOf<T>,
-    ) -> sp_runtime::DispatchResult {
-        pallet::Pallet::<T>::distribute_commission(shop_id, buyer, order_amount, available_commission)
-    }
-
     fn check_order_upgrade_rules(
         shop_id: u64,
         buyer: &T::AccountId,
@@ -2035,12 +1890,6 @@ impl<AccountId, Balance> MemberProvider<AccountId, Balance> for NullMemberProvid
     fn get_referrer(_shop_id: u64, _account: &AccountId) -> Option<AccountId> { None }
     fn auto_register(_shop_id: u64, _account: &AccountId, _referrer: Option<AccountId>) -> sp_runtime::DispatchResult { Ok(()) }
     fn update_spent(_shop_id: u64, _account: &AccountId, _amount: Balance, _amount_usdt: u64) -> sp_runtime::DispatchResult { Ok(()) }
-    fn distribute_commission(
-        _shop_id: u64,
-        _buyer: &AccountId,
-        _order_amount: Balance,
-        _available_commission: Balance,
-    ) -> sp_runtime::DispatchResult { Ok(()) }
     fn check_order_upgrade_rules(
         _shop_id: u64,
         _buyer: &AccountId,

@@ -1,13 +1,10 @@
 [package]
-name = "pallet-entity-member"
+name = "pallet-commission-core"
 version = "0.1.0"
-description = "COSMOS Entity 店铺会员管理模块 - 会员推荐关系与等级管理"
+description = "Commission core dispatch engine, storage, and withdrawal system"
 authors = ["COSMOS Team"]
 edition = "2021"
 license = "MIT"
-
-[package.metadata.docs.rs]
-targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
 codec = { features = ["derive"], workspace = true }
@@ -18,8 +15,8 @@ sp-runtime = { workspace = true }
 sp-std = { workspace = true }
 log = { workspace = true }
 
-# 内部依赖
-pallet-entity-common = { path = "../common", default-features = false }
+pallet-entity-common = { path = "../../common", default-features = false }
+pallet-commission-common = { path = "../common", default-features = false }
 
 [dev-dependencies]
 pallet-balances = { workspace = true }
@@ -36,6 +33,7 @@ std = [
     "sp-runtime/std",
     "sp-std/std",
     "pallet-entity-common/std",
+    "pallet-commission-common/std",
 ]
 runtime-benchmarks = [
     "frame-support/runtime-benchmarks",

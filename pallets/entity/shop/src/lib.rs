@@ -100,8 +100,6 @@ pub mod pallet {
         pub shop_type: ShopType,
         /// Shop 状态
         pub status: ShopOperatingStatus,
-        /// 是否为主 Shop
-        pub is_primary: bool,
         /// Shop 管理员列表
         pub managers: BoundedVec<AccountId, MaxManagers>,
         /// 客服账户
@@ -236,7 +234,6 @@ pub mod pallet {
             entity_id: u64,
             name: BoundedVec<u8, T::MaxShopNameLength>,
             shop_type: ShopType,
-            is_primary: bool,
         },
         /// Shop 信息更新
         ShopUpdated { shop_id: u64 },
@@ -306,8 +303,6 @@ pub mod pallet {
         ShopNotPaused,
         /// Shop 已关闭
         ShopAlreadyClosed,
-        /// 主 Shop 不能关闭
-        CannotClosePrimaryShop,
         /// 积分未启用
         PointsNotEnabled,
         /// 积分已启用
@@ -364,7 +359,7 @@ pub mod pallet {
             }
             
             // 创建 Shop
-            Self::do_create_shop(entity_id, name, shop_type, member_mode, initial_fund, false)?;
+            Self::do_create_shop(entity_id, name, shop_type, member_mode, initial_fund)?;
             
             Ok(())
         }
@@ -644,9 +639,6 @@ pub mod pallet {
                     .ok_or(Error::<T>::EntityNotFound)?;
                 ensure!(who == owner, Error::<T>::NotAuthorized);
                 
-                // 主 Shop 不能关闭
-                ensure!(!shop.is_primary, Error::<T>::CannotClosePrimaryShop);
-                
                 // 检查状态
                 ensure!(shop.status != ShopOperatingStatus::Closed, Error::<T>::ShopAlreadyClosed);
                 
@@ -687,7 +679,6 @@ pub mod pallet {
             shop_type: ShopType,
             member_mode: MemberMode,
             initial_fund: BalanceOf<T>,
-            is_primary: bool,
         ) -> Result<u64, DispatchError> {
             let shop_id = NextShopId::<T>::get();
             let now = <frame_system::Pallet<T>>::block_number();
@@ -700,7 +691,6 @@ pub mod pallet {
                 description_cid: None,
                 shop_type,
                 status: ShopOperatingStatus::Active,
-                is_primary,
                 managers: BoundedVec::default(),
                 customer_service: None,
                 initial_fund,
@@ -725,7 +715,6 @@ pub mod pallet {
                 entity_id,
                 name,
                 shop_type,
-                is_primary,
             });
 
             Ok(shop_id)
@@ -780,12 +769,6 @@ pub mod pallet {
         fn is_shop_manager(shop_id: u64, account: &T::AccountId) -> bool {
             Shops::<T>::get(shop_id)
                 .map(|s| Self::can_manage_shop(&s, account))
-                .unwrap_or(false)
-        }
-
-        fn is_primary_shop(shop_id: u64) -> bool {
-            Shops::<T>::get(shop_id)
-                .map(|s| s.is_primary)
                 .unwrap_or(false)
         }
 

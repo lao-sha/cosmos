@@ -1629,6 +1629,11 @@ dependencies = [
  "pallet-chat-group",
  "pallet-chat-permission",
  "pallet-collective",
+ "pallet-commission-common",
+ "pallet-commission-core",
+ "pallet-commission-level-diff",
+ "pallet-commission-referral",
+ "pallet-commission-single-line",
  "pallet-contracts",
  "pallet-entity-commission",
  "pallet-entity-common",
@@ -6548,6 +6553,77 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-commission-common"
+version = "0.1.0"
+dependencies = [
+ "frame-support",
+ "pallet-entity-common",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-runtime",
+]
+
+[[package]]
+name = "pallet-commission-core"
+version = "0.1.0"
+dependencies = [
+ "frame-support",
+ "frame-system",
+ "log",
+ "pallet-balances",
+ "pallet-commission-common",
+ "pallet-entity-common",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+ "sp-std",
+]
+
+[[package]]
+name = "pallet-commission-level-diff"
+version = "0.1.0"
+dependencies = [
+ "frame-support",
+ "frame-system",
+ "pallet-commission-common",
+ "pallet-entity-common",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-runtime",
+ "sp-std",
+]
+
+[[package]]
+name = "pallet-commission-referral"
+version = "0.1.0"
+dependencies = [
+ "frame-support",
+ "frame-system",
+ "pallet-commission-common",
+ "pallet-entity-common",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-runtime",
+ "sp-std",
+]
+
+[[package]]
+name = "pallet-commission-single-line"
+version = "0.1.0"
+dependencies = [
+ "frame-support",
+ "frame-system",
+ "pallet-commission-common",
+ "pallet-entity-common",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-runtime",
+ "sp-std",
+]
+
+[[package]]
 name = "pallet-contracts"
 version = "45.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6604,19 +6680,13 @@ dependencies = [
 
 [[package]]
 name = "pallet-entity-commission"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
- "frame-support",
- "frame-system",
- "log",
- "pallet-balances",
- "pallet-entity-common",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-io",
- "sp-runtime",
- "sp-std",
+ "pallet-commission-common",
+ "pallet-commission-core",
+ "pallet-commission-level-diff",
+ "pallet-commission-referral",
+ "pallet-commission-single-line",
 ]
 
 [[package]]

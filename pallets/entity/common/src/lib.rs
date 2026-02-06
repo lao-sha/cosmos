@@ -509,9 +509,6 @@ pub trait ShopProvider<AccountId> {
     /// 检查是否为 Shop 管理员
     fn is_shop_manager(shop_id: u64, account: &AccountId) -> bool;
     
-    /// 检查是否为主 Shop
-    fn is_primary_shop(shop_id: u64) -> bool;
-    
     // ==================== 统计更新 ====================
     
     /// 更新 Shop 统计（销售额、订单数）
@@ -643,7 +640,6 @@ impl<AccountId: Default> ShopProvider<AccountId> for NullShopProvider {
     fn shop_type(_shop_id: u64) -> Option<ShopType> { None }
     fn shop_member_mode(_shop_id: u64) -> MemberMode { MemberMode::default() }
     fn is_shop_manager(_shop_id: u64, _account: &AccountId) -> bool { false }
-    fn is_primary_shop(_shop_id: u64) -> bool { false }
     fn update_shop_stats(_shop_id: u64, _sales_amount: u128, _order_count: u32) -> Result<(), DispatchError> { Ok(()) }
     fn update_shop_rating(_shop_id: u64, _rating: u8) -> Result<(), DispatchError> { Ok(()) }
     fn deduct_operating_fund(_shop_id: u64, _amount: u128) -> Result<(), DispatchError> { Ok(()) }

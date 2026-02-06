@@ -361,7 +361,16 @@ mod runtime {
 	pub type EntityMember = pallet_entity_member;
 
 	#[runtime::pallet_index(127)]
-	pub type EntityCommission = pallet_entity_commission;
+	pub type CommissionCore = pallet_commission_core;
+
+	#[runtime::pallet_index(133)]
+	pub type CommissionReferral = pallet_commission_referral;
+
+	#[runtime::pallet_index(134)]
+	pub type CommissionLevelDiff = pallet_commission_level_diff;
+
+	#[runtime::pallet_index(135)]
+	pub type CommissionSingleLine = pallet_commission_single_line;
 
 	#[runtime::pallet_index(128)]
 	pub type EntityMarket = pallet_entity_market;

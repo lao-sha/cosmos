@@ -70,6 +70,11 @@ pallet-entity-shop = { workspace = true }
 pallet-entity-token = { workspace = true }
 pallet-entity-governance = { workspace = true }
 pallet-entity-member = { workspace = true }
+pallet-commission-common = { workspace = true }
+pallet-commission-core = { workspace = true }
+pallet-commission-referral = { workspace = true }
+pallet-commission-level-diff = { workspace = true }
+pallet-commission-single-line = { workspace = true }
 pallet-entity-commission = { workspace = true }
 pallet-entity-service = { workspace = true }
 pallet-entity-transaction = { workspace = true }
@@ -155,6 +160,11 @@ std = [
 	"pallet-entity-token/std",
 	"pallet-entity-governance/std",
 	"pallet-entity-member/std",
+	"pallet-commission-common/std",
+	"pallet-commission-core/std",
+	"pallet-commission-referral/std",
+	"pallet-commission-level-diff/std",
+	"pallet-commission-single-line/std",
 	"pallet-entity-commission/std",
 	"pallet-entity-service/std",
 	"pallet-entity-transaction/std",
