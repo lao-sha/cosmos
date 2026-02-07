@@ -1,16 +1,8 @@
 # Cosmos Blockchain
 
-Cosmos 是一个基于 Substrate 构建的区块链平台，集成玄学占卜、AI 宠物养成、社交通讯、去中心化交易等功能的 Web3 生态系统。
+Cosmos 是一个基于 Substrate 构建的区块链平台，集成 AI 宠物养成、社交通讯、去中心化交易等功能的 Web3 生态系统。
 
 ## 🌟 核心功能
-
-### 🔮 玄学占卜
-- **八字命理** - 根据出生时间分析命运
-- **梅花易数** - 随机起卦预测
-- **六爻占卜** - 传统易经占卜
-- **奇门遁甲** - 时空预测术
-- **紫微斗数** - 星象命理分析
-- **塔罗牌** - 西方占卜系统
 
 ### 🐱 喵星宇宙 (Meowstar)
 AI 宠物养成与 GameFi 生态系统：
@@ -37,11 +29,9 @@ cosmos/
 ├── node/                    # 区块链节点实现
 ├── runtime/                 # 运行时逻辑
 ├── pallets/                 # 自定义 Pallet 模块
-│   ├── divination/          # 占卜模块
 │   ├── meowstar/            # 喵星宇宙模块
 │   ├── chat/                # 聊天和直播模块
 │   ├── trading/             # 交易模块
-│   ├── matchmaking/         # 匹配模块
 │   ├── affiliate/           # 分销模块
 │   ├── escrow/              # 托管模块
 │   ├── evidence/            # 证据存储模块
@@ -159,8 +149,6 @@ docker-compose up -d
 |------|------|------|
 | 首页 | `/` | 核心功能入口 |
 | 聊天 | `/chat` | 即时通讯 |
-| 占卜 | `/market` | 玄学占卜服务 |
-| 合婚 | `/matchmaking` | 缘分匹配 |
 | 我的 | `/profile` | 个人中心 |
 | 喵星主页 | `/meowstar` | 喵星宇宙入口 |
 | 宠物列表 | `/meowstar/pets` | 我的宠物 |

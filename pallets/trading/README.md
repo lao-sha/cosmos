@@ -6,7 +6,7 @@
 
 1. **pallet-maker** - 做市商管理（申请、审核、押金、提现）
 2. **pallet-otc-order** - OTC 订单管理（创建、支付、释放、取消、争议）
-3. **pallet-swap** - COS → USDT 做市商兑换服务（OCW 验证、超时退款）
+3. **pallet-trading-swap** - COS → USDT 做市商兑换服务（OCW 验证、超时退款）
 4. **pallet-trading-common** - 公共工具库（数据掩码、验证）
 
 ### 核心价值
@@ -56,7 +56,7 @@ pallet-otc-order (独立模块 - OTC 订单)
   ├── 争议处理
   └── 信用分记录
 
-pallet-swap (独立模块 - 做市商兑换服务)
+pallet-trading-swap (独立模块 - 做市商兑换服务)
   ├── 做市商兑换（市场化服务）
   ├── OCW 自动验证
   ├── 超时退款机制
@@ -74,7 +74,7 @@ pallet-trading (统一接口层)
     │
     ├─► pallet-maker
     │   ├── 提供做市商信息查询接口
-    │   └── 被 pallet-otc-order 和 pallet-swap 调用
+    │   └── 被 pallet-otc-order 和 pallet-trading-swap 调用
     │
     ├─► pallet-otc-order
     │   ├── 调用 pallet-maker::MakerInterface 查询做市商信息
@@ -83,7 +83,7 @@ pallet-trading (统一接口层)
     │   ├── 调用 pallet-credit::MakerCreditInterface 记录做市商信用
     │   └── 调用 pallet-pricing::PricingProvider 添加价格数据
     │
-    ├─► pallet-swap
+    ├─► pallet-trading-swap
     │   ├── 调用 pallet-maker::MakerInterface 查询做市商信息
     │   ├── 调用 pallet-escrow::Escrow 锁定/释放资金
     │   ├── 调用 pallet-credit::CreditInterface 记录信用
@@ -92,7 +92,7 @@ pallet-trading (统一接口层)
     └─► pallet-trading-common
         ├── 被 pallet-maker 调用（数据脱敏、验证）
         ├── 被 pallet-otc-order 调用（数据脱敏、验证）
-        └── 被 pallet-swap 调用（数据脱敏、验证）
+        └── 被 pallet-trading-swap 调用（数据脱敏、验证）
 ```
 
 ### 重构优势
@@ -101,7 +101,7 @@ pallet-trading (统一接口层)
 |------|------|----------|
 | **低耦合** | 子模块独立开发、测试、部署 | 修改 Maker 逻辑不影响 OTC 和 Swap |
 | **高内聚** | 每个模块职责单一清晰 | Maker 只管做市商，OTC 只管订单 |
-| **易维护** | 修改子模块不影响其他模块 | 升级 Swap 不需要重新测试 Maker |
+| **易维护** | 修改子模块不影响其他模块 | 升级 TradingSwap 不需要重新测试 Maker |
 | **易测试** | 独立模块独立测试 | 每个模块有独立的 mock 和 tests |
 | **灵活集成** | Runtime 可选择性集成 | 可以只集成 OTC，不集成 Swap |
 
@@ -155,7 +155,7 @@ pub mod otc_types {
 
 ```rust
 pub mod swap_types {
-    pub use pallet_swap::{
+    pub use pallet_trading_swap::{
         SwapStatus,            // 兑换状态枚举
         MakerSwapRecord,       // 做市商兑换记录
     };
@@ -194,7 +194,7 @@ pub mod utils {
 pub struct PlatformStats {
     pub total_makers: u64,   // 总做市商数（来自 pallet-maker）
     pub total_orders: u64,   // 总订单数（来自 pallet-otc-order）
-    pub total_swaps: u64,    // 总兑换数（来自 pallet-swap）
+    pub total_swaps: u64,    // 总兑换数（来自 pallet-trading-swap）
 }
 ```
 
@@ -386,7 +386,7 @@ pub fn dispute_order(origin: OriginFor<T>, order_id: u64) -> DispatchResult
 
 ---
 
-### 3. pallet-swap（做市商兑换服务）
+### 3. pallet-trading-swap（做市商兑换服务）
 
 > ℹ️ **版本说明**: v0.2.0 移除了官方桥接功能，仅保留做市商兑换服务
 
@@ -494,7 +494,7 @@ pub enum Event<T: Config> {
 }
 ```
 
-### 3. pallet-swap 事件
+### 3. pallet-trading-swap 事件
 
 ```rust
 pub enum Event<T: Config> {
@@ -571,10 +571,10 @@ impl pallet_otc_order::Config for Runtime {
 }
 ```
 
-### 3. pallet-swap 配置
+### 3. pallet-trading-swap 配置
 
 ```rust
-impl pallet_swap::Config for Runtime {
+impl pallet_trading_swap::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type Currency = Balances;
     type Escrow = Escrow;
@@ -1065,8 +1065,8 @@ impl pallet_otc_order::Config for Runtime {
     type WeightInfo = ();
 }
 
-// 3. 配置 pallet-swap
-impl pallet_swap::Config for Runtime {
+// 3. 配置 pallet-trading-swap
+impl pallet_trading_swap::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type Currency = Balances;
     type Escrow = Escrow;
@@ -1090,7 +1090,7 @@ construct_runtime! {
         // Trading modules
         Maker: pallet_maker,
         OtcOrder: pallet_otc_order,
-        Swap: pallet_swap,
+        TradingSwap: pallet_trading_swap,
 
         // Dependencies
         Escrow: pallet_escrow,
@@ -1193,7 +1193,7 @@ pub struct MakerSwapRecord<T: Config> {
 # 子模块依赖
 pallet-maker = { path = "../maker", default-features = false }
 pallet-otc-order = { path = "../otc-order", default-features = false }
-pallet-swap = { path = "../swap", default-features = false }
+pallet-trading-swap = { path = "swap", default-features = false }
 pallet-trading-common = { path = "../trading-common", default-features = false }
 ```
 
@@ -1203,7 +1203,7 @@ pallet-trading-common = { path = "../trading-common", default-features = false }
 // 直接导出子模块
 pub use pallet_maker;
 pub use pallet_otc_order;
-pub use pallet_swap;
+pub use pallet_trading_swap;
 pub use pallet_trading_common;
 
 // 聚合类型导出
@@ -1220,12 +1220,12 @@ pub struct TradingApi;
 impl TradingApi {
     pub fn get_platform_stats<T>() -> PlatformStats
     where
-        T: pallet_maker::Config + pallet_otc_order::Config + pallet_swap::Config,
+        T: pallet_maker::Config + pallet_otc_order::Config + pallet_trading_swap::Config,
     {
         PlatformStats {
             total_makers: pallet_maker::NextMakerId::<T>::get(),
             total_orders: pallet_otc_order::NextOrderId::<T>::get(),
-            total_swaps: pallet_swap::NextSwapId::<T>::get(),
+            total_swaps: pallet_trading_swap::NextSwapId::<T>::get(),
         }
     }
 }
@@ -1284,7 +1284,7 @@ pub fn is_valid_tron_address(address: &[u8]) -> bool;
 #### 4.3 防重放攻击
 
 ```rust
-// pallet-swap 记录已使用的 TRC20 交易哈希
+// pallet-trading-swap 记录已使用的 TRC20 交易哈希
 pub type UsedTronTxHashes<T: Config> = StorageMap<
     _,
     Blake2_128Concat,
@@ -1307,7 +1307,7 @@ construct_runtime! {
     pub struct Runtime {
         Maker: pallet_maker,
         OtcOrder: pallet_otc_order,
-        Swap: pallet_swap,
+        TradingSwap: pallet_trading_swap,
     }
 }
 
@@ -1327,7 +1327,7 @@ construct_runtime! {
 // ✅ 推荐
 await api.tx.maker.lockDeposit().signAndSend(account);
 await api.tx.otcOrder.createOrder(...).signAndSend(account);
-await api.tx.swap.createSwap(...).signAndSend(account);
+await api.tx.tradingSwap.makerSwap(...).signAndSend(account);
 
 // ❌ 不推荐（无此 API）
 await api.tx.trading.lockDeposit().signAndSend(account);
@@ -1383,7 +1383,7 @@ try {
 
 - **[pallet-maker](../maker/README.md)**: 做市商管理
 - **[pallet-otc-order](../otc/README.md)**: OTC 订单管理
-- **[pallet-swap](../swap/README.md)**: COS → USDT 做市商兑换
+- **[pallet-trading-swap](swap/README.md)**: COS → USDT 做市商兑换
 - **[pallet-trading-common](../common/README.md)**: 公共工具库
 
 ### 依赖模块
@@ -1404,8 +1404,8 @@ try {
 | 版本 | 日期 | 说明 |
 |------|------|------|
 | v0.1.0 | 2025-11-03 | 重构为统一接口层，拆分为 4 个子模块（maker/otc/swap/common） |
-| v0.2.0 | 2026-01-18 | pallet-swap: 移除官方桥接功能，仅保留做市商兑换 |
-| v0.3.0 | 2026-01-18 | pallet-swap: 重命名 bridge → swap |
+| v0.2.0 | 2026-01-18 | pallet-trading-swap: 移除官方桥接功能，仅保留做市商兑换 |
+| v0.3.0 | 2026-01-18 | pallet-trading-swap: 重命名 bridge → swap |
 
 ---
 

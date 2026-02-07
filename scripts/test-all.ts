@@ -17,8 +17,6 @@ const TESTS = [
   { name: 'Escrow', script: 'test-escrow.ts', description: '托管模块' },
   { name: 'Arbitration', script: 'test-arbitration.ts', description: '仲裁模块' },
   { name: 'Chat', script: 'test-chat.ts', description: '聊天模块' },
-  { name: 'Divination', script: 'test-divination.ts', description: '占卜模块' },
-  { name: 'Matchmaking', script: 'test-matchmaking.ts', description: '相亲模块' },
 ];
 
 interface TestResult {

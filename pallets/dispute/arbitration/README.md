@@ -83,7 +83,7 @@ pub enum ComplaintStatus {
 |-------|---------|
 | OTC | OtcSellerNotDeliver, OtcBuyerFalseClaim, OtcTradeFraud |
 | 直播 | LiveIllegalContent, LiveFalseAdvertising, LiveHarassment |
-| 占卜 | DivinePornography, DivineFraud, DivineAbuse |
+| 做市商 | MakerCreditDefault, MakerMaliciousOperation, MakerFalseQuote |
 | 聊天 | ChatHarassment, ChatFraud, ChatIllegalContent |
 | NFT | NftSellerNotDeliver, NftCounterfeit, NftTradeFraud |
 

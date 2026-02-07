@@ -27,7 +27,7 @@ pub mod pallet {
         BoundedVec,
     };
     use frame_system::pallet_prelude::*;
-    use pallet_entity_common::EntityProvider;
+    use pallet_entity_common::{EntityProvider, ShopProvider, MemberRegistrationPolicy};
     pub use pallet_entity_common::MemberLevel;
     use sp_runtime::traits::{Saturating, Zero};
 
@@ -391,25 +391,24 @@ pub mod pallet {
         ValueQuery,
     >;
 
-    // ============================================================================
-    // Entity-Shop 分离架构：Shop 级别会员存储
-    // ============================================================================
-
-    /// Shop 级别会员存储 (shop_id, account) -> EntityMember
-    /// 当 MemberMode 为 Independent 或 Hybrid 时使用
+    /// 会员注册策略 entity_id -> MemberRegistrationPolicy
     #[pallet::storage]
-    #[pallet::getter(fn shop_members)]
-    pub type ShopMembers<T: Config> = StorageDoubleMap<
+    #[pallet::getter(fn entity_member_policy)]
+    pub type EntityMemberPolicy<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat, u64,
+        MemberRegistrationPolicy,
+        ValueQuery,
+    >;
+
+    /// 待审批会员 (entity_id, account) -> referrer
+    #[pallet::storage]
+    pub type PendingMembers<T: Config> = StorageDoubleMap<
         _,
         Blake2_128Concat, u64,
         Blake2_128Concat, T::AccountId,
-        EntityMemberOf<T>,
+        Option<T::AccountId>,
     >;
-
-    /// Shop 会员数量 shop_id -> count
-    #[pallet::storage]
-    #[pallet::getter(fn shop_member_count)]
-    pub type ShopMemberCount<T: Config> = StorageMap<_, Blake2_128Concat, u64, u32, ValueQuery>;
 
     // ============================================================================
     // 事件
@@ -511,6 +510,28 @@ pub mod pallet {
             expired_level_id: u8,
             new_level_id: u8,
         },
+        /// 会员注册策略更新
+        MemberPolicyUpdated {
+            entity_id: u64,
+            policy: MemberRegistrationPolicy,
+        },
+        /// 会员待审批（APPROVAL_REQUIRED 模式）
+        MemberPendingApproval {
+            entity_id: u64,
+            account: T::AccountId,
+            referrer: Option<T::AccountId>,
+        },
+        /// 会员审批通过
+        MemberApproved {
+            entity_id: u64,
+            shop_id: u64,
+            account: T::AccountId,
+        },
+        /// 会员审批拒绝
+        MemberRejected {
+            entity_id: u64,
+            account: T::AccountId,
+        },
     }
 
     // ============================================================================
@@ -567,6 +588,16 @@ pub mod pallet {
         EmptyRuleName,
         /// 无效目标等级
         InvalidTargetLevel,
+        /// 需要先消费才能注册（PURCHASE_REQUIRED 策略）
+        PurchaseRequiredForRegistration,
+        /// 需要提供推荐人（REFERRAL_REQUIRED 策略）
+        ReferralRequiredForRegistration,
+        /// 会员待审批中（APPROVAL_REQUIRED 策略）
+        MemberPendingApproval,
+        /// 未找到待审批记录
+        PendingMemberNotFound,
+        /// 不是 Entity 管理员
+        NotEntityAdmin,
     }
 
     // ============================================================================
@@ -589,25 +620,57 @@ pub mod pallet {
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            // 验证店铺存在
-            ensure!(T::EntityProvider::entity_exists(shop_id), Error::<T>::ShopNotFound);
+            // 验证店铺存在且营业中
+            ensure!(T::ShopProvider::shop_exists(shop_id), Error::<T>::ShopNotFound);
+            ensure!(T::ShopProvider::is_shop_active(shop_id), Error::<T>::ShopNotFound);
 
-            // 验证未注册
-            ensure!(
-                !EntityMembers::<T>::contains_key(shop_id, &who),
-                Error::<T>::AlreadyMember
-            );
+            let entity_id = T::ShopProvider::shop_entity_id(shop_id)
+                .ok_or(Error::<T>::ShopNotFound)?;
+
+            // 检查是否已注册（会员统一在 Entity 级别）
+            ensure!(!EntityMembers::<T>::contains_key(entity_id, &who), Error::<T>::AlreadyMember);
+
+            // ---- 注册策略检查 ----
+            let policy = EntityMemberPolicy::<T>::get(entity_id);
+
+            // PURCHASE_REQUIRED: 手动注册被拒（必须通过 auto_register 即下单触发）
+            ensure!(!policy.requires_purchase(), Error::<T>::PurchaseRequiredForRegistration);
+
+            // REFERRAL_REQUIRED: 必须提供推荐人
+            if policy.requires_referral() {
+                ensure!(referrer.is_some(), Error::<T>::ReferralRequiredForRegistration);
+            }
 
             // 验证推荐人
             if let Some(ref ref_account) = referrer {
                 ensure!(ref_account != &who, Error::<T>::SelfReferral);
                 ensure!(
-                    EntityMembers::<T>::contains_key(shop_id, ref_account),
+                    EntityMembers::<T>::contains_key(entity_id, ref_account),
                     Error::<T>::InvalidReferrer
                 );
             }
 
-            Self::do_register_member(shop_id, &who, referrer.clone())?;
+            // APPROVAL_REQUIRED: 进入待审批状态
+            if policy.requires_approval() {
+                // 检查是否已在待审批列表
+                ensure!(
+                    !PendingMembers::<T>::contains_key(entity_id, &who),
+                    Error::<T>::MemberPendingApproval
+                );
+
+                PendingMembers::<T>::insert(entity_id, &who, referrer.clone());
+
+                Self::deposit_event(Event::MemberPendingApproval {
+                    entity_id,
+                    account: who,
+                    referrer,
+                });
+
+                return Ok(());
+            }
+
+            // 正常注册
+            Self::do_register_member(entity_id, shop_id, &who, referrer.clone())?;
 
             Self::deposit_event(Event::MemberRegistered {
                 shop_id,
@@ -633,7 +696,7 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
 
             // 验证是会员
-            let mut member = EntityMembers::<T>::get(shop_id, &who)
+            let mut member = Self::get_member_by_shop(shop_id, &who)
                 .ok_or(Error::<T>::NotMember)?;
 
             // 验证未绑定推荐人
@@ -642,7 +705,7 @@ pub mod pallet {
             // 验证推荐人
             ensure!(referrer != who, Error::<T>::SelfReferral);
             ensure!(
-                EntityMembers::<T>::contains_key(shop_id, &referrer),
+                Self::is_member_of_shop(shop_id, &referrer),
                 Error::<T>::InvalidReferrer
             );
 
@@ -654,10 +717,14 @@ pub mod pallet {
 
             // 绑定推荐人
             member.referrer = Some(referrer.clone());
-            EntityMembers::<T>::insert(shop_id, &who, member);
+            Self::mutate_member_by_shop(shop_id, &who, |maybe_member| {
+                if let Some(ref mut m) = maybe_member {
+                    m.referrer = member.referrer.clone();
+                }
+            });
 
             // 更新推荐人的直接推荐人数
-            EntityMembers::<T>::mutate(shop_id, &referrer, |maybe_member| {
+            Self::mutate_member_by_shop(shop_id, &referrer, |maybe_member| {
                 if let Some(ref mut m) = maybe_member {
                     m.direct_referrals = m.direct_referrals.saturating_add(1);
                 }
@@ -899,7 +966,7 @@ pub mod pallet {
                 Error::<T>::InvalidLevelId
             );
 
-            EntityMembers::<T>::try_mutate(shop_id, &member, |maybe_member| -> DispatchResult {
+            Self::mutate_member_by_shop(shop_id, &member, |maybe_member| -> DispatchResult {
                 let m = maybe_member.as_mut().ok_or(Error::<T>::NotMember)?;
                 m.custom_level_id = target_level_id;
 
@@ -1167,6 +1234,117 @@ pub mod pallet {
                 Ok(())
             })
         }
+
+        /// 设置会员注册策略（Entity 级别）
+        ///
+        /// # 参数
+        /// - `shop_id`: 任意关联 Shop（用于定位 Entity 和权限校验）
+        /// - `policy_bits`: 策略位标记（0=开放, 1=需购买, 2=需推荐人, 4=需审批，可组合）
+        #[pallet::call_index(17)]
+        #[pallet::weight(Weight::from_parts(15_000, 0))]
+        pub fn set_member_policy(
+            origin: OriginFor<T>,
+            shop_id: u64,
+            policy_bits: u8,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            let entity_id = T::ShopProvider::shop_entity_id(shop_id)
+                .ok_or(Error::<T>::ShopNotFound)?;
+
+            // 权限检查：Entity owner 或 admin
+            ensure!(
+                T::EntityProvider::entity_owner(entity_id).as_ref() == Some(&who)
+                    || T::EntityProvider::is_entity_admin(entity_id, &who),
+                Error::<T>::NotEntityAdmin
+            );
+
+            let policy = MemberRegistrationPolicy(policy_bits);
+            EntityMemberPolicy::<T>::insert(entity_id, policy);
+
+            Self::deposit_event(Event::MemberPolicyUpdated { entity_id, policy });
+
+            Ok(())
+        }
+
+        /// 审批通过待注册会员（APPROVAL_REQUIRED 模式）
+        ///
+        /// # 参数
+        /// - `shop_id`: 关联 Shop
+        /// - `account`: 待审批账户
+        #[pallet::call_index(18)]
+        #[pallet::weight(Weight::from_parts(25_000, 0))]
+        pub fn approve_member(
+            origin: OriginFor<T>,
+            shop_id: u64,
+            account: T::AccountId,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            let entity_id = T::ShopProvider::shop_entity_id(shop_id)
+                .ok_or(Error::<T>::ShopNotFound)?;
+
+            // 权限检查
+            ensure!(
+                T::EntityProvider::entity_owner(entity_id).as_ref() == Some(&who)
+                    || T::EntityProvider::is_entity_admin(entity_id, &who),
+                Error::<T>::NotEntityAdmin
+            );
+
+            // 取出待审批记录
+            let referrer = PendingMembers::<T>::take(entity_id, &account)
+                .ok_or(Error::<T>::PendingMemberNotFound)?;
+
+            // 正式注册
+            Self::do_register_member(entity_id, shop_id, &account, referrer)?;
+
+            Self::deposit_event(Event::MemberApproved {
+                entity_id,
+                shop_id,
+                account,
+            });
+
+            Ok(())
+        }
+
+        /// 拒绝待注册会员（APPROVAL_REQUIRED 模式）
+        ///
+        /// # 参数
+        /// - `shop_id`: 关联 Shop
+        /// - `account`: 待审批账户
+        #[pallet::call_index(19)]
+        #[pallet::weight(Weight::from_parts(15_000, 0))]
+        pub fn reject_member(
+            origin: OriginFor<T>,
+            shop_id: u64,
+            account: T::AccountId,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+
+            let entity_id = T::ShopProvider::shop_entity_id(shop_id)
+                .ok_or(Error::<T>::ShopNotFound)?;
+
+            // 权限检查
+            ensure!(
+                T::EntityProvider::entity_owner(entity_id).as_ref() == Some(&who)
+                    || T::EntityProvider::is_entity_admin(entity_id, &who),
+                Error::<T>::NotEntityAdmin
+            );
+
+            // 删除待审批记录
+            ensure!(
+                PendingMembers::<T>::contains_key(entity_id, &account),
+                Error::<T>::PendingMemberNotFound
+            );
+            PendingMembers::<T>::remove(entity_id, &account);
+
+            Self::deposit_event(Event::MemberRejected {
+                entity_id,
+                account,
+            });
+
+            Ok(())
+        }
     }
 
     // ============================================================================
@@ -1174,8 +1352,36 @@ pub mod pallet {
     // ============================================================================
 
     impl<T: Config> Pallet<T> {
-        /// 注册会员内部实现
+        /// 解析 shop_id 对应的 entity_id
+        fn resolve_entity_id(shop_id: u64) -> u64 {
+            T::ShopProvider::shop_entity_id(shop_id).unwrap_or(0)
+        }
+
+        /// 通过 shop_id 查询会员（会员统一存储在 Entity 级别）
+        pub fn get_member_by_shop(shop_id: u64, account: &T::AccountId) -> Option<EntityMemberOf<T>> {
+            let entity_id = Self::resolve_entity_id(shop_id);
+            EntityMembers::<T>::get(entity_id, account)
+        }
+
+        /// 通过 shop_id 检查是否为会员
+        pub fn is_member_of_shop(shop_id: u64, account: &T::AccountId) -> bool {
+            let entity_id = Self::resolve_entity_id(shop_id);
+            EntityMembers::<T>::contains_key(entity_id, account)
+        }
+
+        /// 通过 shop_id 更新会员数据
+        fn mutate_member_by_shop<R>(
+            shop_id: u64,
+            account: &T::AccountId,
+            f: impl FnOnce(&mut Option<EntityMemberOf<T>>) -> R,
+        ) -> R {
+            let entity_id = Self::resolve_entity_id(shop_id);
+            EntityMembers::<T>::mutate(entity_id, account, f)
+        }
+
+        /// 注册会员内部实现（统一写入 EntityMembers[entity_id]）
         fn do_register_member(
+            entity_id: u64,
             shop_id: u64,
             account: &T::AccountId,
             referrer: Option<T::AccountId>,
@@ -1195,27 +1401,38 @@ pub mod pallet {
                 period_start: now,
             };
 
-            EntityMembers::<T>::insert(shop_id, account, member);
-            MemberCount::<T>::mutate(shop_id, |count| *count = count.saturating_add(1));
+            EntityMembers::<T>::insert(entity_id, account, member);
+            MemberCount::<T>::mutate(entity_id, |count| *count = count.saturating_add(1));
 
             // 更新推荐人统计
             if let Some(ref ref_account) = referrer {
-                EntityMembers::<T>::mutate(shop_id, ref_account, |maybe_member| {
-                    if let Some(ref mut m) = maybe_member {
-                        m.direct_referrals = m.direct_referrals.saturating_add(1);
-                    }
-                });
-
-                // 更新推荐索引
-                let _ = DirectReferrals::<T>::try_mutate(shop_id, ref_account, |referrals| {
-                    referrals.try_push(account.clone())
-                });
-
-                // 更新团队人数
-                Self::update_team_size(shop_id, ref_account);
+                Self::mutate_member_referral(entity_id, shop_id, ref_account, account);
             }
 
             Ok(())
+        }
+
+        /// 更新推荐人统计
+        fn mutate_member_referral(
+            entity_id: u64,
+            shop_id: u64,
+            ref_account: &T::AccountId,
+            new_member: &T::AccountId,
+        ) {
+            // 更新推荐人的 direct_referrals
+            EntityMembers::<T>::mutate(entity_id, ref_account, |maybe_member| {
+                if let Some(ref mut m) = maybe_member {
+                    m.direct_referrals = m.direct_referrals.saturating_add(1);
+                }
+            });
+
+            // 更新推荐索引（按 shop_id 索引，供佣金模块查询）
+            let _ = DirectReferrals::<T>::try_mutate(shop_id, ref_account, |referrals| {
+                referrals.try_push(new_member.clone())
+            });
+
+            // 更新团队人数
+            Self::update_team_size(shop_id, ref_account);
         }
 
         /// 检查是否存在循环推荐
@@ -1248,7 +1465,7 @@ pub mod pallet {
                 if depth >= MAX_DEPTH {
                     break;
                 }
-                current = EntityMembers::<T>::get(shop_id, curr_account)
+                current = Self::get_member_by_shop(shop_id, curr_account)
                     .and_then(|m| m.referrer);
                 depth += 1;
             }
@@ -1267,13 +1484,13 @@ pub mod pallet {
                     break;
                 }
 
-                EntityMembers::<T>::mutate(shop_id, curr_account, |maybe_member| {
+                Self::mutate_member_by_shop(shop_id, curr_account, |maybe_member| {
                     if let Some(ref mut m) = maybe_member {
                         m.team_size = m.team_size.saturating_add(1);
                     }
                 });
 
-                current = EntityMembers::<T>::get(shop_id, curr_account)
+                current = Self::get_member_by_shop(shop_id, curr_account)
                     .and_then(|m| m.referrer);
                 depth += 1;
             }
@@ -1341,7 +1558,7 @@ pub mod pallet {
                 _ => return Ok(()),
             };
 
-            let member = match EntityMembers::<T>::get(shop_id, buyer) {
+            let member = match Self::get_member_by_shop(shop_id, buyer) {
                 Some(m) => m,
                 None => return Ok(()),
             };
@@ -1443,7 +1660,7 @@ pub mod pallet {
         ) -> DispatchResult {
             let now = <frame_system::Pallet<T>>::block_number();
 
-            EntityMembers::<T>::try_mutate(shop_id, account, |maybe_member| -> DispatchResult {
+            Self::mutate_member_by_shop(shop_id, account, |maybe_member| -> DispatchResult {
                 let member = maybe_member.as_mut().ok_or(Error::<T>::NotMember)?;
 
                 let old_level_id = member.custom_level_id;
@@ -1509,7 +1726,7 @@ pub mod pallet {
 
         /// 获取有效等级（考虑过期）
         pub fn get_effective_level(shop_id: u64, account: &T::AccountId) -> u8 {
-            let member = match EntityMembers::<T>::get(shop_id, account) {
+            let member = match Self::get_member_by_shop(shop_id, account) {
                 Some(m) => m,
                 None => return 0,
             };
@@ -1688,7 +1905,7 @@ pub mod pallet {
             amount: BalanceOf<T>,
             amount_usdt: u64,
         ) -> DispatchResult {
-            EntityMembers::<T>::try_mutate(shop_id, account, |maybe_member| -> DispatchResult {
+            Self::mutate_member_by_shop(shop_id, account, |maybe_member| -> DispatchResult {
                 let member = maybe_member.as_mut().ok_or(Error::<T>::NotMember)?;
 
                 member.total_spent = member.total_spent.saturating_add(amount);
@@ -1732,19 +1949,26 @@ pub mod pallet {
             })
         }
 
-        /// 自动注册会员
+        /// 自动注册会员（系统调用：下单、复购赠送等）
+        ///
+        /// 策略行为：
+        /// - PURCHASE_REQUIRED: 不阻拦（auto_register 本身由购买/赠送触发）
+        /// - REFERRAL_REQUIRED: 无推荐人时静默跳过（不注册，不报错）
+        /// - APPROVAL_REQUIRED: 进入待审批状态
         pub fn auto_register(
             shop_id: u64,
             account: &T::AccountId,
             referrer: Option<T::AccountId>,
         ) -> DispatchResult {
-            if EntityMembers::<T>::contains_key(shop_id, account) {
+            let entity_id = Self::resolve_entity_id(shop_id);
+
+            if EntityMembers::<T>::contains_key(entity_id, account) {
                 return Ok(()); // 已是会员
             }
 
             // 验证推荐人
             let valid_referrer = if let Some(ref ref_account) = referrer {
-                if ref_account != account && EntityMembers::<T>::contains_key(shop_id, ref_account) {
+                if ref_account != account && EntityMembers::<T>::contains_key(entity_id, ref_account) {
                     referrer
                 } else {
                     None
@@ -1753,7 +1977,29 @@ pub mod pallet {
                 None
             };
 
-            Self::do_register_member(shop_id, account, valid_referrer.clone())?;
+            // ---- 注册策略检查 ----
+            let policy = EntityMemberPolicy::<T>::get(entity_id);
+
+            // REFERRAL_REQUIRED: 无有效推荐人时拒绝（先判断推荐人，没有推荐人不可购买）
+            if policy.requires_referral() && valid_referrer.is_none() {
+                return Err(Error::<T>::ReferralRequiredForRegistration.into());
+            }
+
+            // APPROVAL_REQUIRED: 进入待审批状态（购买触发也需审批）
+            if policy.requires_approval() {
+                if !PendingMembers::<T>::contains_key(entity_id, account) {
+                    PendingMembers::<T>::insert(entity_id, account, valid_referrer.clone());
+
+                    Self::deposit_event(Event::MemberPendingApproval {
+                        entity_id,
+                        account: account.clone(),
+                        referrer: valid_referrer,
+                    });
+                }
+                return Ok(());
+            }
+
+            Self::do_register_member(entity_id, shop_id, account, valid_referrer.clone())?;
 
             Self::deposit_event(Event::MemberRegistered {
                 shop_id,
@@ -1817,15 +2063,15 @@ pub trait MemberProvider<AccountId, Balance> {
 /// MemberProvider 实现
 impl<T: pallet::Config> MemberProvider<T::AccountId, pallet::BalanceOf<T>> for pallet::Pallet<T> {
     fn is_member(shop_id: u64, account: &T::AccountId) -> bool {
-        pallet::EntityMembers::<T>::contains_key(shop_id, account)
+        Self::is_member_of_shop(shop_id, account)
     }
 
     fn member_level(shop_id: u64, account: &T::AccountId) -> Option<pallet::MemberLevel> {
-        pallet::EntityMembers::<T>::get(shop_id, account).map(|m| m.level)
+        Self::get_member_by_shop(shop_id, account).map(|m| m.level)
     }
 
     fn custom_level_id(shop_id: u64, account: &T::AccountId) -> u8 {
-        pallet::EntityMembers::<T>::get(shop_id, account)
+        Self::get_member_by_shop(shop_id, account)
             .map(|m| m.custom_level_id)
             .unwrap_or(0)
     }
@@ -1843,7 +2089,7 @@ impl<T: pallet::Config> MemberProvider<T::AccountId, pallet::BalanceOf<T>> for p
     }
 
     fn get_referrer(shop_id: u64, account: &T::AccountId) -> Option<T::AccountId> {
-        pallet::EntityMembers::<T>::get(shop_id, account).and_then(|m| m.referrer)
+        Self::get_member_by_shop(shop_id, account).and_then(|m| m.referrer)
     }
 
     fn auto_register(shop_id: u64, account: &T::AccountId, referrer: Option<T::AccountId>) -> sp_runtime::DispatchResult {
@@ -1868,7 +2114,7 @@ impl<T: pallet::Config> MemberProvider<T::AccountId, pallet::BalanceOf<T>> for p
     }
 
     fn get_member_stats(shop_id: u64, account: &T::AccountId) -> (u32, u32, u128) {
-        pallet::EntityMembers::<T>::get(shop_id, account)
+        Self::get_member_by_shop(shop_id, account)
             .map(|m| {
                 let spent_usdt: u128 = sp_runtime::SaturatedConversion::saturated_into(m.total_spent);
                 (m.direct_referrals, m.team_size, spent_usdt)

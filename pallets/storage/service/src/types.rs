@@ -27,34 +27,22 @@ use sp_runtime::RuntimeDebug;
 /// 类型说明：
 /// - Evidence：证据类数据（法律文件、证明材料等）- 最高优先级
 /// - OtcOrder：OTC订单（交易证据、聊天记录等）
-/// - DivinationMarket：命理服务市场（服务描述、订单内容、评价等）
-/// - DivinationNft：命理NFT（NFT主图、描述、动画等）- 高价值资产
-/// - DivinationAi：AI解读内容（解读结果、摘要等）
 /// - Chat：聊天消息（私聊/群聊媒体、文件等）
 /// - Livestream：直播间（封面图、礼物图标等）- 临时数据
 /// - Swap：Swap兑换（兑换证据等）
 /// - Arbitration：仲裁证据（申诉材料、裁决文书、证据截图）- 法律级别
 /// - UserProfile：用户档案（头像、认证材料、简介图）
-/// - DivinationReport：命理排盘报告（八字/紫微/奇门等完整报告）
-/// - Matchmaking：婚恋模块（用户照片、合婚报告、认证材料）
-/// - MatchmakingChat：婚恋聊天（匹配后的聊天媒体）- 临时数据
 /// - General：通用存储（默认类型）
 /// - Custom：自定义域（预留扩展）
 /// 
 /// 域ID映射（用于SubjectFunding账户派生）：
 /// - Evidence = 0
 /// - OtcOrder = 1
-/// - DivinationMarket = 2
-/// - DivinationNft = 3
-/// - DivinationAi = 4
 /// - Chat = 5
 /// - Livestream = 6
 /// - Swap = 7
 /// - Arbitration = 8
 /// - UserProfile = 9
-/// - DivinationReport = 10
-/// - Matchmaking = 11
-/// - MatchmakingChat = 12
 /// - General = 98
 /// - Custom = 99
 /// 
@@ -67,12 +55,6 @@ pub enum SubjectType {
     Evidence,
     /// OTC订单（交易证据、聊天记录，需长期保存）
     OtcOrder,
-    /// 命理服务市场（服务描述、订单内容、评价）
-    DivinationMarket,
-    /// 命理NFT（NFT主图、描述、动画）- 高价值数字资产，永久保存
-    DivinationNft,
-    /// AI解读内容（解读结果、摘要）
-    DivinationAi,
     /// 聊天消息（私聊/群聊媒体、文件）- ⚠️ 180天过期，建议 Temporary 或不 PIN
     Chat,
     /// 直播间（封面图、礼物图标）- ⚠️ 临时数据，建议 Temporary 或不 PIN
@@ -83,12 +65,6 @@ pub enum SubjectType {
     Arbitration,
     /// 用户档案（头像、认证材料、简介图）
     UserProfile,
-    /// 命理排盘报告（八字/紫微/奇门等完整报告PDF/图片）
-    DivinationReport,
-    /// 婚恋模块（用户照片、合婚报告、认证材料）- Standard级别
-    Matchmaking,
-    /// 婚恋聊天（匹配后的聊天媒体）- ⚠️ 临时数据，建议 Temporary
-    MatchmakingChat,
     /// 通用存储（默认类型）
     General,
     /// 自定义域（预留扩展）
@@ -727,39 +703,6 @@ impl StorageLayerConfig {
         }
     }
 
-    /// 获取命理市场的默认配置（标准安全）
-    /// 适用于：DivinationMarket - 服务描述、订单内容、评价
-    pub fn divination_market_default() -> Self {
-        Self {
-            core_replicas: 2,
-            community_replicas: 1,
-            allow_external: true,
-            min_total_replicas: 1,
-        }
-    }
-
-    /// 获取命理NFT的默认配置（高安全）
-    /// 适用于：DivinationNft - NFT主图、描述、动画（高价值数字资产）
-    pub fn divination_nft_default() -> Self {
-        Self {
-            core_replicas: 3,
-            community_replicas: 2,
-            allow_external: false,
-            min_total_replicas: 2,
-        }
-    }
-
-    /// 获取AI解读的默认配置（标准安全）
-    /// 适用于：DivinationAi - AI解读内容、摘要
-    pub fn divination_ai_default() -> Self {
-        Self {
-            core_replicas: 2,
-            community_replicas: 1,
-            allow_external: true,
-            min_total_replicas: 1,
-        }
-    }
-
     /// 获取聊天消息的默认配置（标准安全）
     /// 适用于：Chat - 私聊/群聊媒体、文件
     pub fn chat_default() -> Self {
@@ -815,17 +758,6 @@ impl StorageLayerConfig {
         }
     }
 
-    /// 获取命理排盘报告的默认配置（标准安全）
-    /// 适用于：DivinationReport - 八字/紫微/奇门等完整排盘报告
-    pub fn divination_report_default() -> Self {
-        Self {
-            core_replicas: 2,
-            community_replicas: 1,
-            allow_external: true,
-            min_total_replicas: 1,
-        }
-    }
-
     /// 获取临时数据的默认配置（低成本）
     /// 适用于：临时文件、缓存数据
     pub fn temporary_default() -> Self {
@@ -842,17 +774,11 @@ impl StorageLayerConfig {
         match subject_type {
             SubjectType::Evidence => Self::evidence_default(),
             SubjectType::OtcOrder => Self::otc_default(),
-            SubjectType::DivinationMarket => Self::divination_market_default(),
-            SubjectType::DivinationNft => Self::divination_nft_default(),
-            SubjectType::DivinationAi => Self::divination_ai_default(),
             SubjectType::Chat => Self::chat_default(),
             SubjectType::Livestream => Self::livestream_default(),
             SubjectType::Swap => Self::swap_default(),
             SubjectType::Arbitration => Self::arbitration_default(),
             SubjectType::UserProfile => Self::user_profile_default(),
-            SubjectType::DivinationReport => Self::divination_report_default(),
-            SubjectType::Matchmaking => Self::user_profile_default(), // 婚恋照片使用 Standard 配置
-            SubjectType::MatchmakingChat => Self::chat_default(),     // 婚恋聊天使用 Temporary 配置
             SubjectType::General => Self::general_default(),
             SubjectType::Custom(_) => Self::general_default(),
         }

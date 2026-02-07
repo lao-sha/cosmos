@@ -267,7 +267,7 @@ fn pause_shop_fails_already_paused() {
 
         assert_noop!(
             Shop::pause_shop(RuntimeOrigin::signed(1), 1),
-            Error::<Test>::ShopNotActive
+            Error::<Test>::ShopAlreadyPaused
         );
     });
 }
@@ -292,6 +292,66 @@ fn close_shop_works() {
 
         let shop = Shop::shops(1).unwrap();
         assert_eq!(shop.status, ShopOperatingStatus::Closed);
+    });
+}
+
+// ============================================================================
+// Primary Shop tests
+// ============================================================================
+
+#[test]
+fn create_primary_shop_works() {
+    new_test_ext().execute_with(|| {
+        let shop_id = <Shop as ShopProvider<u64>>::create_primary_shop(
+            1,
+            b"Primary Shop".to_vec(),
+            ShopType::OnlineStore,
+            MemberMode::Inherit,
+        ).unwrap();
+
+        assert!(Shop::shops(shop_id).is_some());
+        let shop = Shop::shops(shop_id).unwrap();
+        assert!(shop.is_primary);
+        assert_eq!(shop.entity_id, 1);
+        assert_eq!(shop.status, ShopOperatingStatus::Active);
+
+        // is_primary_shop trait method
+        assert!(<Shop as ShopProvider<u64>>::is_primary_shop(shop_id));
+    });
+}
+
+#[test]
+fn cannot_close_primary_shop() {
+    new_test_ext().execute_with(|| {
+        let shop_id = <Shop as ShopProvider<u64>>::create_primary_shop(
+            1,
+            b"Primary Shop".to_vec(),
+            ShopType::OnlineStore,
+            MemberMode::Inherit,
+        ).unwrap();
+
+        assert_noop!(
+            Shop::close_shop(RuntimeOrigin::signed(1), shop_id),
+            Error::<Test>::CannotClosePrimaryShop
+        );
+    });
+}
+
+#[test]
+fn normal_shop_is_not_primary() {
+    new_test_ext().execute_with(|| {
+        assert_ok!(Shop::create_shop(
+            RuntimeOrigin::signed(1),
+            1,
+            bounded_name(b"Normal Shop"),
+            ShopType::OnlineStore,
+            MemberMode::Inherit,
+            1000,
+        ));
+
+        let shop = Shop::shops(1).unwrap();
+        assert!(!shop.is_primary);
+        assert!(!<Shop as ShopProvider<u64>>::is_primary_shop(1));
     });
 }
 

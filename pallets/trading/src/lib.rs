@@ -10,7 +10,7 @@
 //! 
 //! 1. **pallet-maker** - 做市商管理（Application、审核、押金、提现）
 //! 2. **pallet-otc-order** - OTC 订单管理（创建、支付、释放、取消、争议）
-//! 3. **pallet-bridge** - COS ↔ USDT 桥接（Swap、兑换、OCW）
+//! 3. **pallet-trading-swap** - COS → USDT 做市商兑换（Swap、OCW 验证）
 //! 4. **pallet-trading-common** - 公共工具（数据掩码、验证）
 //! 
 //! ### 架构优势
@@ -34,10 +34,10 @@
 //!   ├── 首购逻辑
 //!   └── 自动过期
 //! 
-//! pallet-bridge (独立模块)
-//!   ├── COS ↔ USDT兑换
-//!   ├── OCW处理
-//!   └── 做市商兑换
+//! pallet-trading-swap (独立模块)
+//!   ├── COS → USDT 做市商兑换
+//!   ├── OCW 自动验证
+//!   └── 超时退款
 //! 
 //! pallet-trading-common (工具库)
 //!   ├── 数据掩码（姓名、身份证、生日）
@@ -87,7 +87,7 @@
 //!     type WeightInfo = ();
 //! }
 //! 
-//! impl pallet_bridge::Config for Runtime {
+//! impl pallet_trading_swap::Config for Runtime {
 //!     type RuntimeEvent = RuntimeEvent;
 //!     type Currency = Balances;
 //!     type Escrow = Escrow;
@@ -104,7 +104,7 @@
 //!         // ... 其他模块
 //!         Maker: pallet_maker,
 //!         OtcOrder: pallet_otc_order,
-//!         Bridge: pallet_bridge,
+//!         TradingSwap: pallet_trading_swap,
 //!     }
 //! }
 //! ```
@@ -119,8 +119,8 @@
 //! await api.tx.otcOrder.createOrder(makerId, amount, tronAddr).signAndSend(account);
 //! const orderInfo = await api.query.otcOrder.orders(orderId);
 //! 
-//! await api.tx.bridge.swap(amount, tronAddr).signAndSend(account);
-//! const swapInfo = await api.query.bridge.swapRequests(swapId);
+//! await api.tx.tradingSwap.makerSwap(makerId, amount, tronAddr).signAndSend(account);
+//! const swapInfo = await api.query.tradingSwap.makerSwaps(swapId);
 //! ```
 
 // ===== 重新导出子模块 =====
@@ -135,10 +135,10 @@ pub use pallet_maker;
 /// 提供 OTC 订单创建、支付、释放、取消、争议、首购逻辑等功能。
 pub use pallet_otc_order;
 
-/// COS ↔ USDT 桥接模块
+/// COS → USDT 做市商兑换模块
 /// 
-/// 提供官方桥接、做市商兑换、OCW 处理等功能。
-pub use pallet_bridge;
+/// 提供做市商兑换、OCW 自动验证、超时退款等功能。
+pub use pallet_trading_swap;
 
 /// 公共工具模块
 /// 
@@ -167,10 +167,9 @@ pub mod otc_types {
     };
 }
 
-/// Bridge 相关类型
-pub mod bridge_types {
-    pub use pallet_bridge::{
-        SwapRequest,
+/// Swap 相关类型
+pub mod swap_types {
+    pub use pallet_trading_swap::{
         SwapStatus,
         MakerSwapRecord,
     };
@@ -214,12 +213,12 @@ impl TradingApi {
     /// ```
     pub fn get_platform_stats<T>() -> PlatformStats
     where
-        T: pallet_maker::Config + pallet_otc_order::Config + pallet_bridge::Config,
+        T: pallet_maker::Config + pallet_otc_order::Config + pallet_trading_swap::Config,
     {
         PlatformStats {
             total_makers: pallet_maker::NextMakerId::<T>::get(),
             total_orders: pallet_otc_order::NextOrderId::<T>::get(),
-            total_swaps: pallet_bridge::NextSwapId::<T>::get(),
+            total_swaps: pallet_trading_swap::NextSwapId::<T>::get(),
         }
     }
 }

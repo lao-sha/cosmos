@@ -78,7 +78,7 @@ pallet-entity-market = { workspace = true }
 pallet-entity-review = { workspace = true }
 pallet-entity-disclosure = { workspace = true }
 pallet-entity-kyc = { workspace = true }
-pallet-entity-sale = { workspace = true }
+pallet-entity-tokensale = { workspace = true }
 # Costik Bot pallets
 pallet-bot-consensus = { workspace = true }
 pallet-bot-registry = { workspace = true }
@@ -171,7 +171,7 @@ std = [
 	"pallet-entity-review/std",
 	"pallet-entity-disclosure/std",
 	"pallet-entity-kyc/std",
-	"pallet-entity-sale/std",
+	"pallet-entity-tokensale/std",
 	# Costik Bot pallets std
 	"pallet-bot-consensus/std",
 	"pallet-bot-registry/std",

@@ -40,7 +40,7 @@ pallets/dispute/
 | 域标识 | 业务 | 域标识 | 业务 |
 |--------|------|--------|------|
 | `otc_ord_` | OTC 交易 | `livstrm_` | 直播 |
-| `divine__` | 占卜服务 | `chat____` | 聊天 |
+| `chat____` | 聊天 | `chatgrp_` | 群组 |
 | `chatgrp_` | 群组 | `maker___` | 做市商 |
 | `nft_trd_` | NFT 交易 | `swap____` | Swap 交换 |
 | `contact_` | 联系人 | `member__` | 会员 |

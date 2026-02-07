@@ -20,8 +20,8 @@ pub use pallet_commission_single_line;
 
 // Re-export commonly used traits and types at crate root
 pub use pallet_commission_common::{
-    CommissionModes, CommissionOutput, CommissionPlugin, CommissionProvider,
+    CommissionModes, CommissionOutput, CommissionPlugin, CommissionPlan, CommissionProvider,
     CommissionRecord, CommissionSource, CommissionStatus, CommissionType,
-    MemberCommissionStatsData, MemberProvider, WithdrawalTierConfig,
-    NullCommissionProvider, NullMemberProvider,
+    LevelDiffPlanWriter, MemberCommissionStatsData, MemberProvider,
+    NullCommissionProvider, NullMemberProvider, ReferralPlanWriter, WithdrawalTierConfig,
 };

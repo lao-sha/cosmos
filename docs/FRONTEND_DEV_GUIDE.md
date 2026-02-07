@@ -25,7 +25,7 @@ pallets/
 ├── entity/        # 实体管理（店铺、会员、代币、治理）
 ├── trading/       # 交易系统（OTC、Swap、做市商）
 ├── chat/          # 聊天系统（私聊、群聊）
-├── social/        # 社交模块（婚恋配对）
+├── social/        # 社交模块
 ├── dispute/       # 争议解决（托管、证据、仲裁）
 ├── storage/       # 存储服务（IPFS）
 ├── affiliate/     # 联盟计酬
@@ -66,16 +66,7 @@ pallets/
 | group | 群聊 | `/chat/group/` | P1 |
 | contacts | 联系人 | `/friends/` | P0 |
 
-### 2.5 Social 模块组 (Matchmaking)
-
-| Pallet | 功能 | 前端路由 | 优先级 |
-|--------|------|----------|--------|
-| profile | 用户资料 | `/matchmaking/profile` | P0 |
-| matching | 八字合婚 | `/matchmaking/match` | P0 |
-| interaction | 互动操作 | `/matchmaking/` | P0 |
-| membership | VIP 会员 | `/matchmaking/vip` | P1 |
-
-### 2.6 Dispute 模块组
+### 2.5 Dispute 模块组
 
 | Pallet | 功能 | 前端路由 | 优先级 |
 |--------|------|----------|--------|
@@ -96,7 +87,6 @@ frontend/
 │   ├── swap/               # 兑换
 │   ├── maker/              # 做市商
 │   ├── chat/               # 聊天
-│   ├── matchmaking/        # 婚恋
 │   ├── mall/               # 商城
 │   ├── disputes/           # 争议
 │   └── settings/           # 设置
@@ -375,4 +365,3 @@ npm run typecheck
 - [ ] 治理投票
 - [ ] 代币发售
 - [ ] 争议仲裁
-- [ ] 婚恋 VIP

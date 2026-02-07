@@ -45,7 +45,7 @@ members = [
     "pallets/entity/review",
     "pallets/entity/disclosure",
     "pallets/entity/kyc",
-    "pallets/entity/sale",
+    "pallets/entity/sale",  # crate renamed to pallet-entity-tokensale
     "media-utils",
     "runtime",
 # Costik Bot pallets
@@ -103,7 +103,7 @@ pallet-entity-market = { path = "./pallets/entity/market", default-features = fa
 pallet-entity-review = { path = "./pallets/entity/review", default-features = false }
 pallet-entity-disclosure = { path = "./pallets/entity/disclosure", default-features = false }
 pallet-entity-kyc = { path = "./pallets/entity/kyc", default-features = false }
-pallet-entity-sale = { path = "./pallets/entity/sale", default-features = false }
+pallet-entity-tokensale = { path = "./pallets/entity/sale", default-features = false }
 # Costik Bot pallets
 pallet-bot-consensus = { path = "./pallets/costik/bot-consensus", default-features = false }
 pallet-bot-registry = { path = "./pallets/costik/bot-registry", default-features = false }

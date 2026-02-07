@@ -1,4 +1,4 @@
-//! # 实体代币发售模块 (pallet-entity-sale)
+//! # 实体代币发售模块 (pallet-entity-tokensale)
 //!
 //! ## 概述
 //!

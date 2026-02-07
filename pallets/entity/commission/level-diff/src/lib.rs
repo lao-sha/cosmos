@@ -193,15 +193,16 @@ pub mod pallet {
 
     impl<T: Config> Pallet<T> {
         pub fn process_level_diff(
+            entity_id: u64,
             shop_id: u64,
             buyer: &T::AccountId,
             order_amount: BalanceOf<T>,
             remaining: &mut BalanceOf<T>,
             outputs: &mut Vec<CommissionOutput<T::AccountId, BalanceOf<T>>>,
         ) {
-            let global_config = LevelDiffConfigs::<T>::get(shop_id);
+            let global_config = LevelDiffConfigs::<T>::get(entity_id);
             let uses_custom = T::MemberProvider::uses_custom_levels(shop_id);
-            let custom_config = CustomLevelDiffConfigs::<T>::get(shop_id);
+            let custom_config = CustomLevelDiffConfigs::<T>::get(entity_id);
 
             let max_depth = if uses_custom {
                 custom_config.as_ref().map(|c| c.max_depth).unwrap_or(10)
@@ -262,6 +263,7 @@ pub mod pallet {
 
 impl<T: pallet::Config> pallet_commission_common::CommissionPlugin<T::AccountId, pallet::BalanceOf<T>> for pallet::Pallet<T> {
     fn calculate(
+        entity_id: u64,
         shop_id: u64,
         buyer: &T::AccountId,
         order_amount: pallet::BalanceOf<T>,
@@ -279,10 +281,34 @@ impl<T: pallet::Config> pallet_commission_common::CommissionPlugin<T::AccountId,
         let mut remaining = remaining;
         let mut outputs = alloc::vec::Vec::new();
 
+        // entity_id for config lookup, shop_id for MemberProvider
         pallet::Pallet::<T>::process_level_diff(
-            shop_id, buyer, order_amount, &mut remaining, &mut outputs,
+            entity_id, shop_id, buyer, order_amount, &mut remaining, &mut outputs,
         );
 
         (outputs, remaining)
+    }
+}
+
+// ============================================================================
+// LevelDiffPlanWriter implementation
+// ============================================================================
+
+impl<T: pallet::Config> pallet_commission_common::LevelDiffPlanWriter for pallet::Pallet<T> {
+    fn set_global_rates(shop_id: u64, normal: u16, silver: u16, gold: u16, platinum: u16, diamond: u16) -> Result<(), sp_runtime::DispatchError> {
+        pallet::LevelDiffConfigs::<T>::insert(shop_id, pallet::LevelDiffConfig {
+            normal_rate: normal,
+            silver_rate: silver,
+            gold_rate: gold,
+            platinum_rate: platinum,
+            diamond_rate: diamond,
+        });
+        Ok(())
+    }
+
+    fn clear_config(shop_id: u64) -> Result<(), sp_runtime::DispatchError> {
+        pallet::LevelDiffConfigs::<T>::remove(shop_id);
+        pallet::CustomLevelDiffConfigs::<T>::remove(shop_id);
+        Ok(())
     }
 }

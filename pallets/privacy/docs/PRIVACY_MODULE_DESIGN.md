@@ -144,7 +144,7 @@ Phat Contract 是 Phala 的编程模型，超越传统智能合约的能力：
 借鉴 Phala 的 **"链上调度 + 链下计算"** 分层架构，但根据 Cosmos 的实际场景做适配简化：
 
 - Cosmos 不需要通用隐私云计算平台，而是需要**面向特定业务的隐私保护能力**
-- 聊天端到端加密、占卜隐私保护、交易匿名、用户数据安全是核心诉求
+- 聊天端到端加密、交易匿名、用户数据安全是核心诉求
 - 采用 **"链上密钥管理 + 链上访问控制 + 链下隐私计算验证"** 的混合方案
 
 ### 2.2 模块命名
@@ -177,10 +177,10 @@ pallets/privacy/            → 隐私计算模块根目录
 │                           ▼                                      │
 │   ┌─────────────────────────────────────────────────────────┐    │
 │   │              Off-chain Worker (TEE / MPC)                │    │
-│   │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────────┐ │    │
-│   │  │ 加密聊天  │ │ 匿名匹配  │ │ 隐私占卜  │ │ 数据安全   │ │    │
-│   │  │ 引擎     │ │ 引擎     │ │ 引擎     │ │ 存储引擎   │ │    │
-│   │  └──────────┘ └──────────┘ └──────────┘ └────────────┘ │    │
+│   │  ┌──────────┐ ┌──────────┐ ┌────────────┐ │    │
+│   │  │ 加密聊天  │ │ 隐私交易  │ │ 数据安全   │ │    │
+│   │  │ 引擎     │ │ 引擎     │ │ 存储引擎   │ │    │
+│   │  └──────────┘ └──────────┘ └────────────┘ │    │
 │   └─────────────────────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -246,7 +246,6 @@ pub struct ComputeTask<AccountId, BlockNumber> {
 pub enum TaskType {
     EncryptedChat,         // 加密聊天消息处理
     AnonymousMatching,     // 匿名缘分匹配
-    ConfidentialDivination,// 隐私占卜计算
     PrivateTrading,        // 隐私交易撮合
     DataSeal,              // 数据密封存储
 }
@@ -522,10 +521,10 @@ impl<T: Config> Pallet<T> {
 - 消息体使用 X25519 + AES-256-GCM 加密后上链
 - `pallet-privacy-access` 控制群聊密钥的分发权限
 
-### 4.2 Social/Matchmaking 模块集成（匿名缘分匹配）
+### 4.2 社交模块集成（匿名匹配）
 
 ```
-用户A                 privacy-credential            Matchmaking 模块          用户B
+用户A                 privacy-credential            社交模块              用户B
   │                       │                            │                      │
   ├─ issue_credential ────▶  (年龄范围凭证)             │                      │
   ├─ issue_credential ────▶  (地区凭证)                │                      │
@@ -539,8 +538,8 @@ impl<T: Config> Pallet<T> {
 ```
 
 **集成点：**
-- `pallet-matchmaking-profile` 不再明文存储用户详细信息
-- 用 `pallet-privacy-credential` 的 ZK 凭证替代：只证明"25-30岁"而不泄露确切年龄
+- 用户资料不再明文存储详细信息
+- 用 `pallet-privacy-credential` 的 ZK 凭证替代：只证明属性范围而不泄露确切值
 - 匹配算法在 `pallet-privacy-compute` 的链下 Worker 中运行
 
 ### 4.3 Trading 模块集成（隐私交易）
@@ -586,7 +585,7 @@ impl<T: Config> Pallet<T> {
 | 实现 `pallets/privacy/credential/` 凭证发行与验证 | P1 | common, keystore |
 | 集成简化版 ZK 验证（Groth16 或 Bulletproofs） | P1 | credential |
 | 与 `pallet-entity-kyc` 集成 | P1 | credential |
-| 与 `pallet-matchmaking-*` 集成 | P1 | credential |
+| 与社交模块集成 | P1 | credential |
 
 **里程碑：** 匿名匹配功能可用，KYC 一次验证到处使用。
 

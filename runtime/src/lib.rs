@@ -372,7 +372,7 @@ mod runtime {
 	pub type EntityKyc = pallet_entity_kyc;
 
 	#[runtime::pallet_index(132)]
-	pub type EntitySale = pallet_entity_sale;
+	pub type EntityTokenSale = pallet_entity_tokensale;
 
 	// ============================================================================
 	// Costik Bot Pallets

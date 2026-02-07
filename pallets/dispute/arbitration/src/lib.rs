@@ -38,8 +38,6 @@ pub mod pallet {
         pub const OTC_ORDER: [u8; 8] = *b"otc_ord_";
         /// 直播投诉域
         pub const LIVESTREAM: [u8; 8] = *b"livstrm_";
-        /// 占卜服务投诉域
-        pub const DIVINATION: [u8; 8] = *b"divine__";
         /// 聊天投诉域（私聊）
         pub const CHAT: [u8; 8] = *b"chat____";
         /// 做市商投诉域
@@ -93,30 +91,6 @@ pub mod pallet {
         LiveGiftRefund,
         /// 直播其他违规
         LiveOther,
-        
-        // ========== 占卜服务投诉 (域: divine__) ==========
-        /// 色情内容
-        DivinePornography,
-        /// 赌博相关
-        DivineGambling,
-        /// 毒品/违禁品
-        DivineDrugs,
-        /// 诈骗行为
-        DivineFraud,
-        /// 虚假宣传
-        DivineFalseAdvertising,
-        /// 辱骂/人身攻击
-        DivineAbuse,
-        /// 泄露用户隐私
-        DivinePrivacyBreach,
-        /// 政治敏感内容
-        DivinePoliticalContent,
-        /// 封建迷信/过度恐吓
-        DivineSuperstition,
-        /// 服务未完成
-        DivineServiceNotCompleted,
-        /// 占卜服务其他
-        DivineOther,
         
         // ========== 聊天投诉 (域: chat____) ==========
         /// 聊天骚扰
@@ -216,13 +190,6 @@ pub mod pallet {
                 Self::LiveHarassment | Self::LiveFraud | 
                 Self::LiveGiftRefund | Self::LiveOther => domains::LIVESTREAM,
                 
-                // 占卜服务
-                Self::DivinePornography | Self::DivineGambling | Self::DivineDrugs |
-                Self::DivineFraud | Self::DivineFalseAdvertising | Self::DivineAbuse |
-                Self::DivinePrivacyBreach | Self::DivinePoliticalContent |
-                Self::DivineSuperstition | Self::DivineServiceNotCompleted |
-                Self::DivineOther => domains::DIVINATION,
-                
                 // 聊天
                 Self::ChatHarassment | Self::ChatFraud | Self::ChatIllegalContent |
                 Self::ChatPrivateHarassment | Self::ChatBlockAppeal |
@@ -265,11 +232,8 @@ pub mod pallet {
         /// 获取惩罚比例（基点，10000 = 100%）
         pub fn penalty_rate(&self) -> u16 {
             match self {
-                // 严重违规，全额罚没
-                Self::DivineDrugs => 10000,
                 // 重度违规，80%罚没
-                Self::DivinePornography | Self::DivineGambling | 
-                Self::OtcTradeFraud | Self::DivineFraud => 8000,
+                Self::OtcTradeFraud => 8000,
                 // 中度违规，50%罚没
                 Self::LiveIllegalContent | Self::GroupIllegalContent |
                 Self::MakerMaliciousOperation => 5000,
@@ -280,7 +244,7 @@ pub mod pallet {
         
         /// 是否触发永久封禁
         pub fn triggers_permanent_ban(&self) -> bool {
-            matches!(self, Self::DivineDrugs | Self::OtcTradeFraud | Self::DivineFraud)
+            matches!(self, Self::OtcTradeFraud)
         }
     }
 

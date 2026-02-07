@@ -45,7 +45,7 @@ pub mod pallet {
     use frame_system::pallet_prelude::*;
     use pallet_entity_common::{PricingProvider, ProductCategory, ProductProvider, ProductStatus, EntityProvider, ShopProvider};
     use sp_runtime::{
-        traits::{AccountIdConversion, Saturating, Zero},
+        traits::{AccountIdConversion, Zero},
         SaturatedConversion,
     };
 

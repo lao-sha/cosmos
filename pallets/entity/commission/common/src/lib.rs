@@ -93,6 +93,7 @@ pub enum CommissionStatus {
 /// 返佣记录
 #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
 pub struct CommissionRecord<AccountId, Balance, BlockNumber> {
+    pub entity_id: u64,
     pub shop_id: u64,
     pub order_id: u64,
     pub buyer: AccountId,
@@ -134,6 +135,28 @@ impl Default for WithdrawalTierConfig {
     }
 }
 
+/// 提现模式
+///
+/// 决定佣金提现时复购比率的确定方式。
+/// 无论选择哪种模式，Governance 设定的全局最低复购比率始终生效。
+#[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+pub enum WithdrawalMode {
+    /// 全额提现：不强制复购（Governance 底线仍生效）
+    FullWithdrawal,
+    /// 固定比率：所有会员统一复购比率
+    FixedRate { repurchase_rate: u16 },
+    /// 按等级自动决定：通过 default_tier + level_overrides 查表
+    LevelBased,
+    /// 会员自选：会员提现时指定复购比率，不低于 min_repurchase_rate
+    MemberChoice { min_repurchase_rate: u16 },
+}
+
+impl Default for WithdrawalMode {
+    fn default() -> Self {
+        WithdrawalMode::FullWithdrawal
+    }
+}
+
 // ============================================================================
 // 插件输出
 // ============================================================================
@@ -159,7 +182,8 @@ pub trait CommissionPlugin<AccountId, Balance> {
     /// 计算返佣
     ///
     /// # 参数
-    /// - `shop_id`: 店铺 ID
+    /// - `entity_id`: 实体 ID（用于插件配置查询）
+    /// - `shop_id`: 店铺 ID（用于 MemberProvider 查询推荐链）
     /// - `buyer`: 买家账户
     /// - `order_amount`: 订单金额
     /// - `remaining`: 剩余可分配额度
@@ -170,6 +194,7 @@ pub trait CommissionPlugin<AccountId, Balance> {
     /// # 返回
     /// `(outputs, new_remaining)` — 返佣输出列表和剩余额度
     fn calculate(
+        entity_id: u64,
         shop_id: u64,
         buyer: &AccountId,
         order_amount: Balance,
@@ -183,6 +208,7 @@ pub trait CommissionPlugin<AccountId, Balance> {
 /// 空插件实现（占位）
 impl<AccountId, Balance> CommissionPlugin<AccountId, Balance> for () {
     fn calculate(
+        _entity_id: u64,
         _shop_id: u64,
         _buyer: &AccountId,
         _order_amount: Balance,
@@ -244,6 +270,12 @@ pub trait CommissionProvider<AccountId, Balance> {
     ) -> Result<(), DispatchError>;
 
     fn shopping_balance(shop_id: u64, account: &AccountId) -> Balance;
+
+    /// 使用购物余额（由订单模块调用）
+    fn use_shopping_balance(shop_id: u64, account: &AccountId, amount: Balance) -> Result<(), DispatchError>;
+
+    /// 设置全局最低复购比例（由 Governance 调用，万分比）
+    fn set_min_repurchase_rate(shop_id: u64, rate: u16) -> Result<(), DispatchError>;
 }
 
 /// 空 CommissionProvider 实现
@@ -261,6 +293,8 @@ impl<AccountId, Balance: Default> CommissionProvider<AccountId, Balance> for Nul
     fn set_repeat_purchase_config(_: u64, _: u16, _: u32) -> Result<(), DispatchError> { Ok(()) }
     fn set_withdrawal_config_by_governance(_: u64, _: bool, _: bool) -> Result<(), DispatchError> { Ok(()) }
     fn shopping_balance(_: u64, _: &AccountId) -> Balance { Balance::default() }
+    fn use_shopping_balance(_: u64, _: &AccountId, _: Balance) -> Result<(), DispatchError> { Ok(()) }
+    fn set_min_repurchase_rate(_: u64, _: u16) -> Result<(), DispatchError> { Ok(()) }
 }
 
 // ============================================================================
@@ -269,11 +303,13 @@ impl<AccountId, Balance: Default> CommissionProvider<AccountId, Balance> for Nul
 
 /// 会员服务接口（供返佣插件查询推荐人、等级等）
 pub trait MemberProvider<AccountId> {
+    fn is_member(shop_id: u64, account: &AccountId) -> bool;
     fn get_referrer(shop_id: u64, account: &AccountId) -> Option<AccountId>;
     fn member_level(shop_id: u64, account: &AccountId) -> Option<pallet_entity_common::MemberLevel>;
     fn get_member_stats(shop_id: u64, account: &AccountId) -> (u32, u32, u128);
     fn uses_custom_levels(shop_id: u64) -> bool;
     fn custom_level_id(shop_id: u64, account: &AccountId) -> u8;
+    fn auto_register(shop_id: u64, account: &AccountId, referrer: Option<AccountId>) -> Result<(), DispatchError>;
 
     fn set_custom_levels_enabled(shop_id: u64, enabled: bool) -> Result<(), DispatchError>;
     fn set_upgrade_mode(shop_id: u64, mode: u8) -> Result<(), DispatchError>;
@@ -287,15 +323,86 @@ pub trait MemberProvider<AccountId> {
 pub struct NullMemberProvider;
 
 impl<AccountId> MemberProvider<AccountId> for NullMemberProvider {
+    fn is_member(_: u64, _: &AccountId) -> bool { false }
     fn get_referrer(_: u64, _: &AccountId) -> Option<AccountId> { None }
     fn member_level(_: u64, _: &AccountId) -> Option<pallet_entity_common::MemberLevel> { None }
     fn get_member_stats(_: u64, _: &AccountId) -> (u32, u32, u128) { (0, 0, 0) }
     fn uses_custom_levels(_: u64) -> bool { false }
     fn custom_level_id(_: u64, _: &AccountId) -> u8 { 0 }
+    fn auto_register(_: u64, _: &AccountId, _: Option<AccountId>) -> Result<(), DispatchError> { Ok(()) }
     fn set_custom_levels_enabled(_: u64, _: bool) -> Result<(), DispatchError> { Ok(()) }
     fn set_upgrade_mode(_: u64, _: u8) -> Result<(), DispatchError> { Ok(()) }
     fn add_custom_level(_: u64, _: u8, _: &[u8], _: u128, _: u16, _: u16) -> Result<(), DispatchError> { Ok(()) }
     fn update_custom_level(_: u64, _: u8, _: Option<&[u8]>, _: Option<u128>, _: Option<u16>, _: Option<u16>) -> Result<(), DispatchError> { Ok(()) }
     fn remove_custom_level(_: u64, _: u8) -> Result<(), DispatchError> { Ok(()) }
     fn custom_level_count(_: u64) -> u8 { 0 }
+}
+
+// ============================================================================
+// CommissionPlan — 一键初始化佣金方案
+// ============================================================================
+
+/// 佣金方案模板
+#[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+pub enum CommissionPlan {
+    /// 无佣金（关闭所有返佣）
+    None,
+    /// 直推返佣（推荐人获得订单金额的 rate 基点）
+    DirectOnly { rate: u16 },
+    /// 多级分销（levels 级，每级 base_rate 基点，逐级递减 20%）
+    MultiLevel { levels: u8, base_rate: u16 },
+    /// 等级极差（5 级固定比例，单位基点）
+    LevelDiff {
+        normal: u16,
+        silver: u16,
+        gold: u16,
+        platinum: u16,
+        diamond: u16,
+    },
+    /// 自定义（仅启用佣金开关，参数后续手动配置）
+    Custom,
+}
+
+// ============================================================================
+// PlanWriter Traits — 插件写入接口
+// ============================================================================
+
+/// 推荐链插件写入接口（由 commission-referral 实现）
+pub trait ReferralPlanWriter<Balance> {
+    /// 设置直推奖励比例
+    fn set_direct_rate(shop_id: u64, rate: u16) -> Result<(), DispatchError>;
+    /// 设置多级分销（每级比例列表 + 上限比例）
+    fn set_multi_level(shop_id: u64, level_rates: Vec<u16>, max_total_rate: u16) -> Result<(), DispatchError>;
+    /// 设置固定金额奖励
+    fn set_fixed_amount(shop_id: u64, amount: Balance) -> Result<(), DispatchError>;
+    /// 设置首单奖励
+    fn set_first_order(shop_id: u64, amount: Balance, rate: u16, use_amount: bool) -> Result<(), DispatchError>;
+    /// 设置复购奖励
+    fn set_repeat_purchase(shop_id: u64, rate: u16, min_orders: u32) -> Result<(), DispatchError>;
+    /// 清除全部推荐链配置
+    fn clear_config(shop_id: u64) -> Result<(), DispatchError>;
+}
+
+/// 空 ReferralPlanWriter 实现
+impl<Balance> ReferralPlanWriter<Balance> for () {
+    fn set_direct_rate(_: u64, _: u16) -> Result<(), DispatchError> { Ok(()) }
+    fn set_multi_level(_: u64, _: Vec<u16>, _: u16) -> Result<(), DispatchError> { Ok(()) }
+    fn set_fixed_amount(_: u64, _: Balance) -> Result<(), DispatchError> { Ok(()) }
+    fn set_first_order(_: u64, _: Balance, _: u16, _: bool) -> Result<(), DispatchError> { Ok(()) }
+    fn set_repeat_purchase(_: u64, _: u16, _: u32) -> Result<(), DispatchError> { Ok(()) }
+    fn clear_config(_: u64) -> Result<(), DispatchError> { Ok(()) }
+}
+
+/// 等级极差插件写入接口（由 commission-level-diff 实现）
+pub trait LevelDiffPlanWriter {
+    /// 设置全局 5 级极差比例
+    fn set_global_rates(shop_id: u64, normal: u16, silver: u16, gold: u16, platinum: u16, diamond: u16) -> Result<(), DispatchError>;
+    /// 清除等级极差配置
+    fn clear_config(shop_id: u64) -> Result<(), DispatchError>;
+}
+
+/// 空 LevelDiffPlanWriter 实现
+impl LevelDiffPlanWriter for () {
+    fn set_global_rates(_: u64, _: u16, _: u16, _: u16, _: u16, _: u16) -> Result<(), DispatchError> { Ok(()) }
+    fn clear_config(_: u64) -> Result<(), DispatchError> { Ok(()) }
 }

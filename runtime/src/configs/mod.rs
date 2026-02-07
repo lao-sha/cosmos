@@ -994,7 +994,7 @@ impl pallet_collective::Config<TreasuryCollectiveInstance> for Runtime {
 }
 
 // -------------------- 4. 内容委员会 (Content Committee) --------------------
-// 职责：审核占卜师资质、直播内容合规、证据真实性
+// 职责：审核直播内容合规、证据真实性
 
 pub type ContentCollectiveInstance = pallet_collective::Instance4;
 
@@ -1289,8 +1289,9 @@ impl pallet_entity_registry::Config for Runtime {
 	type MinOperatingBalance = ConstU128<{ UNIT / 10 }>;
 	type FundWarningThreshold = ConstU128<{ UNIT }>;
 	type MaxAdmins = ConstU32<10>;
-	type MaxShopsPerEntity = ConstU32<100>;
+	type MaxEntitiesPerUser = ConstU32<3>;
 	type ShopProvider = EntityShop;
+	type PlatformAccount = EntityPlatformAccount;
 }
 
 impl pallet_entity_shop::Config for Runtime {
@@ -1304,6 +1305,7 @@ impl pallet_entity_shop::Config for Runtime {
 	type MaxPointsSymbolLength = ConstU32<8>;
 	type MinOperatingBalance = ConstU128<{ UNIT / 10 }>;
 	type WarningThreshold = ConstU128<{ UNIT }>;
+	type CommissionFundGuard = crate::CommissionCore;
 }
 
 impl pallet_entity_service::Config for Runtime {
@@ -1332,6 +1334,7 @@ impl pallet_entity_transaction::Config for Runtime {
 	type ShipTimeout = EntityShipTimeout;
 	type ConfirmTimeout = EntityConfirmTimeout;
 	type ServiceConfirmTimeout = ConstU32<{ 7 * 24 * 600 }>;  // 7 天
+	type CommissionHandler = OrderCommissionBridge;
 	type MaxCidLength = ConstU32<64>;
 }
 
@@ -1379,6 +1382,10 @@ impl pallet_entity_common::PricingProvider for EntityPricingProvider {
 pub struct MemberProviderBridge;
 
 impl pallet_entity_commission::MemberProvider<AccountId> for MemberProviderBridge {
+	fn is_member(shop_id: u64, account: &AccountId) -> bool {
+		pallet_entity_member::Pallet::<Runtime>::is_member_of_shop(shop_id, account)
+	}
+
 	fn get_referrer(shop_id: u64, account: &AccountId) -> Option<AccountId> {
 		pallet_entity_member::EntityMembers::<Runtime>::get(shop_id, account)
 			.and_then(|m| m.referrer)
@@ -1449,6 +1456,29 @@ impl pallet_entity_commission::MemberProvider<AccountId> for MemberProviderBridg
 	fn custom_level_count(shop_id: u64) -> u8 {
 		pallet_entity_member::Pallet::<Runtime>::custom_level_count(shop_id)
 	}
+
+	fn auto_register(shop_id: u64, account: &AccountId, referrer: Option<AccountId>) -> sp_runtime::DispatchResult {
+		pallet_entity_member::Pallet::<Runtime>::auto_register(shop_id, account, referrer)
+	}
+}
+
+/// 桥接：OrderCommissionHandler → CommissionProvider（供 Transaction 模块调用）
+pub struct OrderCommissionBridge;
+impl pallet_entity_common::OrderCommissionHandler<AccountId, Balance> for OrderCommissionBridge {
+	fn on_order_completed(
+		shop_id: u64,
+		order_id: u64,
+		buyer: &AccountId,
+		order_amount: Balance,
+	) -> Result<(), sp_runtime::DispatchError> {
+		// available_pool = order_amount，commission 内部会按 max_commission_rate 和 shop 余额封顶
+		<pallet_commission_core::Pallet<Runtime> as pallet_commission_common::CommissionProvider<AccountId, Balance>>::process_commission(
+			shop_id, order_id, buyer, order_amount, order_amount,
+		)
+	}
+	fn on_order_cancelled(order_id: u64) -> Result<(), sp_runtime::DispatchError> {
+		<pallet_commission_core::Pallet<Runtime> as pallet_commission_common::CommissionProvider<AccountId, Balance>>::cancel_commission(order_id)
+	}
 }
 
 /// 桥接实现：CommissionCore pallet 作为 CommissionProvider
@@ -1493,11 +1523,14 @@ impl pallet_commission_core::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type Currency = Balances;
 	type ShopProvider = EntityShop;
+	type EntityProvider = EntityRegistry;
 	type MemberProvider = EntityMemberProvider;
 	type ReferralPlugin = crate::CommissionReferral;
 	type LevelDiffPlugin = crate::CommissionLevelDiff;
 	type SingleLinePlugin = crate::CommissionSingleLine;
 	type TeamPlugin = ();
+	type ReferralWriter = crate::CommissionReferral;
+	type LevelDiffWriter = crate::CommissionLevelDiff;
 	type MaxCommissionRecordsPerOrder = ConstU32<20>;
 	type MaxCustomLevels = ConstU32<10>;
 }
@@ -1521,7 +1554,9 @@ pub struct SingleLineStatsFromCore;
 
 impl pallet_commission_single_line::pallet::SingleLineStatsProvider<AccountId, Balance> for SingleLineStatsFromCore {
 	fn get_member_stats(shop_id: u64, account: &AccountId) -> pallet_commission_common::MemberCommissionStatsData<Balance> {
-		pallet_commission_core::MemberCommissionStats::<Runtime>::get(shop_id, account)
+		use pallet_entity_common::ShopProvider;
+		let entity_id = EntityShop::shop_entity_id(shop_id).unwrap_or(0);
+		pallet_commission_core::MemberCommissionStats::<Runtime>::get(entity_id, account)
 	}
 }
 
@@ -1599,7 +1634,7 @@ impl pallet_entity_kyc::Config for Runtime {
 	type AdminOrigin = EnsureRoot<AccountId>;
 }
 
-impl pallet_entity_sale::Config for Runtime {
+impl pallet_entity_tokensale::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type Balance = Balance;
 	type AssetId = u64;

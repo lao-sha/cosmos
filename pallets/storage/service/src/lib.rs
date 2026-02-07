@@ -1117,77 +1117,6 @@ pub mod pallet {
         OptionQuery,
     >;
 
-    // ============================================================================
-    // 命理服务（Divination）- 命主独立账户管理
-    // ============================================================================
-
-    /// 函数级详细中文注释：命主信息结构体
-    /// 
-    /// 记录命主的基本信息，用于：
-    /// 1. 派生 SubjectFunding 账户
-    /// 2. 管理命主关联的所有占卜服务CID
-    /// 3. 账户充值和费用追踪
-    /// 
-    /// 字段说明：
-    /// - owner：命主所有者（可充值、可转让）
-    /// - name_hash：姓名哈希（隐私保护）
-    /// - birth_data_hash：生辰八字哈希（隐私保护）
-    /// - created_at：创建时间（区块号）
-    /// - total_services：累计服务次数
-    #[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
-    #[scale_info(skip_type_params(T))]
-    pub struct DivinationClient<T: Config> {
-        /// 命主所有者（可充值、可转让）
-        pub owner: T::AccountId,
-        /// 姓名哈希（隐私保护）
-        pub name_hash: T::Hash,
-        /// 生辰八字哈希（隐私保护）
-        pub birth_data_hash: T::Hash,
-        /// 创建时间（区块号）
-        pub created_at: BlockNumberFor<T>,
-        /// 累计服务次数
-        pub total_services: u32,
-    }
-
-    /// 函数级详细中文注释：命主注册表
-    /// 
-    /// 存储所有已注册的命主信息
-    /// 
-    /// Key: client_id（自增ID）
-    /// Value: DivinationClient
-    #[pallet::storage]
-    #[pallet::getter(fn divination_clients)]
-    pub type DivinationClients<T: Config> = StorageMap<
-        _,
-        Blake2_128Concat,
-        u64,                          // client_id
-        DivinationClient<T>,
-        OptionQuery,
-    >;
-
-    /// 函数级详细中文注释：命主ID计数器
-    /// 
-    /// 用于生成唯一的命主ID（自增）
-    #[pallet::storage]
-    #[pallet::getter(fn next_client_id)]
-    pub type NextDivinationClientId<T: Config> = StorageValue<_, u64, ValueQuery>;
-
-    /// 函数级详细中文注释：命主 → CID列表索引
-    /// 
-    /// 记录每个命主关联的所有CID（占卜报告）
-    /// 
-    /// Key: client_id
-    /// Value: CID哈希列表（最多100个）
-    #[pallet::storage]
-    #[pallet::getter(fn client_cids)]
-    pub type DivinationClientCids<T: Config> = StorageMap<
-        _,
-        Blake2_128Concat,
-        u64,                                    // client_id
-        BoundedVec<T::Hash, ConstU32<100>>,    // CID列表
-        ValueQuery,
-    >;
-
     /// 事件
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
@@ -1674,68 +1603,6 @@ pub mod pallet {
             priority: u8,
         },
         
-        // ============================================================================
-        // 命理服务（Divination）相关事件
-        // ============================================================================
-        
-        /// 函数级详细中文注释：命主已注册
-        /// 
-        /// 触发时机：
-        /// - 调用 register_divination_client 成功
-        /// 
-        /// 字段说明：
-        /// - client_id：命主ID（自增）
-        /// - owner：命主所有者账户
-        /// - name_hash：姓名哈希
-        /// - birth_data_hash：生辰八字哈希
-        DivinationClientRegistered {
-            client_id: u64,
-            owner: T::AccountId,
-            name_hash: T::Hash,
-            birth_data_hash: T::Hash,
-        },
-        
-        /// 函数级详细中文注释：命主账户已充值
-        /// 
-        /// 触发时机：
-        /// - 调用 fund_divination_client 成功
-        /// 
-        /// 字段说明：
-        /// - client_id：命主ID
-        /// - funder：充值者账户
-        /// - amount：充值金额
-        /// - new_balance：充值后余额
-        DivinationClientFunded {
-            client_id: u64,
-            funder: T::AccountId,
-            amount: BalanceOf<T>,
-            new_balance: BalanceOf<T>,
-        },
-        
-        /// 函数级详细中文注释：命主服务已记录
-        /// 
-        /// 触发时机：
-        /// - 为命主关联新的CID（占卜报告）
-        /// 
-        /// 字段说明：
-        /// - client_id：命主ID
-        /// - cid_hash：CID哈希
-        /// - service_count：累计服务次数
-        DivinationServiceRecorded {
-            client_id: u64,
-            cid_hash: T::Hash,
-            service_count: u32,
-        },
-        
-        /// 函数级详细中文注释：命主所有权已转移
-        /// 
-        /// 触发时机：
-        /// - 调用 transfer_divination_client_ownership 成功
-        DivinationClientOwnershipTransferred {
-            client_id: u64,
-            old_owner: T::AccountId,
-            new_owner: T::AccountId,
-        },
     }
 
     #[pallet::error]
@@ -1864,16 +1731,6 @@ pub mod pallet {
         /// 函数级详细中文注释：域已存在（尝试重复注册）
         DomainAlreadyExists,
         
-        // ============================================================================
-        // 命理服务（Divination）相关错误
-        // ============================================================================
-        
-        /// 函数级详细中文注释：命主不存在
-        DivinationClientNotFound,
-        /// 函数级详细中文注释：非命主所有者（无权限操作）
-        NotDivinationClientOwner,
-        /// 函数级详细中文注释：命主CID列表已满（最多100个）
-        DivinationClientCidsFull,
     }
 
     impl<T: Config> Pallet<T> {
@@ -1921,17 +1778,11 @@ pub mod pallet {
             match subject_type {
                 SubjectType::Evidence => 0,
                 SubjectType::OtcOrder => 1,
-                SubjectType::DivinationMarket => 2,
-                SubjectType::DivinationNft => 3,
-                SubjectType::DivinationAi => 4,
                 SubjectType::Chat => 5,
                 SubjectType::Livestream => 6,
                 SubjectType::Swap => 7,
                 SubjectType::Arbitration => 8,
                 SubjectType::UserProfile => 9,
-                SubjectType::DivinationReport => 10,
-                SubjectType::Matchmaking => 11,
-                SubjectType::MatchmakingChat => 12,
                 SubjectType::General => 98,
                 SubjectType::Custom(_) => 99,
             }
@@ -2528,15 +2379,11 @@ pub mod pallet {
         /// 根据SubjectType和subject_id派生唯一的资金账户地址：
         /// - Evidence：domain=0（证据类数据）
         /// - OtcOrder：domain=1（OTC订单）
-        /// - DivinationMarket：domain=2（命理服务市场）
-        /// - DivinationNft：domain=3（命理NFT）
-        /// - DivinationAi：domain=4（AI解读）
         /// - Chat：domain=5（聊天消息）
         /// - Livestream：domain=6（直播间）
         /// - Swap：domain=7（Swap兑换）
         /// - Arbitration：domain=8（仲裁证据）
         /// - UserProfile：domain=9（用户档案）
-        /// - DivinationReport：domain=10（命理排盘报告）
         /// - General：domain=98（通用存储）
         /// - Custom：domain=99（自定义域）
         pub fn derive_subject_funding_account_v2(
@@ -2546,17 +2393,11 @@ pub mod pallet {
             let domain: u8 = match subject_type {
                 SubjectType::Evidence => 0,           // 证据类数据
                 SubjectType::OtcOrder => 1,           // OTC订单
-                SubjectType::DivinationMarket => 2,   // 命理服务市场
-                SubjectType::DivinationNft => 3,      // 命理NFT
-                SubjectType::DivinationAi => 4,       // AI解读
                 SubjectType::Chat => 5,               // 聊天消息
                 SubjectType::Livestream => 6,         // 直播间
                 SubjectType::Swap => 7,               // Swap兑换
                 SubjectType::Arbitration => 8,        // 仲裁证据
                 SubjectType::UserProfile => 9,        // 用户档案
-                SubjectType::DivinationReport => 10,  // 命理排盘报告
-                SubjectType::Matchmaking => 11,       // 婚恋模块
-                SubjectType::MatchmakingChat => 12,   // 婚恋聊天
                 SubjectType::General => 98,           // 通用存储
                 SubjectType::Custom(_) => 99,         // 自定义域统一使用99
             };
@@ -4411,247 +4252,6 @@ pub mod pallet {
             Ok(())
         }
         
-        // ============================================================================
-        // 命理服务（Divination）相关 Extrinsics
-        // ============================================================================
-        
-        /// 函数级详细中文注释：注册命主（创建命主档案）
-        /// 
-        /// ### 功能
-        /// - 创建新的命主档案
-        /// - 自动分配唯一的 client_id
-        /// - 自动派生 SubjectFunding 账户
-        /// 
-        /// ### 参数
-        /// - `name_hash`: 姓名哈希（隐私保护）
-        /// - `birth_data_hash`: 生辰八字哈希（隐私保护）
-        /// 
-        /// ### 权限
-        /// - 任何签名账户都可以创建命主档案
-        /// - 创建者自动成为命主所有者
-        /// 
-        /// ### 事件
-        /// - DivinationClientRegistered { client_id, owner, name_hash, birth_data_hash }
-        #[pallet::call_index(28)]
-        #[pallet::weight(50_000)]
-        pub fn register_divination_client(
-            origin: OriginFor<T>,
-            name_hash: T::Hash,
-            birth_data_hash: T::Hash,
-        ) -> DispatchResult {
-            let owner = ensure_signed(origin)?;
-            
-            // 1. 获取并递增 client_id
-            let client_id = NextDivinationClientId::<T>::get();
-            NextDivinationClientId::<T>::put(client_id.saturating_add(1));
-            
-            // 2. 创建命主记录
-            let current_block = <frame_system::Pallet<T>>::block_number();
-            let client = DivinationClient {
-                owner: owner.clone(),
-                name_hash,
-                birth_data_hash,
-                created_at: current_block,
-                total_services: 0,
-            };
-            
-            // 3. 存储命主信息
-            DivinationClients::<T>::insert(client_id, client);
-            
-            // 4. 发送事件
-            Self::deposit_event(Event::DivinationClientRegistered {
-                client_id,
-                owner,
-                name_hash,
-                birth_data_hash,
-            });
-            
-            Ok(())
-        }
-        
-        /// 函数级详细中文注释：为命主账户充值
-        /// 
-        /// ### 功能
-        /// - 向命主的 SubjectFunding 账户充值
-        /// - 任何人都可以充值（开放性）
-        /// 
-        /// ### 参数
-        /// - `client_id`: 命主ID
-        /// - `amount`: 充值金额（必须>0）
-        /// 
-        /// ### 权限
-        /// - 任何签名账户都可以充值
-        /// - 无需命主所有者权限
-        /// 
-        /// ### 资金流向
-        /// - caller → SubjectFunding(Divination, client_id)
-        /// 
-        /// ### 事件
-        /// - DivinationClientFunded { client_id, funder, amount, new_balance }
-        #[pallet::call_index(29)]
-        #[pallet::weight(50_000)]
-        pub fn fund_divination_client(
-            origin: OriginFor<T>,
-            client_id: u64,
-            amount: BalanceOf<T>,
-        ) -> DispatchResult {
-            let funder = ensure_signed(origin)?;
-            
-            // 1. 验证参数
-            ensure!(amount != BalanceOf::<T>::default(), Error::<T>::BadParams);
-            
-            // 2. 验证命主存在
-            ensure!(
-                DivinationClients::<T>::contains_key(client_id),
-                Error::<T>::DivinationClientNotFound
-            );
-            
-            // 3. 派生 SubjectFunding 账户
-            let funding_account = Self::derive_subject_funding_account_v2(
-                SubjectType::DivinationMarket,
-                client_id,
-            );
-            
-            // 4. 转账
-            <T as Config>::Currency::transfer(
-                &funder,
-                &funding_account,
-                amount,
-                frame_support::traits::ExistenceRequirement::KeepAlive,
-            )?;
-            
-            // 5. 获取新余额
-            let new_balance = <T as Config>::Currency::free_balance(&funding_account);
-            
-            // 6. 发送事件
-            Self::deposit_event(Event::DivinationClientFunded {
-                client_id,
-                funder,
-                amount,
-                new_balance,
-            });
-            
-            Ok(())
-        }
-        
-        /// 函数级详细中文注释：为命主关联占卜服务CID
-        /// 
-        /// ### 功能
-        /// - 将占卜报告CID关联到命主
-        /// - 自动执行PIN操作
-        /// - 费用从命主的 SubjectFunding 扣除
-        /// 
-        /// ### 参数
-        /// - `client_id`: 命主ID
-        /// - `cid`: IPFS CID（明文）
-        /// - `tier`: Pin等级（可选，默认Standard）
-        /// 
-        /// ### 权限
-        /// - 必须是命主所有者
-        /// 
-        /// ### 事件
-        /// - DivinationServiceRecorded { client_id, cid_hash, service_count }
-        #[pallet::call_index(30)]
-        #[pallet::weight(100_000)]
-        pub fn add_divination_service(
-            origin: OriginFor<T>,
-            client_id: u64,
-            cid: Vec<u8>,
-            tier: Option<PinTier>,
-        ) -> DispatchResult {
-            let caller = ensure_signed(origin)?;
-            
-            // 1. 验证命主存在并检查所有权
-            let mut client = DivinationClients::<T>::get(client_id)
-                .ok_or(Error::<T>::DivinationClientNotFound)?;
-            ensure!(client.owner == caller, Error::<T>::NotDivinationClientOwner);
-            
-            // 2. 计算CID哈希
-            use sp_runtime::traits::Hash;
-            let cid_hash = T::Hashing::hash(&cid);
-            
-            // 3. 添加到命主CID列表
-            DivinationClientCids::<T>::try_mutate(client_id, |cids| {
-                cids.try_push(cid_hash).map_err(|_| Error::<T>::DivinationClientCidsFull)
-            })?;
-            
-            // 4. 更新服务计数
-            client.total_services = client.total_services.saturating_add(1);
-            DivinationClients::<T>::insert(client_id, client.clone());
-            
-            // 5. 注册CidToSubject关系
-            let subject_info = SubjectInfo {
-                subject_type: SubjectType::DivinationMarket,
-                subject_id: client_id,
-                funding_share: 100,
-            };
-            let subject_vec: BoundedVec<SubjectInfo, ConstU32<8>> = 
-                BoundedVec::try_from(vec![subject_info])
-                    .map_err(|_| Error::<T>::BadParams)?;
-            CidToSubject::<T>::insert(&cid_hash, subject_vec);
-            
-            // 6. 执行PIN操作（内部调用）
-            Self::request_pin_for_subject(
-                OriginFor::<T>::from(frame_system::RawOrigin::Signed(caller)),
-                client_id,
-                cid,
-                tier,
-            )?;
-            
-            // 7. 发送事件
-            Self::deposit_event(Event::DivinationServiceRecorded {
-                client_id,
-                cid_hash,
-                service_count: client.total_services,
-            });
-            
-            Ok(())
-        }
-        
-        /// 函数级详细中文注释：转移命主所有权
-        /// 
-        /// ### 功能
-        /// - 将命主所有权转移给新的账户
-        /// - 新所有者将有权管理该命主的所有服务
-        /// 
-        /// ### 参数
-        /// - `client_id`: 命主ID
-        /// - `new_owner`: 新所有者账户
-        /// 
-        /// ### 权限
-        /// - 必须是当前命主所有者
-        /// 
-        /// ### 事件
-        /// - DivinationClientOwnershipTransferred { client_id, old_owner, new_owner }
-        #[pallet::call_index(31)]
-        #[pallet::weight(30_000)]
-        pub fn transfer_divination_client_ownership(
-            origin: OriginFor<T>,
-            client_id: u64,
-            new_owner: T::AccountId,
-        ) -> DispatchResult {
-            let caller = ensure_signed(origin)?;
-            
-            // 1. 验证命主存在并检查所有权
-            DivinationClients::<T>::try_mutate(client_id, |maybe_client| {
-                let client = maybe_client.as_mut()
-                    .ok_or(Error::<T>::DivinationClientNotFound)?;
-                ensure!(client.owner == caller, Error::<T>::NotDivinationClientOwner);
-                
-                // 2. 更新所有者
-                let old_owner = client.owner.clone();
-                client.owner = new_owner.clone();
-                
-                // 3. 发送事件
-                Self::deposit_event(Event::DivinationClientOwnershipTransferred {
-                    client_id,
-                    old_owner,
-                    new_owner,
-                });
-                
-                Ok(())
-            })
-        }
     }
 
     #[pallet::hooks]
@@ -5859,17 +5459,11 @@ impl<T: Config> ContentRegistry for Pallet<T> {
                 match config.subject_type_id {
                     0 => SubjectType::Evidence,
                     1 => SubjectType::OtcOrder,
-                    2 => SubjectType::DivinationMarket,
-                    3 => SubjectType::DivinationNft,
-                    4 => SubjectType::DivinationAi,
                     5 => SubjectType::Chat,
                     6 => SubjectType::Livestream,
                     7 => SubjectType::Swap,
                     8 => SubjectType::Arbitration,
                     9 => SubjectType::UserProfile,
-                    10 => SubjectType::DivinationReport,
-                    11 => SubjectType::Matchmaking,
-                    12 => SubjectType::MatchmakingChat,
                     98 => SubjectType::General,
                     _ => SubjectType::Custom(bounded_domain),
                 }

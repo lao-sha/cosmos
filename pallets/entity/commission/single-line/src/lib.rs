@@ -310,6 +310,7 @@ pub mod pallet {
 
 impl<T: pallet::Config> pallet_commission_common::CommissionPlugin<T::AccountId, pallet::BalanceOf<T>> for pallet::Pallet<T> {
     fn calculate(
+        entity_id: u64,
         shop_id: u64,
         buyer: &T::AccountId,
         _order_amount: pallet::BalanceOf<T>,
@@ -320,7 +321,8 @@ impl<T: pallet::Config> pallet_commission_common::CommissionPlugin<T::AccountId,
     ) -> (alloc::vec::Vec<pallet_commission_common::CommissionOutput<T::AccountId, pallet::BalanceOf<T>>>, pallet::BalanceOf<T>) {
         use pallet_commission_common::CommissionModes;
 
-        let config = match pallet::SingleLineConfigs::<T>::get(shop_id) {
+        // 配置按 entity_id，单链按 entity_id（跨店共享单链）
+        let config = match pallet::SingleLineConfigs::<T>::get(entity_id) {
             Some(c) => c,
             None => return (alloc::vec::Vec::new(), remaining),
         };
@@ -336,16 +338,16 @@ impl<T: pallet::Config> pallet_commission_common::CommissionPlugin<T::AccountId,
         let mut outputs = alloc::vec::Vec::new();
 
         if has_upline {
-            pallet::Pallet::<T>::process_upline(shop_id, buyer, &mut remaining, &config, &mut outputs);
+            pallet::Pallet::<T>::process_upline(entity_id, buyer, &mut remaining, &config, &mut outputs);
         }
 
         if has_downline {
-            pallet::Pallet::<T>::process_downline(shop_id, buyer, &mut remaining, &config, &mut outputs);
+            pallet::Pallet::<T>::process_downline(entity_id, buyer, &mut remaining, &config, &mut outputs);
         }
 
-        // 首次消费加入单链
+        // 首次消费加入单链（Entity 级）
         if is_first_order {
-            let _ = pallet::Pallet::<T>::add_to_single_line(shop_id, buyer);
+            let _ = pallet::Pallet::<T>::add_to_single_line(entity_id, buyer);
         }
 
         (outputs, remaining)

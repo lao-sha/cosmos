@@ -38,7 +38,7 @@ pub mod pallet {
     };
     use frame_system::pallet_prelude::*;
     use pallet_escrow::pallet::Escrow as EscrowTrait;
-    use pallet_entity_common::{MallOrderStatus, OrderProvider, ProductCategory, ProductProvider, EntityProvider, EntityTokenProvider, ShopProvider};
+    use pallet_entity_common::{MallOrderStatus, OrderCommissionHandler, OrderProvider, ProductCategory, ProductProvider, EntityProvider, EntityTokenProvider, ShopProvider};
     use sp_runtime::{traits::{Saturating, Zero}, SaturatedConversion};
 
     /// 货币余额类型别名
@@ -157,6 +157,9 @@ pub mod pallet {
         #[pallet::constant]
         type ServiceConfirmTimeout: Get<BlockNumberFor<Self>>;
 
+        /// 佣金处理接口（订单完成时触发返佣）
+        type CommissionHandler: OrderCommissionHandler<Self::AccountId, BalanceOf<Self>>;
+
         /// CID 最大长度
         #[pallet::constant]
         type MaxCidLength: Get<u32>;
@@ -203,6 +206,18 @@ pub mod pallet {
     #[pallet::storage]
     #[pallet::getter(fn order_stats)]
     pub type OrderStats<T: Config> = StorageValue<_, OrderStatistics<BalanceOf<T>>, ValueQuery>;
+
+    /// 过期检查队列：到期区块号 → 待检查订单 ID 列表
+    /// place_order 写入 [now + ShipTimeout]，ship_order 写入 [now + ConfirmTimeout]
+    /// on_idle 仅检查当前区块对应的队列，O(K) 复杂度
+    #[pallet::storage]
+    pub type ExpiryQueue<T: Config> = StorageMap<
+        _,
+        Blake2_128Concat,
+        BlockNumberFor<T>,
+        BoundedVec<u64, ConstU32<500>>,
+        ValueQuery,
+    >;
 
     // ==================== 事件 ====================
 
@@ -270,6 +285,8 @@ pub mod pallet {
         Overflow,
         /// 数字商品不可取消
         DigitalProductCannotCancel,
+        /// 无效数量（不能为 0）
+        InvalidQuantity,
         /// 数字商品不可退款
         DigitalProductCannotRefund,
         /// 非服务类订单
@@ -280,14 +297,17 @@ pub mod pallet {
 
     #[pallet::hooks]
     impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
-        /// 空闲时处理超时订单
-        fn on_idle(_now: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
-            let base_weight = Weight::from_parts(20_000, 0);
-            if remaining_weight.ref_time() < base_weight.ref_time() * 5 {
+        /// 空闲时处理超时订单（基于 ExpiryQueue 精确索引）
+        fn on_idle(now: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
+            // 每个订单处理约 50_000 weight（读 + 写 + escrow 操作）
+            let per_order_weight = Weight::from_parts(50_000, 0);
+            // 至少能处理 1 个订单才值得进入
+            if remaining_weight.ref_time() < per_order_weight.ref_time().saturating_add(10_000) {
                 return Weight::zero();
             }
 
-            Self::process_expired_orders(5)
+            let max_count = (remaining_weight.ref_time() / per_order_weight.ref_time()).min(20) as u32;
+            Self::process_expired_orders(now, max_count)
         }
     }
 
@@ -312,6 +332,9 @@ pub mod pallet {
             use_tokens: Option<BalanceOf<T>>,
         ) -> DispatchResult {
             let buyer = ensure_signed(origin)?;
+
+            // 校验参数
+            ensure!(quantity > 0, Error::<T>::InvalidQuantity);
 
             // 获取商品信息
             ensure!(T::ProductProvider::product_exists(product_id), Error::<T>::ProductNotFound);
@@ -340,11 +363,10 @@ pub mod pallet {
             
             // 积分抵扣
             let mut final_amount = total_amount;
-            let mut token_discount = Zero::zero();
             if let Some(tokens) = use_tokens {
                 if !tokens.is_zero() && T::EntityToken::is_token_enabled(shop_id) {
-                    token_discount = T::EntityToken::redeem_for_discount(shop_id, &buyer, tokens)?;
-                    final_amount = final_amount.saturating_sub(token_discount);
+                    let discount = T::EntityToken::redeem_for_discount(shop_id, &buyer, tokens)?;
+                    final_amount = final_amount.saturating_sub(discount);
                 }
             }
             
@@ -415,6 +437,17 @@ pub mod pallet {
             ShopOrders::<T>::try_mutate(shop_id, |ids| ids.try_push(order_id))
                 .map_err(|_| Error::<T>::Overflow)?;
             NextOrderId::<T>::put(order_id.saturating_add(1));
+
+            // 写入过期检查队列（非数字商品才需要超时检查）
+            if product_category != ProductCategory::Digital {
+                let expiry_block = if requires_shipping {
+                    now.saturating_add(T::ShipTimeout::get())
+                } else {
+                    // 服务类：等待卖家开始服务的超时（复用 ShipTimeout）
+                    now.saturating_add(T::ShipTimeout::get())
+                };
+                let _ = ExpiryQueue::<T>::try_mutate(expiry_block, |ids| ids.try_push(order_id));
+            }
 
             OrderStats::<T>::mutate(|stats| {
                 stats.total_orders = stats.total_orders.saturating_add(1);
@@ -497,6 +530,11 @@ pub mod pallet {
                 order.shipped_at = Some(<frame_system::Pallet<T>>::block_number());
                 Ok(())
             })?;
+
+            // 写入过期检查队列：发货后 ConfirmTimeout 区块自动确认
+            let now = <frame_system::Pallet<T>>::block_number();
+            let expiry_block = now.saturating_add(T::ConfirmTimeout::get());
+            let _ = ExpiryQueue::<T>::try_mutate(expiry_block, |ids| ids.try_push(order_id));
 
             Self::deposit_event(Event::OrderShipped { order_id });
             Ok(())
@@ -614,6 +652,11 @@ pub mod pallet {
                 Ok(())
             })?;
 
+            // 写入过期检查队列：服务完成后 ServiceConfirmTimeout 区块自动确认
+            let now = <frame_system::Pallet<T>>::block_number();
+            let expiry_block = now.saturating_add(T::ServiceConfirmTimeout::get());
+            let _ = ExpiryQueue::<T>::try_mutate(expiry_block, |ids| ids.try_push(order_id));
+
             Self::deposit_event(Event::ServiceCompleted { order_id });
             Ok(())
         }
@@ -665,6 +708,14 @@ pub mod pallet {
                 1,
             );
 
+            // 触发佣金计算
+            let _ = T::CommissionHandler::on_order_completed(
+                order.shop_id,
+                order_id,
+                &order.buyer,
+                order.total_amount,
+            );
+
             // 发放购物积分奖励
             let _ = T::EntityToken::reward_on_purchase(
                 order.shop_id,
@@ -686,69 +737,70 @@ pub mod pallet {
             Ok(())
         }
 
-        /// 处理过期订单
-        /// P0 安全修复: 限制最大迭代次数，防止区块权重超限
-        fn process_expired_orders(max_count: u32) -> Weight {
-            let now = <frame_system::Pallet<T>>::block_number();
-            let mut processed = 0u32;
-            let mut checked = 0u32;
-            const MAX_ITERATION: u32 = 100; // 最大检查数量
+        /// 处理过期订单（基于 ExpiryQueue 精确索引）
+        ///
+        /// 仅检查当前区块到期的订单，O(K) 复杂度（K = 到期订单数）
+        /// 二次确认订单状态：可能已被手动确认/取消/退款
+        fn process_expired_orders(now: BlockNumberFor<T>, max_count: u32) -> Weight {
+            let order_ids = ExpiryQueue::<T>::get(now);
+            if order_ids.is_empty() {
+                // 仅消耗 1 次 storage read
+                return Weight::from_parts(5_000, 0);
+            }
 
-            let next_id = NextOrderId::<T>::get();
-            for order_id in 0..next_id {
-                if processed >= max_count || checked >= MAX_ITERATION {
+            let mut processed = 0u32;
+            let mut reads = 1u32; // ExpiryQueue read
+
+            for &order_id in order_ids.iter() {
+                if processed >= max_count {
                     break;
                 }
-                checked = checked.saturating_add(1);
+                reads = reads.saturating_add(1);
 
                 if let Some(order) = Orders::<T>::get(order_id) {
                     match order.status {
-                        // 发货超时：自动退款（仅实物商品）
+                        // 发货超时：自动退款
                         MallOrderStatus::Paid => {
-                            // 数字商品已自动完成，不会进入此状态
-                            // 服务类商品等待卖家开始服务
                             if order.requires_shipping {
-                                if let Some(paid_at) = order.paid_at {
-                                    if now > paid_at.saturating_add(T::ShipTimeout::get()) {
-                                        let _ = T::Escrow::refund_all(order_id, &order.buyer);
-                                        let _ = T::ProductProvider::restore_stock(order.product_id, order.quantity);
-                                        Orders::<T>::mutate(order_id, |o| {
-                                            if let Some(ord) = o {
-                                                ord.status = MallOrderStatus::Refunded;
-                                            }
-                                        });
-                                        processed = processed.saturating_add(1);
+                                // 实物商品：未发货 → 退款
+                                let _ = T::Escrow::refund_all(order_id, &order.buyer);
+                                let _ = T::ProductProvider::restore_stock(order.product_id, order.quantity);
+                                Orders::<T>::mutate(order_id, |o| {
+                                    if let Some(ord) = o {
+                                        ord.status = MallOrderStatus::Refunded;
                                     }
-                                }
+                                });
+                                processed = processed.saturating_add(1);
+                            } else if order.product_category == ProductCategory::Service {
+                                // 服务类商品：卖家未开始服务 → 退款
+                                let _ = T::Escrow::refund_all(order_id, &order.buyer);
+                                Orders::<T>::mutate(order_id, |o| {
+                                    if let Some(ord) = o {
+                                        ord.status = MallOrderStatus::Refunded;
+                                    }
+                                });
+                                processed = processed.saturating_add(1);
                             }
                         }
-                        // 确认超时：自动确认
+                        // 确认超时：自动确认收货/服务
                         MallOrderStatus::Shipped => {
-                            // 实物商品：发货后超时自动确认
-                            if order.requires_shipping {
-                                if let Some(shipped_at) = order.shipped_at {
-                                    if now > shipped_at.saturating_add(T::ConfirmTimeout::get()) {
-                                        let _ = Self::do_complete_order(order_id, &order);
-                                        processed = processed.saturating_add(1);
-                                    }
-                                }
-                            }
-                            // 服务类商品：服务完成后超时自动确认
-                            else if order.product_category == ProductCategory::Service {
-                                if let Some(service_completed_at) = order.service_completed_at {
-                                    if now > service_completed_at.saturating_add(T::ServiceConfirmTimeout::get()) {
-                                        let _ = Self::do_complete_order(order_id, &order);
-                                        processed = processed.saturating_add(1);
-                                    }
-                                }
-                            }
+                            let _ = Self::do_complete_order(order_id, &order);
+                            processed = processed.saturating_add(1);
                         }
+                        // 已被手动处理（取消/退款/确认等），跳过
                         _ => {}
                     }
                 }
             }
 
-            Weight::from_parts(30_000 * processed as u64, 0)
+            // 清理已处理的队列条目
+            ExpiryQueue::<T>::remove(now);
+
+            // 精确报告 weight：读队列 + 每个订单读写 + escrow 操作
+            Weight::from_parts(
+                5_000u64.saturating_add(50_000u64.saturating_mul(reads as u64)),
+                0,
+            )
         }
     }
 

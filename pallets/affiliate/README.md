@@ -1245,12 +1245,12 @@ impl<T: Config> Pallet<T> {
 }
 ```
 
-### 与 pallet-divination-membership 集成
+### 与会员模块集成
 
 **集成方式**：通过 `MembershipProvider` trait 提供会员信息
 
 ```rust
-// pallet-divination-membership 实现 MembershipProvider
+// 会员模块实现 MembershipProvider
 impl<T: Config> pallet_affiliate::MembershipProvider<T::AccountId> for Pallet<T> {
     fn is_valid_member(who: &T::AccountId) -> bool {
         // 检查会员状态
@@ -1775,7 +1775,6 @@ api.query.system.events((events) => {
 
 ### 相关模块
 
-- `pallet-divination-membership`: 会员系统
 - `pallet-memorial`: 纪念服务
 - `pallet-ledger`: 账本统计
 - `pallet-escrow`: 托管服务（可选）

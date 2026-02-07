@@ -39,7 +39,7 @@ sp_api::decl_runtime_apis! {
         /// 
         /// ### 参数
         /// - `user`: 用户账户
-        /// - `domain`: 业务域编号（0=Evidence, 2=DivinationMarket, 等）
+        /// - `domain`: 业务域编号（0=Evidence, 5=Chat, 7=Swap, 等）
         /// - `subject_id`: 业务 ID
         /// 
         /// ### 返回

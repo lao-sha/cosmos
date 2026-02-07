@@ -9,7 +9,7 @@ fn create_sale_round_works() {
         let entity_id = 1u64;
         let total_supply = 1_000_000u128;
 
-        assert_ok!(EntitySale::create_sale_round(
+        assert_ok!(EntityTokenSale::create_sale_round(
             RuntimeOrigin::signed(CREATOR),
             entity_id,
             SaleMode::FixedPrice,
@@ -31,7 +31,7 @@ fn create_sale_round_works() {
 fn add_payment_option_works() {
     new_test_ext().execute_with(|| {
         // 创建轮次
-        assert_ok!(EntitySale::create_sale_round(
+        assert_ok!(EntityTokenSale::create_sale_round(
             RuntimeOrigin::signed(CREATOR),
             1,
             SaleMode::FixedPrice,
@@ -43,7 +43,7 @@ fn add_payment_option_works() {
         ));
 
         // 添加支付选项
-        assert_ok!(EntitySale::add_payment_option(
+        assert_ok!(EntityTokenSale::add_payment_option(
             RuntimeOrigin::signed(CREATOR),
             0,               // round_id
             None,            // asset_id (native)
@@ -60,7 +60,7 @@ fn add_payment_option_works() {
 #[test]
 fn set_vesting_config_works() {
     new_test_ext().execute_with(|| {
-        assert_ok!(EntitySale::create_sale_round(
+        assert_ok!(EntityTokenSale::create_sale_round(
             RuntimeOrigin::signed(CREATOR),
             1,
             SaleMode::FixedPrice,
@@ -71,7 +71,7 @@ fn set_vesting_config_works() {
             0,
         ));
 
-        assert_ok!(EntitySale::set_vesting_config(
+        assert_ok!(EntityTokenSale::set_vesting_config(
             RuntimeOrigin::signed(CREATOR),
             0,                          // round_id
             VestingType::Linear,        // vesting_type
@@ -90,7 +90,7 @@ fn set_vesting_config_works() {
 #[test]
 fn start_and_end_sale_works() {
     new_test_ext().execute_with(|| {
-        assert_ok!(EntitySale::create_sale_round(
+        assert_ok!(EntityTokenSale::create_sale_round(
             RuntimeOrigin::signed(CREATOR),
             1,
             SaleMode::FixedPrice,
@@ -102,7 +102,7 @@ fn start_and_end_sale_works() {
         ));
 
         // 开始发售
-        assert_ok!(EntitySale::start_sale(
+        assert_ok!(EntityTokenSale::start_sale(
             RuntimeOrigin::signed(CREATOR),
             0,
         ));
@@ -111,7 +111,7 @@ fn start_and_end_sale_works() {
         assert_eq!(round.status, RoundStatus::Active);
 
         // 结束发售
-        assert_ok!(EntitySale::end_sale(
+        assert_ok!(EntityTokenSale::end_sale(
             RuntimeOrigin::signed(CREATOR),
             0,
         ));

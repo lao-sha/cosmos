@@ -1,6 +1,6 @@
 //! 代币发售模块测试 mock
 
-use crate as pallet_entity_sale;
+use crate as pallet_entity_tokensale;
 use frame_support::{derive_impl, traits::ConstU32};
 use sp_runtime::BuildStorage;
 
@@ -12,7 +12,7 @@ pub const BUYER: u64 = 2;
 frame_support::construct_runtime!(
     pub enum Test {
         System: frame_system,
-        EntitySale: pallet_entity_sale,
+        EntityTokenSale: pallet_entity_tokensale,
     }
 );
 
@@ -21,7 +21,7 @@ impl frame_system::Config for Test {
     type Block = Block;
 }
 
-impl pallet_entity_sale::Config for Test {
+impl pallet_entity_tokensale::Config for Test {
     type RuntimeEvent = RuntimeEvent;
     type Balance = u128;
     type AssetId = u64;

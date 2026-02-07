@@ -48,15 +48,11 @@ IPFS 存储服务核心模块，提供去中心化内容固定（Pin）、运营
 pub enum SubjectType {
     Evidence,        // 证据（最高优先级）
     OtcOrder,        // OTC订单
-    DivinationMarket,// 命理服务市场
-    DivinationNft,   // 命理NFT
-    DivinationAi,    // AI解读
     Chat,            // 聊天消息（⚠️临时）
     Livestream,      // 直播间（⚠️临时）
     Swap,            // Swap兑换
     Arbitration,     // 仲裁证据
     UserProfile,     // 用户档案
-    Matchmaking,     // 婚恋模块
     General,         // 通用存储
     Custom(Vec<u8>), // 自定义域
 }

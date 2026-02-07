@@ -25,7 +25,7 @@ log = { version = "0.4.22", default-features = false }
 # 🆕 2025-11-03: pallet-trading 重构 - 依赖拆分后的子模块
 pallet-maker = { path = "../maker", default-features = false }
 pallet-otc-order = { path = "../otc-order", default-features = false }
-pallet-bridge = { path = "../bridge", default-features = false }
+pallet-trading-swap = { path = "swap", default-features = false }
 pallet-trading-common = { path = "../trading-common", default-features = false }
 
 # 依赖其他pallet（保留用于类型定义）
@@ -56,7 +56,7 @@ std = [
 	# 🆕 2025-11-03: pallet-trading 重构 - 子模块依赖
 	"pallet-maker/std",
 	"pallet-otc-order/std",
-	"pallet-bridge/std",
+	"pallet-trading-swap/std",
 	"pallet-trading-common/std",
 	# 保留的依赖
 	"pallet-timestamp/std",

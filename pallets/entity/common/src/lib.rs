@@ -130,7 +130,7 @@ pub enum GovernanceMode {
 /// 实体状态（原 ShopStatus）
 #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
 pub enum EntityStatus {
-    /// 待审核
+    /// 待审核（历史兼容，新创建不再使用）
     #[default]
     Pending,
     /// 正常运营
@@ -141,6 +141,8 @@ pub enum EntityStatus {
     Banned,
     /// 已关闭
     Closed,
+    /// 待关闭审批（owner 申请关闭，等待治理批准）
+    PendingClose,
 }
 
 /// 向后兼容：ShopStatus 别名（Entity 级别状态）
@@ -238,6 +240,63 @@ impl MemberMode {
     /// 是否在 Shop 级别存储会员
     pub fn uses_shop_members(&self) -> bool {
         matches!(self, Self::Independent | Self::Hybrid)
+    }
+}
+
+// ============================================================================
+// 会员注册策略（位标记）
+// ============================================================================
+
+/// 会员注册策略（位标记，可组合）
+///
+/// - `0b0000_0000` = 开放注册（默认）
+/// - `PURCHASE_REQUIRED` = 必须先消费才能成为会员（手动注册被拒）
+/// - `REFERRAL_REQUIRED` = 必须提供推荐人
+/// - `APPROVAL_REQUIRED` = 需要 Entity owner 审批
+///
+/// 支持组合，例如 `PURCHASE_REQUIRED | REFERRAL_REQUIRED` = 必须消费且有推荐人
+#[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+pub struct MemberRegistrationPolicy(pub u8);
+
+impl MemberRegistrationPolicy {
+    /// 开放注册（无限制）
+    pub const OPEN: Self = Self(0);
+    /// 必须先消费（auto_register 触发）才能成为会员
+    pub const PURCHASE_REQUIRED: u8 = 0b0000_0001;
+    /// 必须提供推荐人
+    pub const REFERRAL_REQUIRED: u8 = 0b0000_0010;
+    /// 需要 Entity owner 审批（注册后进入 Pending 状态）
+    pub const APPROVAL_REQUIRED: u8 = 0b0000_0100;
+
+    /// 检查是否设置了指定标记
+    pub fn contains(&self, flag: u8) -> bool {
+        self.0 & flag == flag
+    }
+
+    /// 是否为开放注册（无任何限制）
+    pub fn is_open(&self) -> bool {
+        self.0 == 0
+    }
+
+    /// 是否要求购买
+    pub fn requires_purchase(&self) -> bool {
+        self.contains(Self::PURCHASE_REQUIRED)
+    }
+
+    /// 是否要求推荐人
+    pub fn requires_referral(&self) -> bool {
+        self.contains(Self::REFERRAL_REQUIRED)
+    }
+
+    /// 是否要求审批
+    pub fn requires_approval(&self) -> bool {
+        self.contains(Self::APPROVAL_REQUIRED)
+    }
+}
+
+impl Default for MemberRegistrationPolicy {
+    fn default() -> Self {
+        Self::OPEN
     }
 }
 
@@ -459,6 +518,32 @@ pub trait EntityProvider<AccountId> {
     /// 更新实体评分
     fn update_entity_rating(entity_id: u64, rating: u8) -> Result<(), DispatchError>;
     
+    // ==================== Entity-Shop 关联接口 ====================
+    
+    /// 注册 Shop 到 Entity（Shop 创建时调用）
+    fn register_shop(entity_id: u64, shop_id: u64) -> Result<(), DispatchError> {
+        let _ = (entity_id, shop_id);
+        Ok(())
+    }
+    
+    /// 从 Entity 注销 Shop（Shop 关闭时调用）
+    fn unregister_shop(entity_id: u64, shop_id: u64) -> Result<(), DispatchError> {
+        let _ = (entity_id, shop_id);
+        Ok(())
+    }
+    
+    /// 检查是否为 Entity 管理员（owner 或 admins 列表中）
+    fn is_entity_admin(entity_id: u64, account: &AccountId) -> bool {
+        let _ = (entity_id, account);
+        false
+    }
+    
+    /// 获取 Entity 下所有 Shop IDs
+    fn entity_shops(entity_id: u64) -> sp_std::vec::Vec<u64> {
+        let _ = entity_id;
+        sp_std::vec::Vec::new()
+    }
+    
     // ==================== 治理调用接口 ====================
     
     /// 暂停实体（治理调用）
@@ -525,6 +610,25 @@ pub trait ShopProvider<AccountId> {
     /// 获取运营资金余额
     fn operating_balance(shop_id: u64) -> u128;
     
+    // ==================== Primary Shop ====================
+    
+    /// 创建主 Shop（Entity 创建时自动调用，绕过 is_entity_active 检查）
+    fn create_primary_shop(
+        entity_id: u64,
+        name: sp_std::vec::Vec<u8>,
+        shop_type: ShopType,
+        member_mode: MemberMode,
+    ) -> Result<u64, DispatchError> {
+        let _ = (entity_id, name, shop_type, member_mode);
+        Err(DispatchError::Other("not implemented"))
+    }
+    
+    /// 检查 Shop 是否为主 Shop
+    fn is_primary_shop(shop_id: u64) -> bool {
+        let _ = shop_id;
+        false
+    }
+    
     // ==================== 控制接口 ====================
     
     /// 暂停 Shop
@@ -535,6 +639,12 @@ pub trait ShopProvider<AccountId> {
     
     /// 恢复 Shop
     fn resume_shop(shop_id: u64) -> Result<(), DispatchError> {
+        let _ = shop_id;
+        Ok(())
+    }
+    
+    /// 强制关闭 Shop（Entity 级联调用，绕过 is_primary 检查）
+    fn force_close_shop(shop_id: u64) -> Result<(), DispatchError> {
         let _ = shop_id;
         Ok(())
     }
@@ -756,6 +866,47 @@ pub trait PricingProvider {
     /// - `u64`: 价格（精度 10^6，即 1,000,000 = 1 USDT/COS）
     /// - 返回 0 表示价格不可用
     fn get_cos_usdt_price() -> u64;
+}
+
+// ============================================================================
+// 佣金资金保护接口
+// ============================================================================
+
+/// 佣金资金保护接口
+///
+/// 供 Shop 模块在扣费时查询已承诺（pending + shopping）的佣金资金，
+/// 防止运营扣费侵占用户佣金。
+pub trait CommissionFundGuard {
+    /// 获取 shop 已承诺的佣金资金总额（pending_total + shopping_total）
+    fn protected_funds(shop_id: u64) -> u128;
+}
+
+/// 空 CommissionFundGuard 实现（无佣金系统时使用）
+impl CommissionFundGuard for () {
+    fn protected_funds(_: u64) -> u128 { 0 }
+}
+
+/// 订单佣金处理接口
+///
+/// 供 Transaction 模块在订单完成时触发佣金计算，
+/// 无需直接依赖 commission 模块。
+pub trait OrderCommissionHandler<AccountId, Balance> {
+    /// 订单完成时处理佣金
+    fn on_order_completed(
+        shop_id: u64,
+        order_id: u64,
+        buyer: &AccountId,
+        order_amount: Balance,
+    ) -> Result<(), DispatchError>;
+
+    /// 订单取消/退款时撤销佣金
+    fn on_order_cancelled(order_id: u64) -> Result<(), DispatchError>;
+}
+
+/// 空佣金处理（无佣金系统时使用）
+impl<AccountId, Balance> OrderCommissionHandler<AccountId, Balance> for () {
+    fn on_order_completed(_: u64, _: u64, _: &AccountId, _: Balance) -> Result<(), DispatchError> { Ok(()) }
+    fn on_order_cancelled(_: u64) -> Result<(), DispatchError> { Ok(()) }
 }
 
 /// 空定价提供者（测试用）

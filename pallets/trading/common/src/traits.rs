@@ -274,8 +274,6 @@ impl MakerCreditInterface for () {
 /// ## 使用者
 /// - `pallet-chat-group`: 群组创建保证金
 /// - `pallet-livestream`: 直播间创建保证金
-/// - `pallet-divination-market`: 服务提供者保证金
-/// - `pallet-divination-ai`: 争议押金
 /// - `pallet-storage-service`: 运营者保证金
 /// - `pallet-affiliate`: 提案押金
 /// - `pallet-trading-maker`: 做市商押金

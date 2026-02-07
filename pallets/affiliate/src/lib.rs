@@ -1626,8 +1626,7 @@ pub mod pallet {
         /// - `Err(...)`: 分配失败原因
         ///
         /// ## 使用场景
-        /// - pallet-divination-membership::purchase() 购买会员时调用
-        /// - pallet-divination-membership::upgrade_to_year10() 升级会员时调用
+        /// - 会员购买/升级时调用
         pub fn distribute_membership_rewards(
             buyer: &T::AccountId,
             amount: BalanceOf<T>,

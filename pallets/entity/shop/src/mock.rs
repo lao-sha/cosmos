@@ -63,6 +63,11 @@ impl pallet_entity_common::EntityProvider<u64> for MockEntityProvider {
     fn update_entity_rating(_entity_id: u64, _rating: u8) -> Result<(), sp_runtime::DispatchError> {
         Ok(())
     }
+
+    fn is_entity_admin(entity_id: u64, account: &u64) -> bool {
+        // Account 10 is admin of Entity 1
+        entity_id == 1 && *account == 10
+    }
 }
 
 parameter_types! {
@@ -86,6 +91,7 @@ impl pallet_entity_shop::Config for Test {
     type MaxPointsSymbolLength = MaxPointsSymbolLength;
     type MinOperatingBalance = MinOperatingBalance;
     type WarningThreshold = WarningThreshold;
+    type CommissionFundGuard = ();
 }
 
 // Build genesis storage according to the mock runtime.
@@ -108,6 +114,10 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
     .unwrap();
 
     let mut ext = sp_io::TestExternalities::new(t);
-    ext.execute_with(|| System::set_block_number(1));
+    ext.execute_with(|| {
+        System::set_block_number(1);
+        // Shop IDs 从 1 开始（与 Entity ID 保持一致）
+        crate::NextShopId::<Test>::put(1);
+    });
     ext
 }

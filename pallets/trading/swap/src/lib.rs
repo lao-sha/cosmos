@@ -257,9 +257,9 @@ pub mod pallet {
     #[pallet::pallet]
     pub struct Pallet<T>(_);
     
-    /// 函数级详细中文注释：Bridge模块配置 trait
+    /// 函数级详细中文注释：Swap模块配置 trait
     #[pallet::config]
-    /// 函数级中文注释：Bridge Pallet 配置 trait
+    /// 函数级中文注释：Swap Pallet 配置 trait
     /// - 🔴 stable2506 API 变更：RuntimeEvent 自动继承，无需显式声明
     /// - 🆕 2026-02-03: OCW 验证由 offchain_worker 执行，结果通过 VerificationOrigin 提交
     /// - 🆕 2026-02-04: OCW 验证结果存储后，由 on_idle 自动处理链上状态
@@ -478,7 +478,7 @@ pub mod pallet {
     
     // ===== 事件 =====
     
-    /// 函数级详细中文注释：Bridge模块事件
+    /// 函数级详细中文注释：Swap模块事件
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
     pub enum Event<T: Config> {
@@ -583,7 +583,7 @@ pub mod pallet {
     
     // ===== 错误 =====
     
-    /// 函数级详细中文注释：Bridge模块错误
+    /// 函数级详细中文注释：Swap模块错误
     #[pallet::error]
     pub enum Error<T> {
         /// 兑换不存在

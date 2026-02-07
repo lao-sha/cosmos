@@ -1,4 +1,4 @@
-# pallet-entity-sale
+# pallet-entity-tokensale
 
 实体代币发售模块。
 

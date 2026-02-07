@@ -153,42 +153,7 @@
 
 ---
 
-## 6. Divination（占卜）模块
-
-### 6.1 八字排盘
-
-| 测试项 | Extrinsic | 说明 |
-|--------|-----------|------|
-| 创建八字盘 | `divinationBazi.createChart(year, month, day, hour, gender)` | 创建八字命盘 |
-
-### 6.2 奇门遁甲
-
-| 测试项 | Extrinsic | 说明 |
-|--------|-----------|------|
-| 创建奇门盘 | `divinationQimen.createChart(year, month, day, hour)` | 创建奇门盘 |
-
-### 6.3 占卜订单
-
-| 测试项 | Extrinsic | 说明 |
-|--------|-----------|------|
-| 创建占卜订单 | `divinationOrders.createOrder(divinerId, serviceType, question)` | 创建占卜订单 |
-| 接单 | `divinationOrders.acceptOrder(orderId)` | 占卜师接单 |
-| 完成订单 | `divinationOrders.completeOrder(orderId, resultCid)` | 提交占卜结果 |
-
----
-
-## 7. Matchmaking（相亲）模块
-
-| 测试项 | Extrinsic | 说明 |
-|--------|-----------|------|
-| 创建档案 | `matchmaking.createProfile(...)` | 创建相亲档案 |
-| 更新档案 | `matchmaking.updateProfile(...)` | 更新档案信息 |
-| 发送喜欢 | `matchmaking.sendLike(targetAccount)` | 发送喜欢 |
-| 匹配成功 | 双方互相喜欢自动触发 | |
-
----
-
-## 8. Storage（存储）模块
+## 6. Storage（存储）模块
 
 ### 8.1 Storage Service
 
@@ -212,8 +177,6 @@ scripts/
 ├── test-chat.ts              # 聊天功能测试
 ├── test-escrow.ts            # 托管功能测试
 ├── test-arbitration.ts       # 仲裁功能测试
-├── test-divination.ts        # 占卜功能测试
-├── test-matchmaking.ts       # 相亲功能测试
 ├── test-storage.ts           # 存储功能测试
 ├── utils/
 │   ├── api.ts                # API 连接工具
@@ -239,8 +202,6 @@ scripts/
 
 ### P2 - 次要功能
 8. **仲裁流程**: 发起仲裁 → 提交证据 → 裁决
-9. **占卜功能**: 创建命盘 → 创建订单
-10. **相亲功能**: 创建档案 → 发送喜欢
 
 ---
 

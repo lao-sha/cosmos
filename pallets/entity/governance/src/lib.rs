@@ -199,6 +199,12 @@ pub mod pallet {
             shopping_balance_generates_commission: bool,
         },
 
+        /// 设置全局最低复购比例底线（万分比，由 Governance 设定）
+        MinRepurchaseRateChange {
+            /// 最低复购比例（万分比，3000 = 30%）
+            min_rate: u16,
+        },
+
         // ==================== 会员等级体系类（新增）====================
         /// 添加自定义等级
         AddCustomLevel {
@@ -1411,6 +1417,10 @@ pub mod pallet {
                         *enabled,
                         *shopping_balance_generates_commission,
                     )
+                },
+
+                ProposalType::MinRepurchaseRateChange { min_rate } => {
+                    T::CommissionProvider::set_min_repurchase_rate(shop_id, *min_rate)
                 },
 
                 // ==================== 会员等级体系类 ====================

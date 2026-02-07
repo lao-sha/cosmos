@@ -1647,10 +1647,10 @@ dependencies = [
  "pallet-entity-member",
  "pallet-entity-registry",
  "pallet-entity-review",
- "pallet-entity-sale",
  "pallet-entity-service",
  "pallet-entity-shop",
  "pallet-entity-token",
+ "pallet-entity-tokensale",
  "pallet-entity-transaction",
  "pallet-escrow",
  "pallet-evidence",
@@ -6866,20 +6866,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallet-entity-sale"
-version = "0.1.0"
-dependencies = [
- "frame-support",
- "frame-system",
- "pallet-entity-common",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-io",
- "sp-runtime",
-]
-
-[[package]]
 name = "pallet-entity-service"
 version = "0.1.0"
 dependencies = [
@@ -6928,6 +6914,20 @@ dependencies = [
  "sp-io",
  "sp-runtime",
  "sp-std",
+]
+
+[[package]]
+name = "pallet-entity-tokensale"
+version = "0.1.0"
+dependencies = [
+ "frame-support",
+ "frame-system",
+ "pallet-entity-common",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
 ]
 
 [[package]]

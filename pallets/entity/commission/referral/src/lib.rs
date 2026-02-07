@@ -473,6 +473,7 @@ pub mod pallet {
 
 impl<T: pallet::Config> pallet_commission_common::CommissionPlugin<T::AccountId, pallet::BalanceOf<T>> for pallet::Pallet<T> {
     fn calculate(
+        entity_id: u64,
         shop_id: u64,
         buyer: &T::AccountId,
         order_amount: pallet::BalanceOf<T>,
@@ -483,7 +484,8 @@ impl<T: pallet::Config> pallet_commission_common::CommissionPlugin<T::AccountId,
     ) -> (alloc::vec::Vec<pallet_commission_common::CommissionOutput<T::AccountId, pallet::BalanceOf<T>>>, pallet::BalanceOf<T>) {
         use pallet_commission_common::CommissionModes;
 
-        let config = match pallet::ReferralConfigs::<T>::get(shop_id) {
+        // 配置按 entity_id 查询，推荐链按 shop_id 查询
+        let config = match pallet::ReferralConfigs::<T>::get(entity_id) {
             Some(c) => c,
             None => return (alloc::vec::Vec::new(), remaining),
         };
@@ -491,35 +493,30 @@ impl<T: pallet::Config> pallet_commission_common::CommissionPlugin<T::AccountId,
         let mut remaining = remaining;
         let mut outputs = alloc::vec::Vec::new();
 
-        // 1. 直推奖励
         if enabled_modes.contains(CommissionModes::DIRECT_REWARD) {
             pallet::Pallet::<T>::process_direct_reward(
                 shop_id, buyer, order_amount, &mut remaining, &config.direct_reward, &mut outputs,
             );
         }
 
-        // 2. 多级分销
         if enabled_modes.contains(CommissionModes::MULTI_LEVEL) {
             pallet::Pallet::<T>::process_multi_level(
                 shop_id, buyer, order_amount, &mut remaining, &config.multi_level, &mut outputs,
             );
         }
 
-        // 3. 固定金额
         if enabled_modes.contains(CommissionModes::FIXED_AMOUNT) {
             pallet::Pallet::<T>::process_fixed_amount(
                 shop_id, buyer, &mut remaining, &config.fixed_amount, &mut outputs,
             );
         }
 
-        // 4. 首单奖励
         if enabled_modes.contains(CommissionModes::FIRST_ORDER) && is_first_order {
             pallet::Pallet::<T>::process_first_order(
                 shop_id, buyer, order_amount, &mut remaining, &config.first_order, &mut outputs,
             );
         }
 
-        // 5. 复购奖励
         if enabled_modes.contains(CommissionModes::REPEAT_PURCHASE) {
             pallet::Pallet::<T>::process_repeat_purchase(
                 shop_id, buyer, order_amount, &mut remaining, &config.repeat_purchase, buyer_order_count, &mut outputs,
@@ -527,5 +524,62 @@ impl<T: pallet::Config> pallet_commission_common::CommissionPlugin<T::AccountId,
         }
 
         (outputs, remaining)
+    }
+}
+
+// ============================================================================
+// ReferralPlanWriter implementation
+// ============================================================================
+
+impl<T: pallet::Config> pallet_commission_common::ReferralPlanWriter<pallet::BalanceOf<T>> for pallet::Pallet<T> {
+    fn set_direct_rate(shop_id: u64, rate: u16) -> Result<(), sp_runtime::DispatchError> {
+        pallet::ReferralConfigs::<T>::mutate(shop_id, |maybe| {
+            let config = maybe.get_or_insert_with(pallet::ReferralConfig::default);
+            config.direct_reward.rate = rate;
+        });
+        Ok(())
+    }
+
+    fn set_multi_level(shop_id: u64, level_rates: alloc::vec::Vec<u16>, max_total_rate: u16) -> Result<(), sp_runtime::DispatchError> {
+        pallet::ReferralConfigs::<T>::mutate(shop_id, |maybe| {
+            let config = maybe.get_or_insert_with(pallet::ReferralConfig::default);
+            let bounded: frame_support::BoundedVec<pallet::MultiLevelTier, T::MaxMultiLevels> = level_rates
+                .into_iter()
+                .map(|rate| pallet::MultiLevelTier { rate, required_directs: 0, required_team_size: 0, required_spent: 0 })
+                .collect::<alloc::vec::Vec<_>>()
+                .try_into()
+                .unwrap_or_default();
+            config.multi_level = pallet::MultiLevelConfig { levels: bounded, max_total_rate };
+        });
+        Ok(())
+    }
+
+    fn set_fixed_amount(shop_id: u64, amount: pallet::BalanceOf<T>) -> Result<(), sp_runtime::DispatchError> {
+        pallet::ReferralConfigs::<T>::mutate(shop_id, |maybe| {
+            let config = maybe.get_or_insert_with(pallet::ReferralConfig::default);
+            config.fixed_amount = pallet::FixedAmountConfig { amount };
+        });
+        Ok(())
+    }
+
+    fn set_first_order(shop_id: u64, amount: pallet::BalanceOf<T>, rate: u16, use_amount: bool) -> Result<(), sp_runtime::DispatchError> {
+        pallet::ReferralConfigs::<T>::mutate(shop_id, |maybe| {
+            let config = maybe.get_or_insert_with(pallet::ReferralConfig::default);
+            config.first_order = pallet::FirstOrderConfig { amount, rate, use_amount };
+        });
+        Ok(())
+    }
+
+    fn set_repeat_purchase(shop_id: u64, rate: u16, min_orders: u32) -> Result<(), sp_runtime::DispatchError> {
+        pallet::ReferralConfigs::<T>::mutate(shop_id, |maybe| {
+            let config = maybe.get_or_insert_with(pallet::ReferralConfig::default);
+            config.repeat_purchase = pallet::RepeatPurchaseConfig { rate, min_orders };
+        });
+        Ok(())
+    }
+
+    fn clear_config(shop_id: u64) -> Result<(), sp_runtime::DispatchError> {
+        pallet::ReferralConfigs::<T>::remove(shop_id);
+        Ok(())
     }
 }
