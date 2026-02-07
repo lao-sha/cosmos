@@ -24,9 +24,6 @@ data/
 node-data/
 spec/
 
-# Nested git repositories
-pallets/divination/xuanxue/
-
 # =========================
 # Node.js / npm
 # =========================
@@ -54,12 +51,6 @@ frontend/.cache/
 
 # Metro bundler
 .metro-health-check*
-
-# =========================
-# Backend
-# =========================
-backend/dist/
-backend/node_modules/
 
 # =========================
 # IDE / Editor
@@ -103,9 +94,6 @@ desktop.ini
 *.crt
 secrets/
 
-# Backend specific env (already has .env.example)
-backend/.env
-
 # =========================
 # Build & Cache
 # =========================
@@ -135,50 +123,6 @@ yarn-debug.log*
 yarn-error.log*
 
 # =========================
-# AI Companion (Python)
-# =========================
-ai-companion/__pycache__/
-ai-companion/.pytest_cache/
-ai-companion/.ruff_cache/
-ai-companion/.mypy_cache/
-ai-companion/*.egg-info/
-ai-companion/.env
-ai-companion/venv/
-ai-companion/.venv/
-
-# Docker volumes (local)
-ai-companion/ollama_data/
-ai-companion/qdrant_data/
-ai-companion/redis_data/
-
-# Model cache
-ai-companion/models/
-.cache/huggingface/
-
-# =========================
-# Python General
-# =========================
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-*.egg
-*.egg-info/
-.eggs/
-*.manifest
-*.spec
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.nox/
-.coverage
-.coverage.*
-htmlcov/
-.pytest_cache/
-.hypothesis/
-
-# =========================
 # Nix / Flake
 # =========================
 result
@@ -186,21 +130,10 @@ result-*
 .direnv/
 
 # =========================
-# LiveKit Deploy
-# =========================
-backend/livekit-deploy/*.log
-backend/livekit-deploy/data/
-
-# =========================
 # Media Utils
 # =========================
 media-utils/output/
 media-utils/temp/
-
-# =========================
-# OpenClaw
-# =========================
-openclaw/
 
 # =========================
 # Node Operator (LLM Agent)
@@ -212,6 +145,34 @@ node-operator/*.log
 node-operator/audit-*.json
 # 云服务器配置缓存
 node-operator/.cloud-cache/
+
+# =========================
+# Costik Agent (Bot Agent)
+# =========================
+costik-agent/.env
+costik-agent/target/
+costik-agent/*.log
+costik-agent/data/
+
+# =========================
+# Costik Node (Bot Node)
+# =========================
+costik-node/.env
+costik-node/target/
+costik-node/*.log
+costik-node/data/
+
+# =========================
+# Costik Deploy (Docker)
+# =========================
+costik-deploy/.env
+costik-deploy/data/
+costik-deploy/*.log
+
+# =========================
+# Chain State (Local Dev)
+# =========================
+my-chain-state/
 
 # =========================
 # Scripts

@@ -1088,75 +1088,6 @@ impl pallet_collective_membership::Config<ContentMembershipInstance> for Runtime
 }
 
 // ============================================================================
-// Matchmaking Membership Pallet Configuration
-// ============================================================================
-
-parameter_types! {
-	pub const MatchmakingBlocksPerMonth: BlockNumber = 30 * DAYS;
-	pub const MatchmakingBlocksPerDay: BlockNumber = DAYS;
-	pub const MatchmakingMonthlyFee: Balance = 10 * UNIT; // 兜底值 10 COS
-	pub const MatchmakingMonthlyFeeUsd: u64 = 10_000_000; // 10 USDT
-	pub const MatchmakingLifetimeFee: Balance = 500 * UNIT; // 兜底值 500 COS
-	pub const MatchmakingLifetimeFeeUsd: u64 = 500_000_000; // 500 USDT
-	// Profile 保证金配置
-	pub const ProfileDeposit: Balance = 500 * UNIT; // 兜底值 500 COS
-	pub const ProfileDepositUsd: u64 = 50_000_000; // 50 USDT
-	pub const ProfileMonthlyFee: Balance = 20 * UNIT; // 兜底值 20 COS
-	pub const ProfileMonthlyFeeUsd: u64 = 2_000_000; // 2 USDT
-}
-
-impl pallet_matchmaking_membership::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = ();
-	type Fungible = Balances;
-	type Balance = Balance;
-	type BlocksPerMonth = MatchmakingBlocksPerMonth;
-	type BlocksPerDay = MatchmakingBlocksPerDay;
-	type MonthlyFee = MatchmakingMonthlyFee;
-	type MonthlyFeeUsd = MatchmakingMonthlyFeeUsd;
-	type LifetimeFee = MatchmakingLifetimeFee;
-	type LifetimeFeeUsd = MatchmakingLifetimeFeeUsd;
-	type Pricing = TradingPricingProvider;
-	type TreasuryAccount = TreasuryAccountId;
-	type BurnAccount = BurnAccountId;
-	type UserFundingProvider = StorageUserFundingProvider;
-	type AffiliateDistributor = StubAffiliateDistributor;
-}
-
-// ============================================================================
-// Matchmaking Profile Pallet Configuration
-// ============================================================================
-
-impl pallet_matchmaking_profile::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type MaxNicknameLen = ConstU32<64>;
-	type MaxLocationLen = ConstU32<128>;
-	type MaxCidLen = ConstU32<64>;
-	type MaxBioLen = ConstU32<512>;
-	type MaxDescLen = ConstU32<256>;
-	type MaxOccupationLen = ConstU32<64>;
-	type MaxTraits = ConstU32<10>;
-	type MaxHobbies = ConstU32<20>;
-	type MaxHobbyLen = ConstU32<32>;
-	type WeightInfo = ();
-	type Fungible = Balances;
-	type RuntimeHoldReason = RuntimeHoldReason;
-	type ProfileDeposit = ProfileDeposit;
-	type ProfileDepositUsd = ProfileDepositUsd;
-	type MonthlyFee = ProfileMonthlyFee;
-	type MonthlyFeeUsd = ProfileMonthlyFeeUsd;
-	type Pricing = TradingPricingProvider;
-	type TreasuryAccount = TreasuryAccountId;
-	type BurnAccount = BurnAccountId;
-	type StorageAccount = StoragePoolAccountId;
-	type AffiliateDistributor = StubAffiliateDistributor;
-	type IpfsPinner = pallet_storage_service::Pallet<Runtime>;
-	type GovernanceOrigin = EnsureRoot<AccountId>;
-	type BlocksPerDay = MatchmakingBlocksPerDay;
-	type Balance = Balance;
-}
-
-// ============================================================================
 // Storage Lifecycle Pallet Configuration
 // ============================================================================
 
@@ -1676,4 +1607,36 @@ impl pallet_entity_sale::Config for Runtime {
 	type MaxWhitelistSize = ConstU32<1000>;
 	type MaxRoundsHistory = ConstU32<50>;
 	type MaxSubscriptionsPerRound = ConstU32<10000>;
+}
+
+// ============================================================================
+// Costik Bot Pallets Config
+// ============================================================================
+
+parameter_types! {
+	/// 节点最低质押: 100 COS
+	pub const BotConsensusMinStake: Balance = 100 * UNIT;
+	/// 节点退出冷却期: ~1 天 (14400 blocks @ 6s/block)
+	pub const BotConsensusExitCooldown: BlockNumber = DAYS;
+}
+
+impl pallet_bot_consensus::Config for Runtime {
+	type Currency = Balances;
+	type MinStake = BotConsensusMinStake;
+	type ExitCooldownPeriod = BotConsensusExitCooldown;
+	type MaxNodes = ConstU32<100>;
+	type SlashPercentage = ConstU32<10>;
+	type ReporterRewardPercentage = ConstU32<50>;
+	type SuspendThreshold = ConstU16<2000>;
+	type ForceExitThreshold = ConstU16<1000>;
+}
+
+impl pallet_bot_registry::Config for Runtime {
+	type MaxBotsPerOwner = ConstU32<20>;
+	type MaxPlatformsPerCommunity = ConstU32<5>;
+	type MaxPlatformBindingsPerUser = ConstU32<5>;
+}
+
+impl pallet_bot_group_mgmt::Config for Runtime {
+	type MaxLogsPerCommunity = ConstU32<10000>;
 }

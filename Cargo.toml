@@ -26,12 +26,6 @@ members = [
     "pallets/dispute/evidence",
     "pallets/dispute/arbitration",
     "pallets/storage/lifecycle",
-    "pallets/social/matchmaking/common",
-    "pallets/social/matchmaking/profile",
-    "pallets/social/matchmaking/matching",
-    "pallets/social/matchmaking/recommendation",
-    "pallets/social/matchmaking/interaction",
-    "pallets/social/matchmaking/membership",
 # Entity pallets (原 ShareMall，已重构为子模块)
     "pallets/entity/common",
     "pallets/entity/shop",
@@ -54,9 +48,13 @@ members = [
     "pallets/entity/sale",
     "media-utils",
     "runtime",
+# Costik Bot pallets
+    "pallets/costik/bot-consensus",
+    "pallets/costik/bot-registry",
+    "pallets/costik/bot-group-mgmt",
 ]
 resolver = "2"
-exclude = ["node-operator"]
+exclude = ["node-operator", "costik-agent", "costik-node"]
 
 [workspace.dependencies]
 cosmos-runtime = { path = "./runtime", default-features = false }
@@ -86,13 +84,6 @@ pallet-evidence = { path = "./pallets/dispute/evidence", default-features = fals
 pallet-arbitration = { path = "./pallets/dispute/arbitration", default-features = false }
 # Storage lifecycle pallet
 pallet-storage-lifecycle = { path = "./pallets/storage/lifecycle", default-features = false }
-# Matchmaking pallets
-pallet-matchmaking-common = { path = "./pallets/social/matchmaking/common", default-features = false }
-pallet-matchmaking-profile = { path = "./pallets/social/matchmaking/profile", default-features = false }
-pallet-matchmaking-matching = { path = "./pallets/social/matchmaking/matching", default-features = false }
-pallet-matchmaking-recommendation = { path = "./pallets/social/matchmaking/recommendation", default-features = false }
-pallet-matchmaking-interaction = { path = "./pallets/social/matchmaking/interaction", default-features = false }
-pallet-matchmaking-membership = { path = "./pallets/social/matchmaking/membership", default-features = false }
 # Entity pallets (原 ShareMall，已重构为子模块)
 pallet-entity-common = { path = "./pallets/entity/common", default-features = false }
 pallet-entity-shop = { path = "./pallets/entity/shop", default-features = false }
@@ -113,6 +104,10 @@ pallet-entity-review = { path = "./pallets/entity/review", default-features = fa
 pallet-entity-disclosure = { path = "./pallets/entity/disclosure", default-features = false }
 pallet-entity-kyc = { path = "./pallets/entity/kyc", default-features = false }
 pallet-entity-sale = { path = "./pallets/entity/sale", default-features = false }
+# Costik Bot pallets
+pallet-bot-consensus = { path = "./pallets/costik/bot-consensus", default-features = false }
+pallet-bot-registry = { path = "./pallets/costik/bot-registry", default-features = false }
+pallet-bot-group-mgmt = { path = "./pallets/costik/bot-group-mgmt", default-features = false }
 # Additional dependencies
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 sp-application-crypto = { version = "44.0.0", default-features = false }

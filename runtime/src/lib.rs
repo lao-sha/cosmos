@@ -309,16 +309,6 @@ mod runtime {
 	pub type StorageLifecycle = pallet_storage_lifecycle;
 
 	// ============================================================================
-	// Matchmaking Pallets
-	// ============================================================================
-
-	#[runtime::pallet_index(80)]
-	pub type MatchmakingMembership = pallet_matchmaking_membership;
-
-	#[runtime::pallet_index(81)]
-	pub type MatchmakingProfile = pallet_matchmaking_profile;
-
-	// ============================================================================
 	// Smart Contracts
 	// ============================================================================
 
@@ -383,4 +373,17 @@ mod runtime {
 
 	#[runtime::pallet_index(132)]
 	pub type EntitySale = pallet_entity_sale;
+
+	// ============================================================================
+	// Costik Bot Pallets
+	// ============================================================================
+
+	#[runtime::pallet_index(140)]
+	pub type BotConsensus = pallet_bot_consensus;
+
+	#[runtime::pallet_index(141)]
+	pub type BotRegistry = pallet_bot_registry;
+
+	#[runtime::pallet_index(142)]
+	pub type BotGroupMgmt = pallet_bot_group_mgmt;
 }

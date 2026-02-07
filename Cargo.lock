@@ -1624,6 +1624,9 @@ dependencies = [
  "pallet-assets",
  "pallet-aura",
  "pallet-balances",
+ "pallet-bot-consensus",
+ "pallet-bot-group-mgmt",
+ "pallet-bot-registry",
  "pallet-chat-common",
  "pallet-chat-core",
  "pallet-chat-group",
@@ -1652,9 +1655,6 @@ dependencies = [
  "pallet-escrow",
  "pallet-evidence",
  "pallet-grandpa",
- "pallet-matchmaking-common",
- "pallet-matchmaking-membership",
- "pallet-matchmaking-profile",
  "pallet-membership",
  "pallet-referral",
  "pallet-storage-lifecycle",
@@ -6432,6 +6432,52 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-bot-consensus"
+version = "0.1.0"
+dependencies = [
+ "frame-support",
+ "frame-system",
+ "log",
+ "pallet-balances",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+ "sp-std",
+]
+
+[[package]]
+name = "pallet-bot-group-mgmt"
+version = "0.1.0"
+dependencies = [
+ "frame-support",
+ "frame-system",
+ "log",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+ "sp-std",
+]
+
+[[package]]
+name = "pallet-bot-registry"
+version = "0.1.0"
+dependencies = [
+ "frame-support",
+ "frame-system",
+ "log",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+ "sp-std",
+]
+
+[[package]]
 name = "pallet-broker"
 version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6951,125 +6997,6 @@ dependencies = [
  "sp-runtime",
  "sp-session",
  "sp-staking",
-]
-
-[[package]]
-name = "pallet-matchmaking-common"
-version = "0.1.0"
-dependencies = [
- "frame-support",
- "frame-system",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-io",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
-name = "pallet-matchmaking-interaction"
-version = "0.1.0"
-dependencies = [
- "frame-benchmarking",
- "frame-support",
- "frame-system",
- "log",
- "pallet-balances",
- "pallet-matchmaking-common",
- "pallet-matchmaking-profile",
- "pallet-timestamp",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-io",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
-name = "pallet-matchmaking-matching"
-version = "0.1.0"
-dependencies = [
- "frame-benchmarking",
- "frame-support",
- "frame-system",
- "log",
- "pallet-balances",
- "pallet-matchmaking-common",
- "pallet-matchmaking-profile",
- "pallet-timestamp",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-io",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
-name = "pallet-matchmaking-membership"
-version = "0.1.0"
-dependencies = [
- "frame-benchmarking",
- "frame-support",
- "frame-system",
- "log",
- "pallet-affiliate",
- "pallet-balances",
- "pallet-matchmaking-common",
- "pallet-matchmaking-profile",
- "pallet-timestamp",
- "pallet-trading-common",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-io",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
-name = "pallet-matchmaking-profile"
-version = "0.1.0"
-dependencies = [
- "frame-benchmarking",
- "frame-support",
- "frame-system",
- "log",
- "pallet-affiliate",
- "pallet-balances",
- "pallet-matchmaking-common",
- "pallet-storage-service",
- "pallet-timestamp",
- "pallet-trading-common",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-io",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
-name = "pallet-matchmaking-recommendation"
-version = "0.1.0"
-dependencies = [
- "frame-benchmarking",
- "frame-support",
- "frame-system",
- "log",
- "pallet-balances",
- "pallet-matchmaking-common",
- "pallet-matchmaking-matching",
- "pallet-matchmaking-profile",
- "pallet-timestamp",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-io",
- "sp-runtime",
- "sp-std",
 ]
 
 [[package]]
