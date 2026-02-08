@@ -1,6 +1,6 @@
-# cosmos-media-common
+# nexus-media-common
 
-共享媒体处理工具库,为 Cosmos 区块链项目提供通用的媒体验证、哈希计算、IPFS工具等功能。
+共享媒体处理工具库,为 Nexus 区块链项目提供通用的媒体验证、哈希计算、IPFS工具等功能。
 
 ## 特性
 
@@ -43,7 +43,7 @@ IPFS辅助工具:
 ## 使用示例
 
 ```rust
-use cosmos_media_common::{
+use nexus_media_common::{
     MediaKind,
     ImageValidator,
     HashHelper,
@@ -68,12 +68,12 @@ if metadata.kind.is_visual() {
 
 ```toml
 [dependencies]
-cosmos-media-common = { path = "../../cosmos-media-common", default-features = false }
+nexus-media-common = { path = "../../nexus-media-common", default-features = false }
 
 [features]
 std = [
     # ... 其他依赖
-    "cosmos-media-common/std",
+    "nexus-media-common/std",
 ]
 ```
 

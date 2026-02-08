@@ -1,6 +1,6 @@
 [package]
-name = "cosmos-node"
-description = "Cosmos blockchain node built with Substrate"
+name = "nexus-node"
+description = "Nexus blockchain node built with Substrate"
 version = "0.1.0"
 license = "Unlicense"
 authors.workspace = true
@@ -36,7 +36,7 @@ sc-service = { version = "0.56.0", default-features = true, workspace = true }
 sc-telemetry = { version = "30.0.0", default-features = true, workspace = true }
 sc-transaction-pool-api = { version = "43.0.0", default-features = true, workspace = true }
 sc-transaction-pool = { version = "44.0.0", default-features = true, workspace = true }
-cosmos-runtime = { version = "0.1.0", workspace = true }
+nexus-runtime = { version = "0.1.0", workspace = true }
 sp-api = { version = "40.0.0", default-features = true, workspace = true }
 sp-block-builder = { version = "40.0.0", default-features = true, workspace = true }
 sp-blockchain = { version = "43.0.0", default-features = true, workspace = true }
@@ -55,14 +55,14 @@ substrate-build-script-utils = { version = "11.0.0", default-features = true, wo
 
 [features]
 default = ["std"]
-std = ["cosmos-runtime/std"]
+std = ["nexus-runtime/std"]
 # Dependencies that are only required if runtime benchmarking should be build.
 runtime-benchmarks = [
 	"frame-benchmarking-cli/runtime-benchmarks",
 	"frame-system/runtime-benchmarks",
 	"pallet-transaction-payment/runtime-benchmarks",
 	"sc-service/runtime-benchmarks",
-	"cosmos-runtime/runtime-benchmarks",
+	"nexus-runtime/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
 ]
 # Enable features that allow the runtime to be tried and debugged. Name might be subject to change
@@ -70,6 +70,6 @@ runtime-benchmarks = [
 try-runtime = [
 	"frame-system/try-runtime",
 	"pallet-transaction-payment/try-runtime",
-	"cosmos-runtime/try-runtime",
+	"nexus-runtime/try-runtime",
 	"sp-runtime/try-runtime",
 ]

@@ -193,7 +193,7 @@ impl Tool for DeployNode {
                 },
                 "chain": {
                     "type": "string",
-                    "description": "链名称，如 cosmos-mainnet, cosmos-testnet"
+                    "description": "链名称，如 nexus-mainnet, nexus-testnet"
                 },
                 "node_type": {
                     "type": "string",
@@ -475,7 +475,7 @@ impl Tool for GenerateAnsiblePlaybook {
     }
 
     async fn execute(&self, args: serde_json::Value) -> Result<ToolResult> {
-        let chain = args["chain"].as_str().unwrap_or("cosmos");
+        let chain = args["chain"].as_str().unwrap_or("nexus");
         let node_type = args["node_type"].as_str().unwrap_or("full");
 
         let playbook = generate_ansible_playbook(chain, node_type);

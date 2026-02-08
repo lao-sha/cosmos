@@ -1,8 +1,8 @@
 [package]
 name = "pallet-entity-common"
 version = "0.1.0"
-description = "COSMOS Entity 公共类型和 Trait 定义"
-authors = ["COSMOS Team"]
+description = "NEXUS Entity 公共类型和 Trait 定义"
+authors = ["NEXUS Team"]
 edition = "2021"
 license = "MIT"
 

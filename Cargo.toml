@@ -1,8 +1,8 @@
 [workspace.package]
 license = "MIT-0"
-authors = ["Cosmos Team"]
-homepage = "https://cosmos.app/"
-repository = "https://github.com/memoio/cosmos.git"
+authors = ["Nexus Team"]
+homepage = "https://nexus.app/"
+repository = "https://github.com/memoio/nexus.git"
 edition = "2021"
 
 [workspace]
@@ -12,8 +12,8 @@ members = [
     "pallets/trading/pricing",
     "pallets/trading/credit",
     "pallets/trading/maker",
-    "pallets/trading/swap",
-    "pallets/trading/otc",
+    "pallets/trading/p2p",
+    "pallets/trading/trc20-verifier",
     "pallets/dispute/escrow",
     "pallets/storage/service",
     "pallets/dispute/evidence",
@@ -41,27 +41,27 @@ members = [
     "pallets/entity/sale",  # crate renamed to pallet-entity-tokensale
     "media-utils",
     "runtime",
-# Costik Bot pallets
-    "pallets/costik/bot-consensus",
-    "pallets/costik/bot-registry",
-    "pallets/costik/bot-group-mgmt",
+# Nexus Bot pallets
+    "pallets/nexus/bot-consensus",
+    "pallets/nexus/bot-registry",
+    "pallets/nexus/bot-group-mgmt",
 ]
 resolver = "2"
-exclude = ["node-operator", "costik-agent", "costik-node"]
+exclude = ["node-operator", "nexus-agent", "nexus-node"]
 
 [workspace.dependencies]
-cosmos-runtime = { path = "./runtime", default-features = false }
+nexus-runtime = { path = "./runtime", default-features = false }
 # Trading pallets
 pallet-trading-common = { path = "./pallets/trading/common", default-features = false }
 pallet-trading-pricing = { path = "./pallets/trading/pricing", default-features = false }
 pallet-trading-credit = { path = "./pallets/trading/credit", default-features = false }
 pallet-trading-maker = { path = "./pallets/trading/maker", default-features = false }
-pallet-trading-swap = { path = "./pallets/trading/swap", default-features = false }
-pallet-trading-otc = { path = "./pallets/trading/otc", default-features = false }
+pallet-trading-p2p = { path = "./pallets/trading/p2p", default-features = false }
+pallet-trading-trc20-verifier = { path = "./pallets/trading/trc20-verifier", default-features = false }
 # Escrow, Referral, IPFS pallets
 pallet-escrow = { path = "./pallets/dispute/escrow", default-features = false }
 pallet-storage-service = { path = "./pallets/storage/service", default-features = false }
-# Cosmos common libraries
+# Nexus common libraries
 media-utils = { path = "./media-utils", default-features = false }
 # Evidence pallet
 pallet-evidence = { path = "./pallets/dispute/evidence", default-features = false }
@@ -89,10 +89,10 @@ pallet-entity-review = { path = "./pallets/entity/review", default-features = fa
 pallet-entity-disclosure = { path = "./pallets/entity/disclosure", default-features = false }
 pallet-entity-kyc = { path = "./pallets/entity/kyc", default-features = false }
 pallet-entity-tokensale = { path = "./pallets/entity/sale", default-features = false }
-# Costik Bot pallets
-pallet-bot-consensus = { path = "./pallets/costik/bot-consensus", default-features = false }
-pallet-bot-registry = { path = "./pallets/costik/bot-registry", default-features = false }
-pallet-bot-group-mgmt = { path = "./pallets/costik/bot-group-mgmt", default-features = false }
+# Nexus Bot pallets
+pallet-bot-consensus = { path = "./pallets/nexus/bot-consensus", default-features = false }
+pallet-bot-registry = { path = "./pallets/nexus/bot-registry", default-features = false }
+pallet-bot-group-mgmt = { path = "./pallets/nexus/bot-group-mgmt", default-features = false }
 # Additional dependencies
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
 sp-application-crypto = { version = "44.0.0", default-features = false }

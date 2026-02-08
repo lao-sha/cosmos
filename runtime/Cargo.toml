@@ -1,6 +1,6 @@
 [package]
-name = "cosmos-runtime"
-description = "Cosmos blockchain runtime built with Substrate, part of Polkadot Sdk."
+name = "nexus-runtime"
+description = "Nexus blockchain runtime built with Substrate, part of Polkadot Sdk."
 version = "0.1.0"
 license = "Unlicense"
 authors.workspace = true
@@ -39,8 +39,7 @@ pallet-trading-common = { workspace = true }
 pallet-trading-pricing = { workspace = true }
 pallet-trading-credit = { workspace = true }
 pallet-trading-maker = { workspace = true }
-pallet-trading-swap = { workspace = true }
-pallet-trading-otc = { workspace = true }
+pallet-trading-p2p = { workspace = true }
 # Escrow, Referral, IPFS pallets
 pallet-escrow = { workspace = true }
 pallet-storage-service = { workspace = true }
@@ -72,7 +71,7 @@ pallet-entity-review = { workspace = true }
 pallet-entity-disclosure = { workspace = true }
 pallet-entity-kyc = { workspace = true }
 pallet-entity-tokensale = { workspace = true }
-# Costik Bot pallets
+# Nexus Bot pallets
 pallet-bot-consensus = { workspace = true }
 pallet-bot-registry = { workspace = true }
 pallet-bot-group-mgmt = { workspace = true }
@@ -125,8 +124,7 @@ std = [
 	"pallet-trading-pricing/std",
 	"pallet-trading-credit/std",
 	"pallet-trading-maker/std",
-	"pallet-trading-swap/std",
-	"pallet-trading-otc/std",
+	"pallet-trading-p2p/std",
 	# Escrow, Referral, IPFS pallets std
 	"pallet-escrow/std",
 	"pallet-storage-service/std",
@@ -158,7 +156,7 @@ std = [
 	"pallet-entity-disclosure/std",
 	"pallet-entity-kyc/std",
 	"pallet-entity-tokensale/std",
-	# Costik Bot pallets std
+	# Nexus Bot pallets std
 	"pallet-bot-consensus/std",
 	"pallet-bot-registry/std",
 	"pallet-bot-group-mgmt/std",
@@ -199,8 +197,7 @@ runtime-benchmarks = [
 	"pallet-trading-pricing/runtime-benchmarks",
 	"pallet-trading-credit/runtime-benchmarks",
 	"pallet-trading-maker/runtime-benchmarks",
-	"pallet-trading-swap/runtime-benchmarks",
-	"pallet-trading-otc/runtime-benchmarks",
+	"pallet-trading-p2p/runtime-benchmarks",
 	# Escrow, Referral pallets benchmarks
 	# Evidence pallet benchmarks
 	"pallet-evidence/runtime-benchmarks",
@@ -228,8 +225,7 @@ try-runtime = [
 	"pallet-trading-pricing/try-runtime",
 	"pallet-trading-credit/try-runtime",
 	"pallet-trading-maker/try-runtime",
-	"pallet-trading-swap/try-runtime",
-	"pallet-trading-otc/try-runtime",
+	"pallet-trading-p2p/try-runtime",
 	# Escrow, Referral pallets try-runtime
 	# Evidence pallet try-runtime
 	"pallet-evidence/try-runtime",

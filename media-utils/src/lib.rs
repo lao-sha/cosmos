@@ -1,6 +1,6 @@
-//! # Cosmos Media Common Library
+//! # Nexus Media Common Library
 //!
-//! 为 Cosmos 区块链项目提供通用的媒体处理工具库。
+//! 为 Nexus 区块链项目提供通用的媒体处理工具库。
 //!
 //! ## 特性
 //!

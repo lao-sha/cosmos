@@ -61,5 +61,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            target/release/cosmos-node
-            target/release/wbuild/cosmos-runtime/cosmos_runtime.compact.compressed.wasm
+            target/release/nexus-node
+            target/release/wbuild/nexus-runtime/nexus_runtime.compact.compressed.wasm

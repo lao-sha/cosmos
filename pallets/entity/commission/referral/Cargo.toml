@@ -2,7 +2,7 @@
 name = "pallet-commission-referral"
 version = "0.1.0"
 description = "Commission referral plugin - Direct, MultiLevel, Fixed, FirstOrder, RepeatPurchase"
-authors = ["COSMOS Team"]
+authors = ["NEXUS Team"]
 edition = "2021"
 license = "MIT"
 

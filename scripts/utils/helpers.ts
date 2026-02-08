@@ -79,11 +79,11 @@ export async function signAndSend(
   });
 }
 
-export function formatCos(amount: bigint | string | number): string {
+export function formatNxs(amount: bigint | string | number): string {
   const value = BigInt(amount);
-  // 链上精度：1 COS = 1e12 最小单位（12位小数）
-  const cos = Number(value) / 1e12;
-  return `${cos.toLocaleString()} COS`;
+  // 链上精度：1 NXS = 1e12 最小单位（12位小数）
+  const nxs = Number(value) / 1e12;
+  return `${nxs.toLocaleString()} NXS`;
 }
 
 export function formatUsdt(amount: number): string {
@@ -94,9 +94,9 @@ export function formatUsdt(amount: number): string {
   return `$${usdt.toFixed(2)} USDT`;
 }
 
-export function toCosWei(cos: number): string {
-  // 链上精度：1 COS = 1e12 最小单位（12位小数）
-  return (BigInt(Math.floor(cos * 1e12))).toString();
+export function toNxsWei(nxs: number): string {
+  // 链上精度：1 NXS = 1e12 最小单位（12位小数）
+  return (BigInt(Math.floor(nxs * 1e12))).toString();
 }
 
 export function toUsdtWei(usdt: number): string {

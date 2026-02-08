@@ -9,7 +9,7 @@
 ### 核心功能
 
 - **Entity 创建** — 付费即激活，自动创建 Primary Shop
-- **金库资金** — 50 USDT 等值 COS 转入派生账户，支撑运营费用
+- **金库资金** — 50 USDT 等值 NXS 转入派生账户，支撑运营费用
 - **管理员体系** — owner + admins 两层权限，admin 继承到 Shop 管理
 - **类型升级** — Merchant → DAO/Enterprise/Community/Project 等
 - **治理模式** — None/Advisory/DualTrack/Committee/FullDAO/Tiered
@@ -111,7 +111,7 @@ T5: Entity=Active,  Shop=Active   → 有效状态: Active         ✅ manager �
 
 ## 金库资金机制
 
-创建 Entity 时，根据实时 COS/USDT 价格计算 **50 USDT 等值的 COS** 转入 **Entity 金库派生账户**。
+创建 Entity 时，根据实时 NXS/USDT 价格计算 **50 USDT 等值的 NXS** 转入 **Entity 金库派生账户**。
 
 ```
 地址: PalletId(*b"et/enty/").into_sub_account_truncating(entity_id)
@@ -120,7 +120,7 @@ T5: Entity=Active,  Shop=Active   → 有效状态: Active         ✅ manager �
 ### 计算公式
 
 ```
-COS 金额 = USDT 金额 × 10^12 / COS价格
+NXS 金额 = USDT 金额 × 10^12 / NXS价格
 final_fund = clamp(COS金额, MinInitialFundCos, MaxInitialFundCos)
 ```
 
@@ -171,10 +171,10 @@ impl pallet_entity_registry::Config for Runtime {
 | `MaxEntityNameLength` | `u32` | 名称最大长度 |
 | `MaxCidLength` | `u32` | IPFS CID 最大长度 |
 | `GovernanceOrigin` | `EnsureOrigin` | 治理 Origin |
-| `PricingProvider` | `PricingProvider` | COS/USDT 定价接口 |
+| `PricingProvider` | `PricingProvider` | NXS/USDT 定价接口 |
 | `InitialFundUsdt` | `u64` | 初始资金 USDT（精度 10^6） |
-| `MinInitialFundCos` | `Balance` | 最小初始资金 COS |
-| `MaxInitialFundCos` | `Balance` | 最大初始资金 COS |
+| `MinInitialFundCos` | `Balance` | 最小初始资金 NXS |
+| `MaxInitialFundCos` | `Balance` | 最大初始资金 NXS |
 | `MinOperatingBalance` | `Balance` | 最低运营余额（低于自动暂停） |
 | `FundWarningThreshold` | `Balance` | 资金预警阈值 |
 | `MaxAdmins` | `u32` | 每个 Entity 最大管理员数 |
@@ -329,7 +329,7 @@ pub trait EntityProvider<AccountId> {
 impl<T: Config> Pallet<T> {
     /// 获取 Entity 金库派生账户
     pub fn entity_treasury_account(entity_id: u64) -> T::AccountId;
-    /// 计算初始运营资金（USDT 等值 COS）
+    /// 计算初始运营资金（USDT 等值 NXS）
     pub fn calculate_initial_fund() -> Result<BalanceOf<T>, DispatchError>;
     /// 获取资金健康状态
     pub fn get_fund_health(balance: BalanceOf<T>) -> FundHealth;
@@ -413,7 +413,7 @@ Active ◄───────────────────────�
 | 版本 | 日期 | 变更 |
 |------|------|------|
 | v0.1.0 | 2026-01-31 | 从 pallet-mall 拆分 |
-| v0.2.0 | 2026-02-01 | 实现 USDT 等值 COS 金库机制 |
+| v0.2.0 | 2026-02-01 | 实现 USDT 等值 NXS 金库机制 |
 | v0.3.0 | 2026-02-03 | 重构为 Entity，支持多种实体类型和治理模式 |
 | v0.4.0 | 2026-02-05 | Entity-Shop 分离架构，1:1 关联，Primary Shop |
 | v0.5.0 | 2026-02-07 | 多实体支持，UserEntity BoundedVec |

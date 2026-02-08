@@ -935,14 +935,14 @@ pub struct NullEntityTokenProvider;
 // 定价接口
 // ============================================================================
 
-/// COS/USDT 价格查询接口
+/// NXS/USDT 价格查询接口
 /// 
-/// 供 shop 模块计算 USDT 等值的 COS 押金
+/// 供 shop 模块计算 USDT 等值的 NXS 押金
 pub trait PricingProvider {
-    /// 获取 COS/USDT 加权平均价格
+    /// 获取 NXS/USDT 加权平均价格
     /// 
     /// # 返回
-    /// - `u64`: 价格（精度 10^6，即 1,000,000 = 1 USDT/COS）
+    /// - `u64`: 价格（精度 10^6，即 1,000,000 = 1 USDT/NXS）
     /// - 返回 0 表示价格不可用
     fn get_cos_usdt_price() -> u64;
 }
@@ -993,7 +993,7 @@ pub struct NullPricingProvider;
 
 impl PricingProvider for NullPricingProvider {
     fn get_cos_usdt_price() -> u64 {
-        // 默认价格：0.000001 USDT/COS（精度 10^6 = 1）
+        // 默认价格：0.000001 USDT/NXS（精度 10^6 = 1）
         1
     }
 }

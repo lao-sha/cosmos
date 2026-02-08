@@ -4,6 +4,7 @@
 //!
 //! ## 版本历史
 //! - v0.1.0 (2026-01-18): 初始版本，从 OTC/Swap/Maker 模块提取
+//! - v0.2.0 (2026-02-08): PricingProvider 适配 P2P 统一模型，report_swap_order → report_p2p_trade
 
 use sp_runtime::{DispatchResult, DispatchError};
 use crate::types::MakerApplicationInfo;
@@ -11,34 +12,41 @@ use crate::types::MakerApplicationInfo;
 /// 函数级详细中文注释：定价服务接口
 ///
 /// ## 说明
-/// 提供 COS/USD 实时汇率查询功能
+/// 提供 NXS/USD 实时汇率查询功能
 ///
 /// ## 使用者
-/// - `pallet-trading-otc`: 计算订单金额
-/// - `pallet-trading-swap`: 计算兑换金额
+/// - `pallet-trading-p2p`: 计算订单金额、上报成交价
 /// - `pallet-trading-maker`: 计算押金价值
+/// - `pallet-arbitration`: 投诉押金换算
+/// - `pallet-storage-service`: 运营者保证金计算
 ///
 /// ## 实现者
 /// - `pallet-trading-pricing`: 提供聚合价格
 pub trait PricingProvider<Balance> {
-    /// 获取 COS/USD 汇率（精度 10^6）
+    /// 获取 NXS/USD 汇率（精度 10^6）
     ///
     /// ## 返回
-    /// - `Some(rate)`: 当前汇率（如 1_000_000 表示 1 COS = 1 USD）
+    /// - `Some(rate)`: 当前汇率（如 1_000_000 表示 1 NXS = 1 USD）
     /// - `None`: 价格不可用（冷启动期或无数据）
     fn get_cos_to_usd_rate() -> Option<Balance>;
     
-    /// 上报 Swap 交易到价格聚合
+    /// 🆕 v0.2.0: 上报 P2P 成交到价格聚合（统一 Buy/Sell 两方向）
     ///
     /// ## 参数
     /// - `timestamp`: 交易时间戳（Unix 毫秒）
     /// - `price_usdt`: USDT 单价（精度 10^6）
-    /// - `cos_qty`: COS 数量（精度 10^12）
+    /// - `nxs_qty`: NXS 数量（精度 10^12）
     ///
     /// ## 返回
     /// - `Ok(())`: 成功
     /// - `Err`: 失败
-    fn report_swap_order(timestamp: u64, price_usdt: u64, cos_qty: u128) -> sp_runtime::DispatchResult;
+    fn report_p2p_trade(timestamp: u64, price_usdt: u64, nxs_qty: u128) -> sp_runtime::DispatchResult;
+
+    /// 🔄 向后兼容：原 report_swap_order，转发到 report_p2p_trade
+    #[deprecated(note = "use report_p2p_trade instead")]
+    fn report_swap_order(timestamp: u64, price_usdt: u64, nxs_qty: u128) -> sp_runtime::DispatchResult {
+        Self::report_p2p_trade(timestamp, price_usdt, nxs_qty)
+    }
 }
 
 /// 函数级详细中文注释：Maker Pallet 接口
@@ -47,8 +55,7 @@ pub trait PricingProvider<Balance> {
 /// 提供做市商信息查询功能
 ///
 /// ## 使用者
-/// - `pallet-trading-otc`: 验证做市商和获取收款地址
-/// - `pallet-trading-swap`: 验证做市商状态
+/// - `pallet-trading-p2p`: 验证做市商和获取收款地址
 ///
 /// ## 实现者
 /// - `pallet-trading-maker`: 提供做市商管理
@@ -117,7 +124,7 @@ pub trait MakerInterface<AccountId, Balance> {
     /// 🆕 罚没做市商保证金（Swap 严重少付场景）
     ///
     /// ## 说明
-    /// 当做市商在 COS → USDT 兑换中严重少付（< 50%）时，
+    /// 当做市商在 NXS → USDT 兑换中严重少付（< 50%）时，
     /// 从其保证金中扣除 10% 作为惩罚，转入国库。
     ///
     /// ## 参数
@@ -154,8 +161,7 @@ pub enum MakerValidationError {
 /// 提供做市商信用分管理功能
 ///
 /// ## 使用者
-/// - `pallet-trading-otc`: 订单完成/超时/争议时调用
-/// - `pallet-trading-swap`: 兑换完成/超时/争议时调用
+/// - `pallet-trading-p2p`: 订单完成/超时/争议时调用
 ///
 /// ## 实现者
 /// - `pallet-trading-credit`: 提供信用分管理
@@ -203,7 +209,7 @@ impl<Balance> PricingProvider<Balance> for () {
         None
     }
     
-    fn report_swap_order(_timestamp: u64, _price_usdt: u64, _cos_qty: u128) -> sp_runtime::DispatchResult {
+    fn report_p2p_trade(_timestamp: u64, _price_usdt: u64, _nxs_qty: u128) -> sp_runtime::DispatchResult {
         Ok(())
     }
 }
@@ -275,26 +281,26 @@ impl MakerCreditInterface for () {
 /// - `pallet-livestream`: 直播间创建保证金
 /// - `pallet-storage-service`: 运营者保证金
 /// - `pallet-trading-maker`: 做市商押金
-/// - `pallet-trading-otc`: 交易押金
+/// - `pallet-trading-p2p`: 交易押金
 /// - `pallet-arbitration`: 投诉押金
 ///
 /// ## 实现者
 /// - 各模块通过 `DepositCalculatorImpl` 实现
 pub trait DepositCalculator<Balance> {
-    /// 计算 USD 等值的 COS 保证金
+    /// 计算 USD 等值的 NXS 保证金
     ///
     /// ## 参数
     /// - `usd_amount`: USD 金额（精度 10^6，如 5_000_000 = 5 USDT）
-    /// - `fallback`: 汇率不可用时的兜底金额（COS）
+    /// - `fallback`: 汇率不可用时的兜底金额（NXS）
     ///
     /// ## 返回
-    /// - 计算后的 COS 金额
+    /// - 计算后的 NXS 金额
     ///
     /// ## 计算公式
     /// ```text
-    /// cos_amount = usd_amount * 10^18 / rate
+    /// nxs_amount = usd_amount * 10^18 / rate
     /// ```
-    /// 其中 rate 是 COS/USD 汇率（精度 10^6）
+    /// 其中 rate 是 NXS/USD 汇率（精度 10^6）
     fn calculate_deposit(usd_amount: u64, fallback: Balance) -> Balance;
 }
 
@@ -316,15 +322,15 @@ where
         // 尝试使用实时汇率计算
         if let Some(rate) = P::get_cos_to_usd_rate() {
             if rate > Balance::zero() {
-                // cos_amount = usd_amount * 10^18 / rate
+                // nxs_amount = usd_amount * 10^18 / rate
                 // 其中 usd_amount 精度 10^6，rate 精度 10^6
-                // 结果精度 10^18（COS 标准精度）
+                // 结果精度 10^18（NXS 标准精度）
                 let usd_u128 = usd_amount as u128;
                 let rate_u128: u128 = rate.into();
                 let cos_precision: u128 = 1_000_000_000_000_000_000u128; // 10^18
-                let cos_amount_u128 = usd_u128.saturating_mul(cos_precision) / rate_u128;
+                let nxs_amount_u128 = usd_u128.saturating_mul(cos_precision) / rate_u128;
                 
-                if let Ok(amount) = Balance::try_from(cos_amount_u128) {
+                if let Ok(amount) = Balance::try_from(nxs_amount_u128) {
                     return amount;
                 }
             }
@@ -347,15 +353,15 @@ impl<Balance: Default> DepositCalculator<Balance> for () {
 mod tests {
     use super::*;
 
-    /// Mock PricingProvider: 1 COS = 0.1 USD (rate = 100_000)
+    /// Mock PricingProvider: 1 NXS = 0.1 USD (rate = 100_000)
     pub struct MockPricingProvider;
 
     impl PricingProvider<u128> for MockPricingProvider {
         fn get_cos_to_usd_rate() -> Option<u128> {
-            Some(100_000) // 0.1 USD/COS
+            Some(100_000) // 0.1 USD/NXS
         }
         
-        fn report_swap_order(_timestamp: u64, _price_usdt: u64, _cos_qty: u128) -> sp_runtime::DispatchResult {
+        fn report_p2p_trade(_timestamp: u64, _price_usdt: u64, _nxs_qty: u128) -> sp_runtime::DispatchResult {
             Ok(())
         }
     }
@@ -368,7 +374,7 @@ mod tests {
             None
         }
         
-        fn report_swap_order(_timestamp: u64, _price_usdt: u64, _cos_qty: u128) -> sp_runtime::DispatchResult {
+        fn report_p2p_trade(_timestamp: u64, _price_usdt: u64, _nxs_qty: u128) -> sp_runtime::DispatchResult {
             Ok(())
         }
     }
@@ -381,7 +387,7 @@ mod tests {
             Some(0)
         }
         
-        fn report_swap_order(_timestamp: u64, _price_usdt: u64, _cos_qty: u128) -> sp_runtime::DispatchResult {
+        fn report_p2p_trade(_timestamp: u64, _price_usdt: u64, _nxs_qty: u128) -> sp_runtime::DispatchResult {
             Ok(())
         }
     }
@@ -391,13 +397,13 @@ mod tests {
         type Calculator = DepositCalculatorImpl<MockPricingProvider, u128>;
         
         // 5 USDT = 5_000_000 (精度 10^6)
-        // rate = 100_000 (0.1 USD/COS)
-        // 预期: 5_000_000 * 10^18 / 100_000 = 50 * 10^18 = 50 COS
+        // rate = 100_000 (0.1 USD/NXS)
+        // 预期: 5_000_000 * 10^18 / 100_000 = 50 * 10^18 = 50 NXS
         let usd_amount: u64 = 5_000_000;
-        let fallback: u128 = 10_000_000_000_000_000_000; // 10 COS
+        let fallback: u128 = 10_000_000_000_000_000_000; // 10 NXS
         
         let result = Calculator::calculate_deposit(usd_amount, fallback);
-        let expected: u128 = 50_000_000_000_000_000_000; // 50 COS
+        let expected: u128 = 50_000_000_000_000_000_000; // 50 NXS
         assert_eq!(result, expected);
     }
 
@@ -436,15 +442,15 @@ mod tests {
     fn test_deposit_calculator_various_amounts() {
         type Calculator = DepositCalculatorImpl<MockPricingProvider, u128>;
         
-        // 1 USDT -> 10 COS
+        // 1 USDT -> 10 NXS
         let result_1 = Calculator::calculate_deposit(1_000_000, 0);
         assert_eq!(result_1, 10_000_000_000_000_000_000u128);
         
-        // 100 USDT -> 1000 COS
+        // 100 USDT -> 1000 NXS
         let result_100 = Calculator::calculate_deposit(100_000_000, 0);
         assert_eq!(result_100, 1_000_000_000_000_000_000_000u128);
         
-        // 0.01 USDT -> 0.1 COS
+        // 0.01 USDT -> 0.1 NXS
         let result_001 = Calculator::calculate_deposit(10_000, 0);
         assert_eq!(result_001, 100_000_000_000_000_000u128);
     }
@@ -454,7 +460,7 @@ mod tests {
         let rate = <() as PricingProvider<u128>>::get_cos_to_usd_rate();
         assert!(rate.is_none());
         
-        let result = <() as PricingProvider<u128>>::report_swap_order(0, 0, 0);
+        let result = <() as PricingProvider<u128>>::report_p2p_trade(0, 0, 0);
         assert!(result.is_ok());
     }
 

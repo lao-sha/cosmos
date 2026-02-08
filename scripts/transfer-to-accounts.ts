@@ -6,8 +6,8 @@
  *   npx tsx transfer-to-accounts.ts [amount]
  *   
  * 示例:
- *   npx tsx transfer-to-accounts.ts         # 每个账户转 10 COS
- *   npx tsx transfer-to-accounts.ts 100     # 每个账户转 100 COS
+ *   npx tsx transfer-to-accounts.ts         # 每个账户转 10 NXS
+ *   npx tsx transfer-to-accounts.ts 100     # 每个账户转 100 NXS
  */
 
 import { cryptoWaitReady } from '@polkadot/util-crypto';
@@ -19,15 +19,15 @@ import {
   logStep, 
   logSuccess, 
   logError, 
-  formatCos,
-  toCosWei,
+  formatNxs,
+  toNxsWei,
 } from './utils/helpers.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
 await cryptoWaitReady();
 
-const DEFAULT_AMOUNT = 1000000000; // 默认每个账户转 1000000000 COS
+const DEFAULT_AMOUNT = 1000000000; // 默认每个账户转 1000000000 NXS
 
 function parseAddressesFromFile(filePath: string): string[] {
   const content = fs.readFileSync(filePath, 'utf-8');
@@ -97,17 +97,17 @@ async function main() {
   
   // 查询 Alice 余额
   const aliceBalance = await api.query.system.account(alice.address);
-  console.log(`   Alice 余额: ${formatCos(aliceBalance.data.free.toString())}`);
+  console.log(`   Alice 余额: ${formatNxs(aliceBalance.data.free.toString())}`);
   
   const totalAmount = amount * addresses.length;
-  console.log(`   计划转账总额: ${totalAmount} COS (每账户 ${amount} COS)`);
+  console.log(`   计划转账总额: ${totalAmount} NXS (每账户 ${amount} NXS)`);
   
   // ========================================
   // 步骤 3: 批量转账
   // ========================================
   logStep(3, `向 ${addresses.length} 个账户转账`);
   
-  const amountWei = toCosWei(amount);
+  const amountWei = toNxsWei(amount);
   let successCount = 0;
   let failCount = 0;
   
@@ -148,13 +148,13 @@ async function main() {
   for (const idx of checkIndices) {
     if (idx < addresses.length) {
       const balance = await api.query.system.account(addresses[idx]);
-      console.log(`   账户 ${idx + 1}: ${formatCos(balance.data.free.toString())}`);
+      console.log(`   账户 ${idx + 1}: ${formatNxs(balance.data.free.toString())}`);
     }
   }
   
   // 查询 Alice 新余额
   const newAliceBalance = await api.query.system.account(alice.address);
-  console.log(`\n   Alice 新余额: ${formatCos(newAliceBalance.data.free.toString())}`);
+  console.log(`\n   Alice 新余额: ${formatNxs(newAliceBalance.data.free.toString())}`);
   
   logSection('完成');
   

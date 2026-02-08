@@ -147,27 +147,27 @@ node-operator/audit-*.json
 node-operator/.cloud-cache/
 
 # =========================
-# Costik Agent (Bot Agent)
+# Nexus Agent (Bot Agent)
 # =========================
-costik-agent/.env
-costik-agent/target/
-costik-agent/*.log
-costik-agent/data/
+nexus-agent/.env
+nexus-agent/target/
+nexus-agent/*.log
+nexus-agent/data/
 
 # =========================
-# Costik Node (Bot Node)
+# Nexus Node (Bot Node)
 # =========================
-costik-node/.env
-costik-node/target/
-costik-node/*.log
-costik-node/data/
+nexus-node/.env
+nexus-node/target/
+nexus-node/*.log
+nexus-node/data/
 
 # =========================
-# Costik Deploy (Docker)
+# Nexus Deploy (Docker)
 # =========================
-costik-deploy/.env
-costik-deploy/data/
-costik-deploy/*.log
+nexus-deploy/.env
+nexus-deploy/data/
+nexus-deploy/*.log
 
 # =========================
 # Chain State (Local Dev)
@@ -190,6 +190,11 @@ frontend/android/
 frontend/.kotlin/
 frontend/*.tsbuildinfo
 frontend/app-example/
+
+# =========================
+# Telegram (Bot 测试数据)
+# =========================
+telegram/
 
 # =========================
 # Misc

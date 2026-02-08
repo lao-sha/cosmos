@@ -1,8 +1,8 @@
 [package]
 name = "pallet-entity-commission"
 version = "0.2.0"
-description = "COSMOS Entity 返佣管理模块 - 插件化架构 re-export wrapper"
-authors = ["COSMOS Team"]
+description = "NEXUS Entity 返佣管理模块 - 插件化架构 re-export wrapper"
+authors = ["NEXUS Team"]
 edition = "2021"
 license = "MIT"
 

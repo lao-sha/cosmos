@@ -11,7 +11,7 @@
 
 ### 核心功能
 
-- 📝 **商品创建** - 从店铺派生账户扣取 1 USDT 等值 COS 押金
+- 📝 **商品创建** - 从店铺派生账户扣取 1 USDT 等值 NXS 押金
 - ✏️ **商品更新** - 修改商品信息
 - 🚀 **商品上架** - 发布商品到店铺
 - 📥 **商品下架** - 从店铺移除商品
@@ -23,7 +23,7 @@
 
 ### 核心设计
 
-创建商品时从**店铺派生账户**扣取 **1 USDT 等值 COS** 作为押金，转入 **Pallet 账户**托管。
+创建商品时从**店铺派生账户**扣取 **1 USDT 等值 NXS** 作为押金，转入 **Pallet 账户**托管。
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -43,14 +43,14 @@
 ### 押金计算
 
 ```
-COS 押金 = USDT 金额 × 10^12 / COS价格
+NXS 押金 = USDT 金额 × 10^12 / NXS价格
 ```
 
-| COS/USDT 价格 | 1 USDT 等值 COS |
+| NXS/USDT 价格 | 1 USDT 等值 NXS |
 |---------------|-----------------|
-| 0.001 | 1,000 COS |
-| 0.01 | 100 COS |
-| 0.1 | 10 COS |
+| 0.001 | 1,000 NXS |
+| 0.01 | 100 NXS |
+| 0.1 | 10 NXS |
 
 ## 🏗️ 架构
 
@@ -98,9 +98,9 @@ std = [
 parameter_types! {
     /// 商品押金：1 USDT（精度 10^6）
     pub const ProductDepositUsdt: u64 = 1_000_000;
-    /// 最小押金：1 COS
+    /// 最小押金：1 NXS
     pub const MinProductDepositCos: Balance = 1 * UNIT;
-    /// 最大押金：100 COS
+    /// 最大押金：100 NXS
     pub const MaxProductDepositCos: Balance = 100 * UNIT;
 }
 
@@ -127,8 +127,8 @@ impl pallet_entity_product::Config for Runtime {
 | `MaxProductsPerShop` | u32 | 每店铺最大商品数 | 1000 |
 | `MaxCidLength` | u32 | CID 最大长度 | 64 |
 | `ProductDepositUsdt` | u64 | **押金 USDT（精度 10^6）** | 1_000_000 |
-| `MinProductDepositCos` | Balance | **最小押金 COS** | 1 UNIT |
-| `MaxProductDepositCos` | Balance | **最大押金 COS** | 100 UNIT |
+| `MinProductDepositCos` | Balance | **最小押金 NXS** | 1 UNIT |
+| `MaxProductDepositCos` | Balance | **最大押金 NXS** | 100 UNIT |
 
 ## 📊 数据结构
 
@@ -212,7 +212,7 @@ fn create_product(
 
 **权限：** 仅店主
 
-**押金：** 从店铺派生账户扣取 1 USDT 等值 COS
+**押金：** 从店铺派生账户扣取 1 USDT 等值 NXS
 
 **示例：**
 ```javascript

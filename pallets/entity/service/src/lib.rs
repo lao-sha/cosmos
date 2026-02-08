@@ -11,7 +11,7 @@
 //!
 //! ## 押金机制
 //!
-//! - 创建商品时从店铺派生账户扣取 1 USDT 等值 COS
+//! - 创建商品时从店铺派生账户扣取 1 USDT 等值 NXS
 //! - 押金转入 Pallet 账户托管
 //! - 删除商品时从 Pallet 账户退还到店铺派生账户
 //!
@@ -116,7 +116,7 @@ pub mod pallet {
         /// Shop 查询接口（Entity-Shop 分离架构）
         type ShopProvider: ShopProvider<Self::AccountId>;
 
-        /// 定价提供者（用于计算 USDT 等值 COS 押金）
+        /// 定价提供者（用于计算 USDT 等值 NXS 押金）
         type PricingProvider: PricingProvider;
 
         /// 每店铺最大商品数
@@ -131,11 +131,11 @@ pub mod pallet {
         #[pallet::constant]
         type ProductDepositUsdt: Get<u64>;
 
-        /// 最小押金 COS
+        /// 最小押金 NXS
         #[pallet::constant]
         type MinProductDepositCos: Get<BalanceOf<Self>>;
 
-        /// 最大押金 COS
+        /// 最大押金 NXS
         #[pallet::constant]
         type MaxProductDepositCos: Get<BalanceOf<Self>>;
     }
@@ -278,7 +278,7 @@ pub mod pallet {
                 Error::<T>::MaxProductsReached
             );
 
-            // 计算押金（1 USDT 等值 COS）
+            // 计算押金（1 USDT 等值 NXS）
             let deposit = Self::calculate_product_deposit()?;
 
             // 获取店铺派生账户
@@ -522,25 +522,25 @@ pub mod pallet {
             PRODUCT_PALLET_ID.into_account_truncating()
         }
 
-        /// 计算商品押金（1 USDT 等值 COS）
+        /// 计算商品押金（1 USDT 等值 NXS）
         pub fn calculate_product_deposit() -> Result<BalanceOf<T>, sp_runtime::DispatchError> {
             let price = T::PricingProvider::get_cos_usdt_price();
             ensure!(price > 0, Error::<T>::PriceUnavailable);
 
             let usdt_amount = T::ProductDepositUsdt::get();
 
-            // cos_amount = usdt_amount * 10^12 / price
-            let cos_amount_u128 = (usdt_amount as u128)
+            // nxs_amount = usdt_amount * 10^12 / price
+            let nxs_amount_u128 = (usdt_amount as u128)
                 .checked_mul(1_000_000_000_000u128)
                 .ok_or(Error::<T>::ArithmeticOverflow)?
                 .checked_div(price as u128)
                 .ok_or(Error::<T>::ArithmeticOverflow)?;
 
-            let cos_amount: BalanceOf<T> = cos_amount_u128.saturated_into();
+            let nxs_amount: BalanceOf<T> = nxs_amount_u128.saturated_into();
 
             let min_deposit = T::MinProductDepositCos::get();
             let max_deposit = T::MaxProductDepositCos::get();
-            let final_deposit = cos_amount.max(min_deposit).min(max_deposit);
+            let final_deposit = nxs_amount.max(min_deposit).min(max_deposit);
 
             Ok(final_deposit)
         }

@@ -2,7 +2,7 @@
 
 ## 概述
 
-`pallet-trading-maker` 是 Cosmos 交易系统的核心模块之一，负责做市商的完整生命周期管理。做市商是 OTC 交易和 Bridge 兑换服务的核心参与者，本模块提供了从申请、审核、押金管理到服务运营的全流程支持。
+`pallet-trading-maker` 是 Nexus 交易系统的核心模块之一，负责做市商的完整生命周期管理。做市商是 OTC 交易和 Bridge 兑换服务的核心参与者，本模块提供了从申请、审核、押金管理到服务运营的全流程支持。
 
 ### 主要功能
 
@@ -31,7 +31,7 @@ DepositLocked → PendingReview → Active/Rejected/Cancelled
 ```
 
 **流程说明**：
-1. 用户调用 `lock_deposit` 锁定押金（默认 1000 COS）
+1. 用户调用 `lock_deposit` 锁定押金（默认 1000 NXS）
 2. 在 1 小时内调用 `submit_info` 提交个人资料
 3. 治理委员会在 24 小时内审核申请
 4. 审核通过后做市商状态变为 `Active`，可开始提供服务
@@ -40,7 +40,7 @@ DepositLocked → PendingReview → Active/Rejected/Cancelled
 
 #### 动态押金机制
 
-押金以 COS 代币锁定，但目标价值以 USD 计价（默认 1000 USD）。系统会：
+押金以 NXS 代币锁定，但目标价值以 USD 计价（默认 1000 USD）。系统会：
 - 定期检查押金的 USD 价值
 - 当价值低于阈值（950 USD）时触发补充警告
 - 支持做市商主动补充或系统自动补充
@@ -210,7 +210,7 @@ pub struct PenaltyRecord<T: Config> {
     pub maker_id: u64,
     /// 扣除类型
     pub penalty_type: PenaltyType,
-    /// 扣除的COS数量
+    /// 扣除的NXS数量
     pub deducted_amount: BalanceOf<T>,
     /// 扣除时的USD价值
     pub usd_value: u64,
@@ -344,7 +344,7 @@ pub struct ArchivedPenaltyL2 {
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `MakerDepositAmount` | `BalanceOf<T>` | 1000 COS | 做市商押金金额 |
+| `MakerDepositAmount` | `BalanceOf<T>` | 1000 NXS | 做市商押金金额 |
 | `TargetDepositUsd` | `u64` | 1,000,000,000 (1000 USD) | 押金目标USD价值（精度10^6） |
 | `DepositReplenishThreshold` | `u64` | 950,000,000 (950 USD) | 押金补充触发阈值（精度10^6） |
 | `DepositReplenishTarget` | `u64` | 1,050,000,000 (1050 USD) | 押金补充目标（精度10^6） |
@@ -381,7 +381,7 @@ Maker::submit_info(
 
 ```rust
 // 步骤1：申请提现
-let amount = 500_000_000_000_000u128; // 500 COS
+let amount = 500_000_000_000_000u128; // 500 NXS
 Maker::request_withdrawal(origin, amount)?;
 
 // 步骤2：等待7天冷却期
@@ -436,7 +436,7 @@ Maker::appeal_penalty(origin, penalty_id, evidence_cid)?;
 - `frame_support`: Substrate 框架支持
 - `frame_system`: 系统模块
 - `pallet_trading_common`: 交易公共类型和接口
-- `pallet_cosmos_ipfs`: IPFS 内容注册（用于自动 Pin 做市商资料）
+- `pallet_nexus_ipfs`: IPFS 内容注册（用于自动 Pin 做市商资料）
 
 ---
 

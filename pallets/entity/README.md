@@ -1,13 +1,13 @@
 # Entity 模块 (pallet-entity)
 
-> 🏪 COSMOS 实体管理系统 - 支持多类型实体、通证发行、治理、KYC 和代币发售
+> 🏪 NEXUS 实体管理系统 - 支持多类型实体、通证发行、治理、KYC 和代币发售
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Substrate](https://img.shields.io/badge/Substrate-polkadot--sdk-blue)](https://github.com/paritytech/polkadot-sdk)
 
 ## 概述
 
-Entity 模块是 COSMOS 平台的核心业务模块套件，从 Entity 重构而来，提供通用实体管理能力。支持店铺、餐饮、投资基金、DAO、合作社等多种实体类型。
+Entity 模块是 NEXUS 平台的核心业务模块套件，从 Entity 重构而来，提供通用实体管理能力。支持店铺、餐饮、投资基金、DAO、合作社等多种实体类型。
 
 ## 模块架构
 

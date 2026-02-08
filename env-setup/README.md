@@ -1,6 +1,6 @@
 # Env setup
 
-Special files for setting up an environment to work with the Cosmos project:
+Special files for setting up an environment to work with the Nexus project:
 
 - `rust-toolchain.toml` when working with `rustup`.
 - `flake.nix` when working with `nix`.

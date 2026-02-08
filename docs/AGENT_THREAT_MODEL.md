@@ -1,4 +1,4 @@
-# Costik Agent 威胁模型与防作恶深度分析
+# Nexus Agent 威胁模型与防作恶深度分析
 
 ## 1. 架构要害：Agent 是信任根
 
@@ -31,7 +31,7 @@ Telegram ──webhook──▶ Agent (持有 Bot Token + Ed25519 私钥)
 | 项目 | 说明 |
 |------|------|
 | **攻击方式** | Agent 凭空构造一个从未发生的 Telegram Update，签名后多播到节点 |
-| **代码位置** | `costik-agent/src/webhook.rs:67-75` — 从 `body` 直接构造 `SignedMessage` |
+| **代码位置** | `nexus-agent/src/webhook.rs:67-75` — 从 `body` 直接构造 `SignedMessage` |
 | **影响** | 节点共识通过一个假消息 → Leader 执行伪造的管理动作（如 ban 无辜用户） |
 | **当前防御** | ❌ **无** — 节点只验签名，不验消息来自 Telegram |
 | **严重性** | 🔴 **Critical** |
@@ -43,7 +43,7 @@ Telegram ──webhook──▶ Agent (持有 Bot Token + Ed25519 私钥)
 | 项目 | 说明 |
 |------|------|
 | **攻击方式** | Agent 收到真实 Telegram 消息 "hello"，改为 "/ban" 后签名转发 |
-| **代码位置** | `costik-agent/src/webhook.rs:49` — `raw_json = body.to_vec()`，Agent 可在签名前任意修改 |
+| **代码位置** | `nexus-agent/src/webhook.rs:49` — `raw_json = body.to_vec()`，Agent 可在签名前任意修改 |
 | **影响** | 同 A1 |
 | **当前防御** | ⚠️ **弱** — `verifier.rs:144-160` 重新计算 hash 但因序列化差异只记 debug 日志 |
 | **严重性** | 🔴 **Critical** |
@@ -53,7 +53,7 @@ Telegram ──webhook──▶ Agent (持有 Bot Token + Ed25519 私钥)
 | 项目 | 说明 |
 |------|------|
 | **攻击方式** | Agent 丢弃管理员的 `/unban` 或 `/unmute` 命令，只转发 `/ban` |
-| **代码位置** | `costik-agent/src/webhook.rs:80` — `tokio::spawn` 可被条件跳过 |
+| **代码位置** | `nexus-agent/src/webhook.rs:80` — `tokio::spawn` 可被条件跳过 |
 | **影响** | 审查/选择性执行 — 管理员认为命令已发送但实际被 Agent 吞掉 |
 | **当前防御** | ❌ **无** |
 | **严重性** | 🟠 **High** |
@@ -73,7 +73,7 @@ Telegram ──webhook──▶ Agent (持有 Bot Token + Ed25519 私钥)
 | 项目 | 说明 |
 |------|------|
 | **攻击方式** | Agent 收到 Leader 的 `/v1/execute` 但返回假错误或不调用 TG API |
-| **代码位置** | `costik-agent/src/webhook.rs:132` — `state.executor.execute()` 结果不可验证 |
+| **代码位置** | `nexus-agent/src/webhook.rs:132` — `state.executor.execute()` 结果不可验证 |
 | **影响** | 合法共识决定无法执行（DoS） |
 | **当前防御** | ⚠️ **弱** — `FailoverManager` 存在但只处理 Leader 超时，不处理 Agent 拒绝 |
 | **严重性** | 🟠 **High** |
@@ -83,7 +83,7 @@ Telegram ──webhook──▶ Agent (持有 Bot Token + Ed25519 私钥)
 | 项目 | 说明 |
 |------|------|
 | **攻击方式** | Leader 指令 ban user_id=123，Agent 实际调用 TG API ban user_id=456 |
-| **代码位置** | `costik-agent/src/executor.rs:58-161` — 内部逻辑不可外部审计 |
+| **代码位置** | `nexus-agent/src/executor.rs:58-161` — 内部逻辑不可外部审计 |
 | **影响** | 错误的用户被操作 |
 | **当前防御** | ❌ **无** — `agent_receipt` 当前是 `"ok"` 字符串，无密码学证明 |
 | **严重性** | 🟠 **High** |
@@ -93,7 +93,7 @@ Telegram ──webhook──▶ Agent (持有 Bot Token + Ed25519 私钥)
 | 项目 | 说明 |
 |------|------|
 | **攻击方式** | Agent 执行成功但告诉 Leader 失败 → FailoverManager 触发 Backup → 再次执行 |
-| **代码位置** | `costik-node/src/leader.rs:226-238` — 失败时 Backup 可接管 |
+| **代码位置** | `nexus-node/src/leader.rs:226-238` — 失败时 Backup 可接管 |
 | **影响** | 同一动作执行多次（如发送重复消息，多次 ban） |
 | **当前防御** | ❌ **无** — Telegram 部分 API 幂等（ban），部分不幂等（sendMessage） |
 | **严重性** | 🟡 **Medium** |
@@ -103,7 +103,7 @@ Telegram ──webhook──▶ Agent (持有 Bot Token + Ed25519 私钥)
 | 项目 | 说明 |
 |------|------|
 | **攻击方式** | Agent 跳过序列号或重置序列号制造混乱 |
-| **代码位置** | `costik-agent/src/signer.rs` — SequenceManager 由 Agent 完全控制 |
+| **代码位置** | `nexus-agent/src/signer.rs` — SequenceManager 由 Agent 完全控制 |
 | **影响** | 节点重放检测失效，消息排序混乱 |
 | **当前防御** | ⚠️ **弱** — `SequenceTracker` 有 ±10 容忍窗口但 Agent 控制序列源 |
 | **严重性** | 🟡 **Medium** |
@@ -113,7 +113,7 @@ Telegram ──webhook──▶ Agent (持有 Bot Token + Ed25519 私钥)
 | 项目 | 说明 |
 |------|------|
 | **攻击方式** | Agent 对同一 sequence 发送不同内容给不同节点 |
-| **代码位置** | `costik-node/src/gossip/state.rs` — equivocation detection |
+| **代码位置** | `nexus-node/src/gossip/state.rs` — equivocation detection |
 | **影响** | 部分节点共识通过不同消息 → 分叉 |
 | **当前防御** | ✅ **有效** — Gossip 状态机检测 hash 不一致，自动举报上链 |
 | **严重性** | 🟢 **Mitigated** |
@@ -123,7 +123,7 @@ Telegram ──webhook──▶ Agent (持有 Bot Token + Ed25519 私钥)
 | 项目 | 说明 |
 |------|------|
 | **攻击方式** | Agent 的 Ed25519 私钥被窃取，攻击者可冒充 Agent |
-| **代码位置** | `costik-agent/src/signer.rs:50` — 密钥存储在文件系统 |
+| **代码位置** | `nexus-agent/src/signer.rs:50` — 密钥存储在文件系统 |
 | **影响** | 完全冒充 Agent |
 | **当前防御** | ⚠️ **弱** — Unix 权限 600，无 HSM/TEE |
 | **严重性** | 🟠 **High** |
@@ -353,7 +353,7 @@ Agent 之间交叉验证:
 ### 漏洞 V1: `/v1/execute` 无 Leader 签名验证
 
 ```rust
-// costik-agent/src/webhook.rs:130
+// nexus-agent/src/webhook.rs:130
 // TODO: 验证 Leader 签名 + consensus_nodes 数量
 let result = state.executor.execute(&action).await;
 ```
@@ -364,7 +364,7 @@ let result = state.executor.execute(&action).await;
 ### 漏洞 V2: 执行回执无密码学证明
 
 ```rust
-// costik-agent/src/executor.rs:169
+// nexus-agent/src/executor.rs:169
 agent_receipt: Some("ok".to_string()), // TODO: Ed25519 签名回执
 ```
 
@@ -374,7 +374,7 @@ agent_receipt: Some("ok".to_string()), // TODO: Ed25519 签名回执
 ### 漏洞 V3: message_hash 一致性检查被跳过
 
 ```rust
-// costik-node/src/verifier.rs:154-160
+// nexus-node/src/verifier.rs:154-160
 if computed_hash != message.message_hash {
     debug!(...); // 仅 debug 日志，不拒绝
 }
@@ -386,7 +386,7 @@ if computed_hash != message.message_hash {
 ### 漏洞 V4: Leader 签名字段为空
 
 ```rust
-// costik-node/src/leader.rs:174
+// nexus-node/src/leader.rs:174
 leader_signature: String::new(), // TODO: 签名
 ```
 

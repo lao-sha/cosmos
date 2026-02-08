@@ -1,7 +1,7 @@
 [package]
 name = "pallet-entity-disclosure"
 version = "0.1.0"
-description = "COSMOS Entity 财务披露模块"
+description = "NEXUS Entity 财务披露模块"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true

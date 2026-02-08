@@ -357,8 +357,8 @@ mod tests {
 
     #[test]
     fn test_deployment_scripts() {
-        let script = DeploymentScripts::install_node("cosmos", "validator");
-        assert!(script.contains("cosmos"));
+        let script = DeploymentScripts::install_node("nexus", "validator");
+        assert!(script.contains("nexus"));
         assert!(script.contains("validator"));
     }
 }

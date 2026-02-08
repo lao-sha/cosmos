@@ -4,9 +4,12 @@
 //!
 //! ## 概述
 //! 本模块负责：
-//! 1. COS/USDT 市场价格聚合（OTC + Bridge）
+//! 1. NXS/USDT 市场价格聚合（P2P Buy + Sell 两方向）
 //! 2. CNY/USDT 汇率获取（通过 Offchain Worker）
 //! 3. 价格偏离检查
+//!
+//! ## 版本历史
+//! - v1.4.0 (2026-02-08): 适配 P2P 统一模型，OTC→Buy, Bridge→Sell
 //!
 //! ## Offchain Worker
 //! - 每24小时自动从 Exchange Rate API 获取 CNY/USD 汇率
@@ -97,16 +100,16 @@ pub mod pallet {
         pub timestamp: u64,
         /// USDT 单价（精度 10^6，即 1,000,000 = 1 USDT）
         pub price_usdt: u64,
-        /// COS 数量（精度 10^12，即 1,000,000,000,000 = 1 COS）
-        pub cos_qty: u128,
+        /// NXS 数量（精度 10^12，即 1,000,000,000,000 = 1 NXS）
+        pub nxs_qty: u128,
     }
 
     /// 函数级中文注释：价格聚合数据
-    /// 维护最近累计 1,000,000 COS 的订单统计信息
+    /// 维护最近累计 1,000,000 NXS 的订单统计信息
     #[derive(Clone, Encode, Decode, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
     pub struct PriceAggregateData {
-        /// 累计 COS 数量（精度 10^12）
-        pub total_cos: u128,
+        /// 累计 NXS 数量（精度 10^12）
+        pub total_nxs: u128,
         /// 累计 USDT 金额（精度 10^6）
         pub total_usdt: u128,
         /// 订单数量
@@ -117,28 +120,28 @@ pub mod pallet {
         pub newest_index: RingBufferIndex,
     }
 
-    /// 函数级中文注释：COS 市场统计信息
-    /// 综合 OTC 和 Bridge 两个市场的价格和交易数据
+    /// 函数级中文注释：NXS 市场统计信息
+    /// 综合 Buy 和 Sell 两方向的价格和交易数据
     #[derive(Clone, Encode, Decode, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
     pub struct MarketStats {
-        /// OTC 均价（精度 10^6）
-        pub otc_price: u64,
-        /// Bridge 均价（精度 10^6）
-        pub bridge_price: u64,
+        /// Buy 方向均价（精度 10^6）
+        pub buy_price: u64,
+        /// Sell 方向均价（精度 10^6）
+        pub sell_price: u64,
         /// 加权平均价格（精度 10^6）
         pub weighted_price: u64,
         /// 简单平均价格（精度 10^6）
         pub simple_avg_price: u64,
-        /// OTC 交易量（精度 10^12）
-        pub otc_volume: u128,
-        /// Bridge 交易量（精度 10^12）
-        pub bridge_volume: u128,
+        /// Buy 方向交易量（精度 10^12）
+        pub buy_volume: u128,
+        /// Sell 方向交易量（精度 10^12）
+        pub sell_volume: u128,
         /// 总交易量（精度 10^12）
         pub total_volume: u128,
-        /// OTC 订单数
-        pub otc_order_count: u32,
-        /// Bridge 兑换数
-        pub bridge_swap_count: u32,
+        /// Buy 方向订单数
+        pub buy_order_count: u32,
+        /// Sell 方向订单数
+        pub sell_order_count: u32,
     }
 
     /// 函数级中文注释：汇率数据结构
@@ -152,32 +155,32 @@ pub mod pallet {
         pub updated_at: u64,
     }
 
-    /// 函数级中文注释：OTC 订单价格聚合数据
-    /// 维护最近累计 1,000,000 COS 的 OTC 订单统计
+    /// 函数级中文注释：Buy 方向（USDT→NXS）价格聚合数据
+    /// 维护最近累计 1,000,000 NXS 的 Buy 方向订单统计
     #[pallet::storage]
-    #[pallet::getter(fn otc_aggregate)]
-    pub type OtcPriceAggregate<T> = StorageValue<_, PriceAggregateData, ValueQuery>;
+    #[pallet::getter(fn buy_aggregate)]
+    pub type BuyPriceAggregate<T> = StorageValue<_, PriceAggregateData, ValueQuery>;
 
-    /// 函数级中文注释：OTC 订单历史循环缓冲区
+    /// 函数级中文注释：Buy 方向订单历史循环缓冲区
     /// 存储最多 10,000 笔订单快照，通过索引 0-9999 循环使用
     #[pallet::storage]
-    pub type OtcOrderRingBuffer<T> = StorageMap<
+    pub type BuyOrderRingBuffer<T> = StorageMap<
         _,
         Blake2_128Concat,
         u32,  // 索引 0-9999
         OrderSnapshot,
     >;
 
-    /// 函数级中文注释：Bridge 兑换价格聚合数据
-    /// 维护最近累计 1,000,000 COS 的桥接兑换统计
+    /// 函数级中文注释：Sell 方向（NXS→USDT）价格聚合数据
+    /// 维护最近累计 1,000,000 NXS 的 Sell 方向订单统计
     #[pallet::storage]
-    #[pallet::getter(fn bridge_aggregate)]
-    pub type BridgePriceAggregate<T> = StorageValue<_, PriceAggregateData, ValueQuery>;
+    #[pallet::getter(fn sell_aggregate)]
+    pub type SellPriceAggregate<T> = StorageValue<_, PriceAggregateData, ValueQuery>;
 
-    /// 函数级中文注释：Bridge 兑换历史循环缓冲区
-    /// 存储最多 10,000 笔兑换快照，通过索引 0-9999 循环使用
+    /// 函数级中文注释：Sell 方向订单历史循环缓冲区
+    /// 存储最多 10,000 笔订单快照，通过索引 0-9999 循环使用
     #[pallet::storage]
-    pub type BridgeOrderRingBuffer<T> = StorageMap<
+    pub type SellOrderRingBuffer<T> = StorageMap<
         _,
         Blake2_128Concat,
         u32,  // 索引 0-9999
@@ -185,21 +188,21 @@ pub mod pallet {
     >;
 
     /// 函数级中文注释：冷启动阈值（可治理调整）
-    /// 当 OTC 和 Bridge 的交易量都低于此阈值时，使用默认价格
-    /// 默认值：1,000,000,000 COS（10亿，精度 10^12）
+    /// 当 Buy 和 Sell 两方向的交易量都低于此阈值时，使用默认价格
+    /// 默认值：1,000,000,000 NXS（10亿，精度 10^12）
     #[pallet::storage]
     #[pallet::getter(fn cold_start_threshold)]
     pub type ColdStartThreshold<T> = StorageValue<_, u128, ValueQuery, DefaultColdStartThreshold>;
 
     #[pallet::type_value]
     pub fn DefaultColdStartThreshold() -> u128 {
-        // 冷启动阈值：10亿 COS
-        1_000_000_000u128 * 1_000_000_000_000u128 // 10亿 COS
+        // 冷启动阈值：10亿 NXS
+        1_000_000_000u128 * 1_000_000_000_000u128 // 10亿 NXS
     }
 
     /// 函数级中文注释：默认价格（可治理调整）
     /// 用于冷启动阶段的价格锚点
-    /// 默认值：1（0.000001 USDT/COS，精度 10^6）
+    /// 默认值：1（0.000001 USDT/NXS，精度 10^6）
     /// 注：实际要求 0.0000007，但受精度限制，向上取整为 1
     #[pallet::storage]
     #[pallet::getter(fn default_price)]
@@ -207,7 +210,7 @@ pub mod pallet {
 
     #[pallet::type_value]
     pub fn DefaultPriceValue() -> u64 {
-        1u64 // 0.000001 USDT/COS
+        1u64 // 0.000001 USDT/NXS
         // 注：用户要求 0.0000007，但精度 10^6 下为 0.7，向上取整为 1（最小精度单位）
     }
 
@@ -235,18 +238,18 @@ pub mod pallet {
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
     pub enum Event<T: Config> {
-        /// 函数级中文注释：OTC 订单添加到价格聚合
-        OtcOrderAdded {
+        /// 函数级中文注释：Buy 方向成交添加到价格聚合
+        BuyTradeAdded {
             timestamp: u64,
             price_usdt: u64,
-            cos_qty: u128,
+            nxs_qty: u128,
             new_avg_price: u64,
         },
-        /// 函数级中文注释：Bridge 兑换添加到价格聚合
-        BridgeSwapAdded {
+        /// 函数级中文注释：Sell 方向成交添加到价格聚合
+        SellTradeAdded {
             timestamp: u64,
             price_usdt: u64,
-            cos_qty: u128,
+            nxs_qty: u128,
             new_avg_price: u64,
         },
         /// 函数级中文注释：冷启动参数更新事件
@@ -257,8 +260,8 @@ pub mod pallet {
         /// 函数级中文注释：冷启动退出事件（标志性事件，市场进入正常定价阶段）
         ColdStartExited {
             final_threshold: u128,
-            otc_volume: u128,
-            bridge_volume: u128,
+            buy_volume: u128,
+            sell_volume: u128,
             market_price: u64,
         },
         /// M-3修复：冷启动重置事件（治理紧急恢复机制）
@@ -305,45 +308,45 @@ pub mod pallet {
 
     /// 函数级中文注释：Pallet 辅助方法（聚合数据管理）
     impl<T: Config> Pallet<T> {
-        /// 函数级详细中文注释：添加 OTC 订单到价格聚合
+        /// 函数级详细中文注释：添加 Buy 方向（USDT→NXS）成交到价格聚合
         /// 
         /// # 参数
-        /// - `timestamp`: 订单时间戳（Unix 毫秒）
+        /// - `timestamp`: 成交时间戳（Unix 毫秒）
         /// - `price_usdt`: USDT 单价（精度 10^6）
-        /// - `cos_qty`: COS 数量（精度 10^12）
+        /// - `nxs_qty`: NXS 数量（精度 10^12）
         /// 
         /// # 逻辑
         /// 1. 读取当前聚合数据
-        /// 2. 如果累计超过 1,000,000 COS，删除最旧的订单直到满足限制
+        /// 2. 如果累计超过 1,000,000 NXS，删除最旧的订单直到满足限制
         /// 3. 添加新订单到循环缓冲区
         /// 4. 更新聚合统计数据
         /// 5. 发出事件
-        /// P3修复：单笔订单最大 COS 数量（1000万 COS）
+        /// P3修复：单笔订单最大 NXS 数量（1000万 NXS）
         const MAX_SINGLE_ORDER_COS: u128 = 10_000_000u128 * 1_000_000_000_000u128;
         
-        pub fn add_otc_order(
+        pub fn add_buy_trade(
             timestamp: u64,
             price_usdt: u64,
-            cos_qty: u128,
+            nxs_qty: u128,
         ) -> DispatchResult {
             // P1修复：输入验证
             ensure!(price_usdt > 0, Error::<T>::InvalidPrice);
-            ensure!(cos_qty > 0, Error::<T>::InvalidQuantity);
+            ensure!(nxs_qty > 0, Error::<T>::InvalidQuantity);
             // P3修复：单笔订单上限验证
-            ensure!(cos_qty <= Self::MAX_SINGLE_ORDER_COS, Error::<T>::OrderTooLarge);
+            ensure!(nxs_qty <= Self::MAX_SINGLE_ORDER_COS, Error::<T>::OrderTooLarge);
             
-            let mut agg = OtcPriceAggregate::<T>::get();
-            let limit: u128 = 1_000_000u128 * 1_000_000_000_000u128; // 1,000,000 COS（精度 10^12）
+            let mut agg = BuyPriceAggregate::<T>::get();
+            let limit: u128 = 1_000_000u128 * 1_000_000_000_000u128; // 1,000,000 NXS（精度 10^12）
             
             // 如果添加后超过限制，删除最旧的订单
-            let mut new_total = agg.total_cos.saturating_add(cos_qty);
+            let mut new_total = agg.total_nxs.saturating_add(nxs_qty);
             while new_total > limit && agg.order_count > 0 {
                 // P3修复：使用类型安全的索引
-                if let Some(oldest) = OtcOrderRingBuffer::<T>::take(agg.oldest_index.value()) {
+                if let Some(oldest) = BuyOrderRingBuffer::<T>::take(agg.oldest_index.value()) {
                     // 从聚合数据中减去
-                    agg.total_cos = agg.total_cos.saturating_sub(oldest.cos_qty);
+                    agg.total_nxs = agg.total_nxs.saturating_sub(oldest.nxs_qty);
                     // P0修复：先乘后除，避免精度丢失
-                    let oldest_usdt = oldest.cos_qty
+                    let oldest_usdt = oldest.nxs_qty
                         .saturating_mul(oldest.price_usdt as u128)
                         / 1_000_000_000_000u128;
                     agg.total_usdt = agg.total_usdt.saturating_sub(oldest_usdt);
@@ -353,7 +356,7 @@ pub mod pallet {
                     agg.oldest_index = agg.oldest_index.next();
                     
                     // 重新计算新总量
-                    new_total = agg.total_cos.saturating_add(cos_qty);
+                    new_total = agg.total_nxs.saturating_add(nxs_qty);
                 } else {
                     break;
                 }
@@ -370,21 +373,21 @@ pub mod pallet {
                 agg.newest_index.next()
             };
             
-            OtcOrderRingBuffer::<T>::insert(new_index.value(), OrderSnapshot {
+            BuyOrderRingBuffer::<T>::insert(new_index.value(), OrderSnapshot {
                 timestamp,
                 price_usdt,
-                cos_qty,
+                nxs_qty,
             });
             
             // 更新聚合数据
             // P0修复：先乘后除，避免精度丢失
             // P2修复：使用 checked_mul/checked_add 防止溢出
-            let order_usdt = cos_qty
+            let order_usdt = nxs_qty
                 .checked_mul(price_usdt as u128)
                 .ok_or(Error::<T>::ArithmeticOverflow)?
                 / 1_000_000_000_000u128;
-            agg.total_cos = agg.total_cos
-                .checked_add(cos_qty)
+            agg.total_nxs = agg.total_nxs
+                .checked_add(nxs_qty)
                 .ok_or(Error::<T>::ArithmeticOverflow)?;
             agg.total_usdt = agg.total_usdt
                 .checked_add(order_usdt)
@@ -393,53 +396,53 @@ pub mod pallet {
             agg.newest_index = new_index;
             
             // 保存聚合数据
-            OtcPriceAggregate::<T>::put(agg.clone());
+            BuyPriceAggregate::<T>::put(agg.clone());
             
             // 计算新均价
-            let new_avg_price = Self::get_otc_average_price();
+            let new_avg_price = Self::get_buy_average_price();
             
             // 发出事件
-            Self::deposit_event(Event::OtcOrderAdded {
+            Self::deposit_event(Event::BuyTradeAdded {
                 timestamp,
                 price_usdt,
-                cos_qty,
+                nxs_qty,
                 new_avg_price,
             });
             
             Ok(())
         }
 
-        /// 函数级详细中文注释：添加 Swap 交易到价格聚合
-        /// 逻辑与 add_otc_order 相同，但操作 Swap 相关的存储
-        pub fn add_swap_order(
+        /// 函数级详细中文注释：添加 Sell 方向（NXS→USDT）成交到价格聚合
+        /// 逻辑与 add_buy_trade 相同，但操作 Sell 方向的存储
+        pub fn add_sell_trade(
             timestamp: u64,
             price_usdt: u64,
-            cos_qty: u128,
+            nxs_qty: u128,
         ) -> DispatchResult {
             // P1修复：输入验证
             ensure!(price_usdt > 0, Error::<T>::InvalidPrice);
-            ensure!(cos_qty > 0, Error::<T>::InvalidQuantity);
+            ensure!(nxs_qty > 0, Error::<T>::InvalidQuantity);
             // P3修复：单笔订单上限验证
-            ensure!(cos_qty <= Self::MAX_SINGLE_ORDER_COS, Error::<T>::OrderTooLarge);
+            ensure!(nxs_qty <= Self::MAX_SINGLE_ORDER_COS, Error::<T>::OrderTooLarge);
             
-            let mut agg = BridgePriceAggregate::<T>::get();
-            let limit: u128 = 1_000_000u128 * 1_000_000_000_000u128; // 1,000,000 COS
+            let mut agg = SellPriceAggregate::<T>::get();
+            let limit: u128 = 1_000_000u128 * 1_000_000_000_000u128; // 1,000,000 NXS
             
             // 删除旧订单直到满足限制
-            let mut new_total = agg.total_cos.saturating_add(cos_qty);
+            let mut new_total = agg.total_nxs.saturating_add(nxs_qty);
             while new_total > limit && agg.order_count > 0 {
                 // P3修复：使用类型安全的索引
-                if let Some(oldest) = BridgeOrderRingBuffer::<T>::take(agg.oldest_index.value()) {
-                    agg.total_cos = agg.total_cos.saturating_sub(oldest.cos_qty);
+                if let Some(oldest) = SellOrderRingBuffer::<T>::take(agg.oldest_index.value()) {
+                    agg.total_nxs = agg.total_nxs.saturating_sub(oldest.nxs_qty);
                     // P0修复：先乘后除，避免精度丢失
-                    let oldest_usdt = oldest.cos_qty
+                    let oldest_usdt = oldest.nxs_qty
                         .saturating_mul(oldest.price_usdt as u128)
                         / 1_000_000_000_000u128;
                     agg.total_usdt = agg.total_usdt.saturating_sub(oldest_usdt);
                     agg.order_count = agg.order_count.saturating_sub(1);
                     // P3修复：使用类型安全的索引移动
                     agg.oldest_index = agg.oldest_index.next();
-                    new_total = agg.total_cos.saturating_add(cos_qty);
+                    new_total = agg.total_nxs.saturating_add(nxs_qty);
                 } else {
                     break;
                 }
@@ -456,21 +459,21 @@ pub mod pallet {
                 agg.newest_index.next()
             };
             
-            BridgeOrderRingBuffer::<T>::insert(new_index.value(), OrderSnapshot {
+            SellOrderRingBuffer::<T>::insert(new_index.value(), OrderSnapshot {
                 timestamp,
                 price_usdt,
-                cos_qty,
+                nxs_qty,
             });
             
             // 更新聚合数据
             // P0修复：先乘后除，避免精度丢失
             // P2修复：使用 checked_mul/checked_add 防止溢出
-            let order_usdt = cos_qty
+            let order_usdt = nxs_qty
                 .checked_mul(price_usdt as u128)
                 .ok_or(Error::<T>::ArithmeticOverflow)?
                 / 1_000_000_000_000u128;
-            agg.total_cos = agg.total_cos
-                .checked_add(cos_qty)
+            agg.total_nxs = agg.total_nxs
+                .checked_add(nxs_qty)
                 .ok_or(Error::<T>::ArithmeticOverflow)?;
             agg.total_usdt = agg.total_usdt
                 .checked_add(order_usdt)
@@ -478,84 +481,84 @@ pub mod pallet {
             agg.order_count = agg.order_count.saturating_add(1);
             agg.newest_index = new_index;
             
-            BridgePriceAggregate::<T>::put(agg.clone());
+            SellPriceAggregate::<T>::put(agg.clone());
             
-            let new_avg_price = Self::get_bridge_average_price();
+            let new_avg_price = Self::get_sell_average_price();
             
-            Self::deposit_event(Event::BridgeSwapAdded {
+            Self::deposit_event(Event::SellTradeAdded {
                 timestamp,
                 price_usdt,
-                cos_qty,
+                nxs_qty,
                 new_avg_price,
             });
             
             Ok(())
         }
 
-        /// 函数级详细中文注释：获取 OTC 订单均价（USDT/COS，精度 10^6）
+        /// 函数级详细中文注释：获取 Buy 方向均价（USDT/NXS，精度 10^6）
         /// 
         /// # 返回
         /// - `u64`: 均价（精度 10^6），0 表示无数据
         /// 
         /// # 计算公式
-        /// 均价 = 总 USDT / 总 COS
-        ///      = total_usdt / (total_cos / 10^12)
-        ///      = (total_usdt * 10^12) / total_cos
-        pub fn get_otc_average_price() -> u64 {
-            let agg = OtcPriceAggregate::<T>::get();
-            if agg.total_cos == 0 {
+        /// 均价 = 总 USDT / 总 NXS
+        ///      = total_usdt / (total_nxs / 10^12)
+        ///      = (total_usdt * 10^12) / total_nxs
+        pub fn get_buy_average_price() -> u64 {
+            let agg = BuyPriceAggregate::<T>::get();
+            if agg.total_nxs == 0 {
                 return 0;
             }
-            // 均价 = (total_usdt * 10^12) / total_cos
+            // 均价 = (total_usdt * 10^12) / total_nxs
             let avg = agg.total_usdt
                 .saturating_mul(1_000_000_000_000u128)
-                .checked_div(agg.total_cos)
+                .checked_div(agg.total_nxs)
                 .unwrap_or(0);
             // P3修复：安全类型转换，避免截断
             avg.min(u64::MAX as u128) as u64
         }
 
-        /// 函数级详细中文注释：获取 Bridge 兑换均价（USDT/COS，精度 10^6）
-        pub fn get_bridge_average_price() -> u64 {
-            let agg = BridgePriceAggregate::<T>::get();
-            if agg.total_cos == 0 {
+        /// 函数级详细中文注释：获取 Sell 方向均价（USDT/NXS，精度 10^6）
+        pub fn get_sell_average_price() -> u64 {
+            let agg = SellPriceAggregate::<T>::get();
+            if agg.total_nxs == 0 {
                 return 0;
             }
             let avg = agg.total_usdt
                 .saturating_mul(1_000_000_000_000u128)
-                .checked_div(agg.total_cos)
+                .checked_div(agg.total_nxs)
                 .unwrap_or(0);
             // P3修复：安全类型转换，避免截断
             avg.min(u64::MAX as u128) as u64
         }
 
-        /// 函数级详细中文注释：获取 OTC 聚合统计信息
-        /// 返回：(累计COS, 累计USDT, 订单数, 均价)
-        pub fn get_otc_stats() -> (u128, u128, u32, u64) {
-            let agg = OtcPriceAggregate::<T>::get();
-            let avg = Self::get_otc_average_price();
-            (agg.total_cos, agg.total_usdt, agg.order_count, avg)
+        /// 函数级详细中文注释：获取 Buy 方向聚合统计信息
+        /// 返回：(累计NXS, 累计USDT, 订单数, 均价)
+        pub fn get_buy_stats() -> (u128, u128, u32, u64) {
+            let agg = BuyPriceAggregate::<T>::get();
+            let avg = Self::get_buy_average_price();
+            (agg.total_nxs, agg.total_usdt, agg.order_count, avg)
         }
 
-        /// 函数级详细中文注释：获取 Bridge 聚合统计信息
-        /// 返回：(累计COS, 累计USDT, 订单数, 均价)
-        pub fn get_bridge_stats() -> (u128, u128, u32, u64) {
-            let agg = BridgePriceAggregate::<T>::get();
-            let avg = Self::get_bridge_average_price();
-            (agg.total_cos, agg.total_usdt, agg.order_count, avg)
+        /// 函数级详细中文注释：获取 Sell 方向聚合统计信息
+        /// 返回：(累计NXS, 累计USDT, 订单数, 均价)
+        pub fn get_sell_stats() -> (u128, u128, u32, u64) {
+            let agg = SellPriceAggregate::<T>::get();
+            let avg = Self::get_sell_average_price();
+            (agg.total_nxs, agg.total_usdt, agg.order_count, avg)
         }
 
-        /// 函数级详细中文注释：获取 COS 市场参考价格（简单平均 + 冷启动保护）
+        /// 函数级详细中文注释：获取 NXS 市场参考价格（简单平均 + 冷启动保护）
         /// 
         /// # 算法
         /// - 冷启动阶段：如果两个市场交易量都未达阈值，返回默认价格
         /// - 正常阶段：
-        ///   - 如果两个市场都有数据：(OTC均价 + Bridge均价) / 2
-        ///   - 如果只有一个市场有数据：使用该市场的均价
+        ///   - 如果两个方向都有数据：(Buy均价 + Sell均价) / 2
+        ///   - 如果只有一个方向有数据：使用该方向的均价
         ///   - 如果都无数据：返回默认价格（兜底）
         /// 
         /// # 返回
-        /// - `u64`: USDT/COS 价格（精度 10^6）
+        /// - `u64`: USDT/NXS 价格（精度 10^6）
         /// 
         /// # 用途
         /// - 前端显示参考价格
@@ -568,22 +571,22 @@ pub mod pallet {
             }
             
             // 正常市场价格计算
-            let otc_avg = Self::get_otc_average_price();
-            let bridge_avg = Self::get_bridge_average_price();
+            let buy_avg = Self::get_buy_average_price();
+            let sell_avg = Self::get_sell_average_price();
             
-            match (otc_avg, bridge_avg) {
+            match (buy_avg, sell_avg) {
                 (0, 0) => DefaultPrice::<T>::get(),  // 无数据时返回默认价格
-                (0, b) => b,                         // 只有 Bridge
-                (o, 0) => o,                         // 只有 OTC
-                (o, b) => (o + b) / 2,              // 简单平均
+                (0, s) => s,                         // 只有 Sell
+                (b, 0) => b,                         // 只有 Buy
+                (b, s) => (b + s) / 2,              // 简单平均
             }
         }
 
-        /// 函数级详细中文注释：获取 COS 市场价格（加权平均 + 冷启动保护）
+        /// 函数级详细中文注释：获取 NXS 市场价格（加权平均 + 冷启动保护）
         /// 
         /// # 算法
         /// - 冷启动阶段：如果两个市场交易量都未达阈值，返回默认价格
-        /// - 正常阶段：加权平均 = (OTC总USDT + Bridge总USDT) / (OTC总MEMO + Bridge总COS)
+        /// - 正常阶段：加权平均 = (Buy总USDT + Sell总USDT) / (Buy总NXS + Sell总NXS)
         /// 
         /// # 优点
         /// - 考虑交易量权重，更准确反映市场情况
@@ -592,7 +595,7 @@ pub mod pallet {
         /// - 冷启动保护避免初期价格为0或被操纵
         /// 
         /// # 返回
-        /// - `u64`: USDT/COS 价格（精度 10^6）
+        /// - `u64`: USDT/NXS 价格（精度 10^6）
         /// 
         /// # 用途
         /// - 资产估值（钱包总值计算）
@@ -628,11 +631,11 @@ pub mod pallet {
             }
             
             let threshold = ColdStartThreshold::<T>::get();
-            let otc_agg = OtcPriceAggregate::<T>::get();
-            let bridge_agg = BridgePriceAggregate::<T>::get();
+            let buy_agg = BuyPriceAggregate::<T>::get();
+            let sell_agg = SellPriceAggregate::<T>::get();
             
             // 未达阈值，仍在冷启动阶段
-            if otc_agg.total_cos < threshold && bridge_agg.total_cos < threshold {
+            if buy_agg.total_nxs < threshold && sell_agg.total_nxs < threshold {
                 return true;
             }
             
@@ -643,8 +646,8 @@ pub mod pallet {
             let market_price = Self::calculate_weighted_average();
             Self::deposit_event(Event::ColdStartExited {
                 final_threshold: threshold,
-                otc_volume: otc_agg.total_cos,
-                bridge_volume: bridge_agg.total_cos,
+                buy_volume: buy_agg.total_nxs,
+                sell_volume: sell_agg.total_nxs,
                 market_price,
             });
             
@@ -654,30 +657,30 @@ pub mod pallet {
         /// 函数级详细中文注释：内部辅助函数 - 计算加权平均价格
         /// 不包含冷启动逻辑，纯粹的数学计算
         fn calculate_weighted_average() -> u64 {
-            let otc_agg = OtcPriceAggregate::<T>::get();
-            let bridge_agg = BridgePriceAggregate::<T>::get();
+            let buy_agg = BuyPriceAggregate::<T>::get();
+            let sell_agg = SellPriceAggregate::<T>::get();
             
-            let total_cos = otc_agg.total_cos.saturating_add(bridge_agg.total_cos);
-            if total_cos == 0 {
+            let total_nxs = buy_agg.total_nxs.saturating_add(sell_agg.total_nxs);
+            if total_nxs == 0 {
                 return DefaultPrice::<T>::get(); // 无数据时返回默认价格
             }
             
-            // 加权平均 = 总USDT / 总COS
-            let total_usdt = otc_agg.total_usdt.saturating_add(bridge_agg.total_usdt);
+            // 加权平均 = 总USDT / 总NXS
+            let total_usdt = buy_agg.total_usdt.saturating_add(sell_agg.total_usdt);
             let avg = total_usdt
                 .saturating_mul(1_000_000_000_000u128)
-                .checked_div(total_cos)
+                .checked_div(total_nxs)
                 .unwrap_or(0);
             
             // P3修复：安全类型转换，避免截断
             avg.min(u64::MAX as u128) as u64
         }
 
-        /// 函数级详细中文注释：获取完整的 COS 市场统计信息
+        /// 函数级详细中文注释：获取完整的 NXS 市场统计信息
         /// 
         /// # 返回
         /// `MarketStats` 结构，包含：
-        /// - OTC 和 Bridge 各自的均价
+        /// - Buy 和 Sell 各自的均价
         /// - 加权平均价格和简单平均价格
         /// - 各市场的交易量和订单数
         /// - 总交易量
@@ -688,24 +691,24 @@ pub mod pallet {
         /// - 交易量统计
         /// - API 查询接口
         pub fn get_market_stats() -> MarketStats {
-            let otc_agg = OtcPriceAggregate::<T>::get();
-            let bridge_agg = BridgePriceAggregate::<T>::get();
+            let buy_agg = BuyPriceAggregate::<T>::get();
+            let sell_agg = SellPriceAggregate::<T>::get();
             
-            let otc_price = Self::get_otc_average_price();
-            let bridge_price = Self::get_bridge_average_price();
+            let buy_price = Self::get_buy_average_price();
+            let sell_price = Self::get_sell_average_price();
             let weighted_price = Self::get_cos_market_price_weighted();
             let simple_avg_price = Self::get_memo_reference_price();
             
             MarketStats {
-                otc_price,
-                bridge_price,
+                buy_price,
+                sell_price,
                 weighted_price,
                 simple_avg_price,
-                otc_volume: otc_agg.total_cos,
-                bridge_volume: bridge_agg.total_cos,
-                total_volume: otc_agg.total_cos.saturating_add(bridge_agg.total_cos),
-                otc_order_count: otc_agg.order_count,
-                bridge_swap_count: bridge_agg.order_count,
+                buy_volume: buy_agg.total_nxs,
+                sell_volume: sell_agg.total_nxs,
+                total_volume: buy_agg.total_nxs.saturating_add(sell_agg.total_nxs),
+                buy_order_count: buy_agg.order_count,
+                sell_order_count: sell_agg.order_count,
             }
         }
 
@@ -726,15 +729,15 @@ pub mod pallet {
         /// 4. 检查偏离率是否超过 MaxPriceDeviation 配置的限制
         /// 
         /// # 示例
-        /// - 基准价格：1.0 USDT/COS（1,000,000）
+        /// - 基准价格：1.0 USDT/NXS（1,000,000）
         /// - MaxPriceDeviation：2000 bps（20%）
-        /// - 允许范围：0.8 ~ 1.2 USDT/COS
-        /// - 订单价格 1.1 USDT/COS → 偏离 10% → 通过 ✅
-        /// - 订单价格 1.5 USDT/COS → 偏离 50% → 拒绝 ❌
+        /// - 允许范围：0.8 ~ 1.2 USDT/NXS
+        /// - 订单价格 1.1 USDT/NXS → 偏离 10% → 通过 ✅
+        /// - 订单价格 1.5 USDT/NXS → 偏离 50% → 拒绝 ❌
         /// 
         /// # 用途
-        /// - OTC 订单创建时的价格合理性检查
-        /// - Bridge 兑换创建时的价格合理性检查
+        /// - P2P Buy 订单创建时的价格合理性检查
+        /// - P2P Sell 订单创建时的价格合理性检查
         /// - 防止极端价格订单，保护买卖双方
         pub fn check_price_deviation(order_price_usdt: u64) -> DispatchResult {
             // 1. 获取基准价格（市场加权平均价格）

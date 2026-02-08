@@ -799,7 +799,7 @@ pub mod pallet {
                 balance_u128.checked_div(min_u128).unwrap_or(0)
             };
 
-            // COS 余额信任分
+            // NXS 余额信任分
             let balance_score = if balance_multiplier >= 10000 {
                 50  // >= 10000倍：高信任
             } else if balance_multiplier >= 1000 {
@@ -1631,7 +1631,7 @@ pub mod pallet {
 
         /// 函数级详细中文注释：计算动态保证金要求
         pub fn calculate_required_deposit(maker_id: u64) -> BalanceOf<T> {
-            // 基础保证金：1,000,000 COS
+            // 基础保证金：1,000,000 NXS
             let base_deposit = 1_000_000u128
                 .checked_mul(1_000_000_000_000_000_000u128)
                 .unwrap_or(1_000_000_000_000_000_000_000_000u128);

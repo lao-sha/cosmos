@@ -1,8 +1,8 @@
 [package]
 name = "pallet-entity-member"
 version = "0.1.0"
-description = "COSMOS Entity 店铺会员管理模块 - 会员推荐关系与等级管理"
-authors = ["COSMOS Team"]
+description = "NEXUS Entity 店铺会员管理模块 - 会员推荐关系与等级管理"
+authors = ["NEXUS Team"]
 edition = "2021"
 license = "MIT"
 

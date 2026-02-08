@@ -172,7 +172,7 @@ cargo build --release
 ./target/release/node-operator servers
 
 # 远程部署节点
-./target/release/node-operator deploy --server prod1 --chain cosmos --node-type validator
+./target/release/node-operator deploy --server prod1 --chain nexus --node-type validator
 
 # 列出所有工具（含远程工具）
 ./target/release/node-operator -r tools
@@ -203,7 +203,7 @@ cargo build --release
 ║ 目标:     prod-server-1                                      ║
 ║ 风险级别: 高风险 - 可能导致数据丢失                            ║
 ╠══════════════════════════════════════════════════════════════╣
-║ 描述: Deploy cosmos validator node on prod-server-1         ║
+║ 描述: Deploy nexus validator node on prod-server-1         ║
 ╚══════════════════════════════════════════════════════════════╝
 
 是否批准此操作? [y/N]:

@@ -2,7 +2,7 @@
 name = "pallet-entity-market"
 version = "0.1.0"
 description = "店铺代币 P2P 交易市场模块"
-authors = ["Cosmos Team"]
+authors = ["Nexus Team"]
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/parity/polkadot-sdk"

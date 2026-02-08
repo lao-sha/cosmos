@@ -481,7 +481,7 @@ impl Tool for AutoDeployNode {
                 },
                 "chain": {
                     "type": "string",
-                    "description": "链名称，默认 cosmos"
+                    "description": "链名称，默认 nexus"
                 }
             },
             "required": ["node_name", "node_type", "region"]
@@ -495,7 +495,7 @@ impl Tool for AutoDeployNode {
             .ok_or_else(|| anyhow!("Missing node_type"))?;
         let region = args["region"].as_str()
             .ok_or_else(|| anyhow!("Missing region"))?;
-        let chain = args["chain"].as_str().unwrap_or("cosmos");
+        let chain = args["chain"].as_str().unwrap_or("nexus");
 
         // 根据节点类型推荐配置
         let (desc, min_vcpu, min_ram) = crate::cloud_provider::recommend_plan_for_node(node_type);

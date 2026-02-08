@@ -1,7 +1,7 @@
 {
-  "name": "cosmos-test-scripts",
+  "name": "nexus-test-scripts",
   "version": "1.0.0",
-  "description": "Cosmos chain test scripts",
+  "description": "Nexus chain test scripts",
   "type": "module",
   "scripts": {
     "test:maker": "tsx test-maker.ts",

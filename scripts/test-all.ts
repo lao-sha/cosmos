@@ -86,7 +86,7 @@ async function runTest(test: typeof TESTS[0]): Promise<TestResult> {
 }
 
 async function main() {
-  logSection('Cosmos 链综合测试');
+  logSection('Nexus 链综合测试');
   
   console.log(`\n📋 待测试模块: ${TESTS.length} 个\n`);
   

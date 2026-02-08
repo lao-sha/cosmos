@@ -2,7 +2,7 @@
 name = "pallet-commission-single-line"
 version = "0.1.0"
 description = "Commission single-line plugin - upline/downline earnings based on consumption order"
-authors = ["COSMOS Team"]
+authors = ["NEXUS Team"]
 edition = "2021"
 license = "MIT"
 

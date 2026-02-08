@@ -1,8 +1,8 @@
 [package]
 name = "pallet-entity-review"
 version = "0.1.0"
-description = "COSMOS Entity 评价管理模块"
-authors = ["COSMOS Team"]
+description = "NEXUS Entity 评价管理模块"
+authors = ["NEXUS Team"]
 edition = "2021"
 license = "MIT"
 

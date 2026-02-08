@@ -54,7 +54,7 @@ enum Commands {
         server: String,
 
         /// 链名称
-        #[arg(short, long, default_value = "cosmos")]
+        #[arg(short, long, default_value = "nexus")]
         chain: String,
 
         /// 节点类型

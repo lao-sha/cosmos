@@ -2,8 +2,8 @@
 name = "media-utils"
 version = "0.1.0"
 edition = "2021"
-authors = ["Cosmos Team"]
-description = "Common media processing utilities for Cosmos blockchain"
+authors = ["Nexus Team"]
+description = "Common media processing utilities for Nexus blockchain"
 license = "MIT"
 
 [dependencies]

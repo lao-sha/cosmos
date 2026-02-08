@@ -40,7 +40,7 @@ async function runTest(name: string, script: string): Promise<boolean> {
 }
 
 async function main() {
-  logSection('Cosmos 链上功能测试');
+  logSection('Nexus 链上功能测试');
   
   console.log('📋 测试列表:');
   tests.forEach((t, i) => {

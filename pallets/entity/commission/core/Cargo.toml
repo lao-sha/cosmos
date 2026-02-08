@@ -2,7 +2,7 @@
 name = "pallet-commission-core"
 version = "0.1.0"
 description = "Commission core dispatch engine, storage, and withdrawal system"
-authors = ["COSMOS Team"]
+authors = ["NEXUS Team"]
 edition = "2021"
 license = "MIT"
 

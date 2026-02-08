@@ -1,6 +1,6 @@
-# Cosmos Blockchain
+# Nexus Blockchain
 
-Cosmos 是一个基于 Substrate 构建的区块链平台，集成 AI 宠物养成、社交通讯、去中心化交易等功能的 Web3 生态系统。
+Nexus 是一个基于 Substrate 构建的区块链平台，集成 AI 宠物养成、社交通讯、去中心化交易等功能的 Web3 生态系统。
 
 ## 🌟 核心功能
 
@@ -25,7 +25,7 @@ AI 宠物养成与 GameFi 生态系统：
 ## 📁 项目结构
 
 ```
-cosmos/
+nexus/
 ├── node/                    # 区块链节点实现
 ├── runtime/                 # 运行时逻辑
 ├── pallets/                 # 自定义 Pallet 模块
@@ -67,7 +67,7 @@ cosmos/
 cargo build --release
 
 # 运行开发链
-./target/release/cosmos-node --dev
+./target/release/nexus-node --dev
 ```
 
 ### 前端应用
@@ -129,10 +129,10 @@ docker-compose up -d
 
 ```bash
 # 构建镜像
-docker build . -t cosmos-blockchain
+docker build . -t nexus-blockchain
 
 # 运行节点
-docker run -p 9944:9944 -p 30333:30333 cosmos-blockchain --dev
+docker run -p 9944:9944 -p 30333:30333 nexus-blockchain --dev
 ```
 
 ### 完整服务栈

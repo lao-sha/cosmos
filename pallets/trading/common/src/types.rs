@@ -16,8 +16,7 @@ use frame_support::{BoundedVec, pallet_prelude::ConstU32};
 /// - 用于 OTC 订单收款地址和 Swap 兑换地址
 ///
 /// ## 使用者
-/// - `pallet-trading-otc`: 做市商收款地址
-/// - `pallet-trading-swap`: 用户 USDT 接收地址
+/// - `pallet-trading-p2p`: 做市商收款地址 / 用户 USDT 接收地址
 /// - `pallet-trading-maker`: 做市商注册地址
 pub type TronAddress = BoundedVec<u8, ConstU32<34>>;
 

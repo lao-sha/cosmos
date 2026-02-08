@@ -21,7 +21,7 @@
 7. [实施路线图](#7-实施路线图)
 8. [风险评估与缓解](#8-风险评估与缓解)
 9. [结论与建议](#9-结论与建议)
-10. [Costik 官方代理 — 产品需求](#10-costik-官方代理--产品需求)
+10. [Nexus 官方代理 — 产品需求](#10-nexus-官方代理--产品需求)
     - 10.1~10.8 核心功能、技术架构、商业模型、实施计划
     - 10.9 自建代理广告激励方案
 11. [AI 客服 — 深度实现方案](#11-ai-客服--深度实现方案)
@@ -37,7 +37,7 @@
     - 11.10 实施里程碑
     - 11.11 双重角色分析：店铺产品客服 × 群客服
     - 11.12 调用区块链 AI 项目大模型 — 可行性分析
-    - 11.13 Costik Agent 群主自保管 Key — 可行性分析
+    - 11.13 Nexus Agent 群主自保管 Key — 可行性分析
 
 ---
 
@@ -102,18 +102,18 @@
 - `LightningPaymentManager` — 自动付款开关 + 金额上限（默认 100,000 sats ≈ $30）
 - `ApprovalManager` — 高危操作需人工审批
 
-#### costik-agent（去中心化 Bot 本地代理）
+#### nexus-agent（去中心化 Bot 本地代理）
 
-**位置**: `costik-agent/`（独立 binary）
+**位置**: `nexus-agent/`（独立 binary）
 
 **能力**:
 - Telegram Webhook 接收 → Ed25519 签名 → 确定性节点选择 → 并行多播
 - TelegramExecutor：10 种 TG API 方法（sendMessage / deleteMessage / banChatMember 等）
 - 滑动窗口限速器
 
-#### costik-node（去中心化验证节点）
+#### nexus-node（去中心化验证节点）
 
-**位置**: `costik-node/`（独立 binary）
+**位置**: `nexus-node/`（独立 binary）
 
 **能力**:
 - 4 层验证：Ed25519 签名 → Bot 活跃检查 → 公钥匹配 → 目标节点检查
@@ -132,7 +132,7 @@
 ├─────────────────┼────────────┼────────────────────────────┤
 │ Entity/Shop     │ ⭐⭐⭐⭐    │ 高 — 完整商业闭环           │
 │ Commission      │ ⭐⭐⭐⭐    │ 高 — 4 种提现模式 + 奖励    │
-│ Costik Bot      │ ⭐⭐⭐⭐    │ 高 — 85 测试全过            │
+│ Nexus Bot      │ ⭐⭐⭐⭐    │ 高 — 85 测试全过            │
 │ node-operator   │ ⭐⭐⭐     │ 中高 — 需加自动循环         │
 │ Trading         │ ⭐⭐⭐⭐    │ 中 — 需 AI 定价策略         │
 │ Storage/Privacy │ ⭐⭐⭐     │ 低 — AI 知识库需扩展        │
@@ -184,7 +184,7 @@
 关键差异:
 - 不做 AI 训练/推理市场（留给 Bittensor/Ritual）
 - 做 AI 驱动的商业实体自主运营
-- 每个 AI 决策通过 Costik 多节点共识验证
+- 每个 AI 决策通过 Nexus 多节点共识验证
 - AI 的"钱包"由链上治理规则约束
 ```
 
@@ -239,9 +239,9 @@ LLM 总结结果 → 返回用户
 | 缺失项 | 难度 | 实施方案 |
 |--------|------|---------|
 | **自动触发循环** | 低 | 在 `node-operator/src/main.rs` 加入 `tokio::spawn` 定时任务，每 N 分钟调用 `agent.chat("检查所有节点状态")` |
-| **链上事件监听** | 中 | 复用 `costik-node` 的 `chain_client.rs` subxt 框架，监听 `NodeOffline` / `EquivocationDetected` 事件触发运维 |
+| **链上事件监听** | 中 | 复用 `nexus-node` 的 `chain_client.rs` subxt 框架，监听 `NodeOffline` / `EquivocationDetected` 事件触发运维 |
 | **自愈决策链** | 中 | 定义决策树：检测异常 → 尝试重启 → 失败则迁移 → 记录到链上 |
-| **多 Agent 协调** | 高 | 多个 Ops Agent 通过 Costik 共识协调：同一异常只由一个 Agent 处理 |
+| **多 Agent 协调** | 高 | 多个 Ops Agent 通过 Nexus 共识协调：同一异常只由一个 Agent 处理 |
 | **决策审计上链** | 低 | 复用 `pallet-bot-group-mgmt` 的 `log_action` extrinsic 记录运维决策 |
 
 #### 4.1.3 架构变化
@@ -262,7 +262,7 @@ After (目标):
               ┌─────────┴─────────┐
               │ 低危操作           │ 高危操作
               │ (查看日志/状态)    │ (重启/迁移/删除)
-              │ → 自动执行         │ → Costik 共识验证
+              │ → 自动执行         │ → Nexus 共识验证
               │                   │ → 链上审批 (多签)
               │                   │ → 执行 + 上链存证
               └─────────┬─────────┘
@@ -303,8 +303,8 @@ Entity 资金池增长 → AI Agent 运营费用自动支付
 | `pallet-bot-registry` (5 平台绑定) | AI Sales Agent 的链上身份注册 |
 | `pallet-bot-consensus` (多节点验证) | AI 回复内容经多节点验证后才发送 |
 | `pallet-bot-group-mgmt` (规则引擎) | 约束 AI 营销行为（频率/内容/合规） |
-| `costik-node/rule_engine.rs` (Rule trait 链) | 扩展为 AI 获客规则：需求识别 → 推荐匹配 → 回复生成 |
-| `costik-node/PlatformAdapter` trait | 已实现 TG/Discord/Slack 适配器，直接复用 |
+| `nexus-node/rule_engine.rs` (Rule trait 链) | 扩展为 AI 获客规则：需求识别 → 推荐匹配 → 回复生成 |
+| `nexus-node/PlatformAdapter` trait | 已实现 TG/Discord/Slack 适配器，直接复用 |
 | `pallet-entity-service` | AI 读取 Entity 的服务目录 |
 | `pallet-commission-referral` | AI 带来的客户自动进入推荐链 |
 | `pallet-entity-member` | 新客户自动注册为 Member |
@@ -314,7 +314,7 @@ Entity 资金池增长 → AI Agent 运营费用自动支付
 **a) AI 获客 Agent（off-chain 服务）**
 
 ```rust
-// 新建: costik-agent/src/sales_agent.rs (概念设计)
+// 新建: nexus-agent/src/sales_agent.rs (概念设计)
 
 pub struct SalesAgent {
     /// LLM 客户端 (复用 node-operator 的 llm_client)
@@ -333,7 +333,7 @@ impl SalesAgent {
         // 1. 规则引擎检查：是否在允许时间/频率内
         // 2. LLM 分析：消息是否包含潜在需求
         // 3. LLM 生成：个性化回复/推荐
-        // 4. Costik 共识验证：多节点确认回复内容合规
+        // 4. Nexus 共识验证：多节点确认回复内容合规
         // 5. 执行发送
     }
 }
@@ -384,7 +384,7 @@ AI Agent 佣金 → 自动支付运营成本 (LLM API / 服务器)
 |------|------|---------|
 | 平台封号（TG/Discord 反自动营销） | 🔴 高 | 严格限速 + 拟人化回复 + 声明 AI 身份 |
 | 用户反感垃圾营销 | 🔴 高 | 只在需求匹配时回复 + 用户可屏蔽 |
-| LLM 幻觉导致虚假宣传 | 🟡 中 | Costik 多节点验证 + 知识库 RAG |
+| LLM 幻觉导致虚假宣传 | 🟡 中 | Nexus 多节点验证 + 知识库 RAG |
 | 法律合规（GDPR/广告法） | 🟡 中 | 自动声明 AI 身份 + 不收集用户数据 |
 | 冷启动（无客户历史数据） | 🟡 中 | 初期由 Entity Owner 提供种子知识 |
 
@@ -489,8 +489,8 @@ SSH 部署 Cosmos 节点 → 注册到链上
 
 | 优先级 | 产品 | 基于 | 状态 |
 |--------|------|------|------|
-| **P0** | AI 客服 Bot | costik-agent + costik-node + LLM | 详见 Section 11 |
-| **P1** | Costik 官方代理 @CostikBot | costik-official-agent | 详见 Section 10 |
+| **P0** | AI 客服 Bot | nexus-agent + nexus-node + LLM | 详见 Section 11 |
+| **P1** | Nexus 官方代理 @NexusBot | nexus-official-agent | 详见 Section 10 |
 | **P2** | AI 自动运维 | node-operator + 自动循环 | 详见 4.1 |
 | **P3** | AI 自动部署节点 | node-operator + cloud_provider | 详见 4.3 |
 | **P4** | AI 主动获客 | AI 客服扩展 | 详见 4.2（远期） |
@@ -517,7 +517,7 @@ SSH 部署 Cosmos 节点 → 注册到链上
             ┌──────────────┼──────────────┐
             │              │              │
      ┌──────▼──────┐ ┌────▼────┐ ┌───────▼────────┐
-     │ costik-node │ │ costik- │ │ node-operator  │
+     │ nexus-node │ │ nexus- │ │ node-operator  │
      │  (×K 节点)  │ │ agent   │ │ (运维/部署 AI) │
      │             │ │ (群主   │ │                │
      │ 规则引擎    │ │  本地   │ │ LLM Tool-call  │
@@ -551,24 +551,24 @@ SSH 部署 Cosmos 节点 → 注册到链上
 ```
 群主 (Entity Owner)
   │
-  ├── 自建模式: 运行 costik-agent (本地 VPS)
+  ├── 自建模式: 运行 nexus-agent (本地 VPS)
   │     └── 自保管 BOT_TOKEN + Ed25519 Key (详见 11.13)
   │
-  └── 官方模式: 拉 @CostikBot 入群 (详见 Section 10)
-        └── 零部署，Costik 集群托管
+  └── 官方模式: 拉 @NexusBot 入群 (详见 Section 10)
+        └── 零部署，Nexus 集群托管
 
-costik-agent ←──── TG Webhook ────→ Telegram Server
+nexus-agent ←──── TG Webhook ────→ Telegram Server
   │
   │ Ed25519 签名 + 确定性多播
   ↓
-costik-node (×K)
+nexus-node (×K)
   │ 4 层验证 → Gossip 共识 → M/K 确认
   ↓
 Leader Node
   │ 规则引擎匹配 → AI Handler (LLM 调用)
   │ 知识库: 链上商品(L1) + IPFS文档(L2) + 历史QA(L3)
   ↓
-costik-agent ←── POST /v1/execute
+nexus-agent ←── POST /v1/execute
   │ TelegramExecutor.sendMessage()
   ↓
 用户看到 AI 客服回复
@@ -580,7 +580,7 @@ costik-agent ←── POST /v1/execute
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
 │  外部输入    │     │  AI 决策     │     │  执行 + 存证 │
 ├─────────────┤     ├─────────────┤     ├─────────────┤
-│ 链上事件     │────→│ LLM 分析     │────→│ Costik 验证  │
+│ 链上事件     │────→│ LLM 分析     │────→│ Nexus 验证  │
 │ 平台消息     │     │ Tool 调用    │     │ 链上审批     │
 │ 定时任务     │     │ 规则匹配     │     │ 执行动作     │
 │ 阈值告警     │     │ 预算校验     │     │ 结果上链     │
@@ -600,7 +600,7 @@ Layer 1: AI 自身约束
     ├── 单次操作金额上限（max_auto_pay_sats）
     └── 行为规则引擎（频率/内容/时间限制）
 
-Layer 2: Costik 共识验证
+Layer 2: Nexus 共识验证
     ├── 高危决策需 M/K 节点确认（M = ceil(K×2/3)）
     ├── Equivocation 检测（AI 不一致行为被惩罚）
     ├── Leader 轮换（避免单点操控）
@@ -618,7 +618,7 @@ Layer 3: 链上治理
 | 风险级别 | 操作示例 | 执行方式 |
 |---------|---------|---------|
 | 🟢 **低** | 查看节点状态、读取日志、查询余额 | AI 直接执行 |
-| 🟡 **中** | 重启节点、发送群消息、创建 Invoice | Costik M/K 共识后执行 |
+| 🟡 **中** | 重启节点、发送群消息、创建 Invoice | Nexus M/K 共识后执行 |
 | 🔴 **高** | 创建/删除服务器、转账、修改链上配置 | 共识 + Entity Owner 审批 |
 | ⚫ **禁止** | 修改治理参数、操作用户钱包、绕过审计 | AI 无权限 |
 
@@ -626,7 +626,7 @@ Layer 3: 链上治理
 
 1. **不能直接操作用户资金** — AI 只能操作 Entity 运营资金池
 2. **不能修改链上治理参数** — AI 只有建议权
-3. **不能绕过 Costik 共识** — 所有副作用操作必须经过验证
+3. **不能绕过 Nexus 共识** — 所有副作用操作必须经过验证
 4. **不能隐藏决策** — 所有决策必须上链存证
 5. **不能超出预算** — BudgetManager 是硬性检查，不是 LLM 判断
 
@@ -641,7 +641,7 @@ Layer 3: 链上治理
 **最高商业价值，可直接面向 Entity Owner 交付**
 
 - [ ] 抽取 `cosmos-llm-client` 共享 crate（复用 `node-operator/src/llm_client.rs`）
-- [ ] 实现 `AiCustomerServiceRule`（costik-node 规则引擎新规则）
+- [ ] 实现 `AiCustomerServiceRule`（nexus-node 规则引擎新规则）
 - [ ] 实现 `AiHandler`（Leader 节点 LLM 推理 + RAG）
 - [ ] 实现 `KnowledgeManager` Layer 1（链上商品目录）
 - [ ] 实现 `ConversationCache`（内存对话缓存）
@@ -664,11 +664,11 @@ Layer 3: 链上治理
 
 **验证标准**: AI 回答在一周内通过学习明显提升准确率（> 90%），LLM 成本可追踪
 
-### Phase 3: Costik 官方代理（P1，4 周）
+### Phase 3: Nexus 官方代理（P1，4 周）
 
 **零门槛增长引擎 — 详见 Section 10**
 
-- [ ] 新建 `costik-official-agent/` 项目
+- [ ] 新建 `nexus-official-agent/` 项目
 - [ ] `GroupRegistry`：Bot 入群/退群自动注册
 - [ ] `MemberCollector`：会员信息采集
 - [ ] `StatsEngine`：活跃度评分、增长趋势
@@ -705,7 +705,7 @@ Layer 3: 链上治理
 
 | 风险 | 概率 | 影响 | 缓解 |
 |------|------|------|------|
-| LLM 幻觉导致错误操作 | 中 | 高 | Tool 白名单 + Costik 共识 + 金额上限 |
+| LLM 幻觉导致错误操作 | 中 | 高 | Tool 白名单 + Nexus 共识 + 金额上限 |
 | LLM API 不可用 | 中 | 中 | 多 Provider 切换（Claude ↔ OpenAI） |
 | 链上交易费暴涨 | 低 | 中 | 批次提交（ChainSubmitter 已支持） |
 | subxt 断连 | 中 | 低 | 自动重连 + 静态缓存回退（已实现） |
@@ -716,7 +716,7 @@ Layer 3: 链上治理
 |------|------|------|------|
 | 平台封号 | 中 | 高 | 限速 + 拟人 + 声明 AI |
 | 用户反感 | 中 | 中 | 只响应匹配需求 + 可屏蔽 |
-| 竞争对手抄袭 | 中 | 低 | Costik 共识验证是技术壁垒 |
+| 竞争对手抄袭 | 中 | 低 | Nexus 共识验证是技术壁垒 |
 | 监管变化 | 低 | 高 | 保守合规 + 支持区域关闭 |
 
 ### 8.3 安全风险
@@ -736,9 +736,9 @@ Layer 3: 链上治理
 
 **Cosmos 项目实现 AI 自主运行是可行且合理的**，理由如下：
 
-1. **技术基座完备** — 已有 LLM Agent 框架（node-operator）、去中心化共识（Costik 85 测试）、云部署 API（3 云服务商 + Lightning 支付）、完整商业实体系统（Entity/Shop/Member/Commission）
+1. **技术基座完备** — 已有 LLM Agent 框架（node-operator）、去中心化共识（Nexus 85 测试）、云部署 API（3 云服务商 + Lightning 支付）、完整商业实体系统（Entity/Shop/Member/Commission）
 2. **差异化明确** — 不做 AI 训练/推理市场，做 AI 驱动的商业实体自主运营 + 决策链上可审计
-3. **AI 客服是最佳切入点** — 复用现有 costik-agent/costik-node 管道，3 周可交付 MVP，直接面向 Entity Owner 产生商业价值
+3. **AI 客服是最佳切入点** — 复用现有 nexus-agent/nexus-node 管道，3 周可交付 MVP，直接面向 Entity Owner 产生商业价值
 
 ### 9.2 独特竞争优势
 
@@ -755,7 +755,7 @@ Layer 3: 链上治理
 
 Phase 1: AI 客服 MVP（3 周）     → 最高商业价值，直接面向 Entity Owner
 Phase 2: AI 客服完善（4 周）     → 知识库 + 自动学习 + 去中心化 LLM
-Phase 3: 官方代理 @CostikBot（4 周）→ 零门槛增长引擎
+Phase 3: 官方代理 @NexusBot（4 周）→ 零门槛增长引擎
 Phase 4: AI 运维 + 节点部署（4 周） → 基础设施自动化
 Phase 5: 广告网络 + 获客（远期）   → 商业模式闭环
 ```
@@ -769,28 +769,28 @@ Phase 5: 广告网络 + 获客（远期）   → 商业模式闭环
 
 ---
 
-## 10. Costik 官方代理 — 产品需求
+## 10. Nexus 官方代理 — 产品需求
 
 ### 10.1 背景与动机
 
-当前 `costik-agent` 是**群主自建代理**模式：群主需要自行部署 Docker、配置 `BOT_TOKEN`、管理服务器。这对非技术型群主来说门槛过高，限制了项目的推广和用户增长。
+当前 `nexus-agent` 是**群主自建代理**模式：群主需要自行部署 Docker、配置 `BOT_TOKEN`、管理服务器。这对非技术型群主来说门槛过高，限制了项目的推广和用户增长。
 
-**核心思路**：Costik 官方运营一个托管的 Telegram Bot（`@CostikBot`），群主**只需将官方 Bot 拉入群聊**，即可**免费**获得群聊会员信息采集与管理服务。群主零配置、零部署、零成本。
+**核心思路**：Nexus 官方运营一个托管的 Telegram Bot（`@NexusBot`），群主**只需将官方 Bot 拉入群聊**，即可**免费**获得群聊会员信息采集与管理服务。群主零配置、零部署、零成本。
 
 ### 10.2 产品定位
 
 ```
-当前模式（costik-agent — 自建代理）:
+当前模式（nexus-agent — 自建代理）:
   群主 → 部署服务器 → 配置 BOT_TOKEN → 启动 Docker → 注册链上
   适用: 技术型群主 / Entity 运营方 / 高级用户
 
-新增模式（Costik Official Bot — 官方代理）:
-  群主 → 拉 @CostikBot 入群 → 完成
+新增模式（Nexus Official Bot — 官方代理）:
+  群主 → 拉 @NexusBot 入群 → 完成
   适用: 所有群主 / 零门槛 / 免费增长引擎
 ```
 
 两种模式**共存互补**，不互斥：
-- **官方代理**：免费基础服务，快速获客，数据由 Costik 集群托管
+- **官方代理**：免费基础服务，快速获客，数据由 Nexus 集群托管
 - **自建代理**：高级功能，数据完全自主，适合有隐私需求的 Entity
 
 ### 10.3 核心功能需求
@@ -799,7 +799,7 @@ Phase 5: 广告网络 + 获客（远期）   → 商业模式闭环
 
 | 项目 | 说明 |
 |------|------|
-| **触发方式** | 群主/管理员将 `@CostikBot` 添加到 Telegram 群组 |
+| **触发方式** | 群主/管理员将 `@NexusBot` 添加到 Telegram 群组 |
 | **激活流程** | Bot 检测 `chat_member_updated` 事件 → 自动绑定群组 → 发送欢迎消息 |
 | **权限要求** | Bot 需获得群管理员权限（读消息 + 获取成员列表） |
 | **退出机制** | 群主踢出 Bot 即停止服务，自动清理该群数据 |
@@ -845,7 +845,7 @@ Bot 入群后自动采集和持续更新以下信息：
 ```
 Telegram 群成员 (user_id: 12345, username: @alice)
         ↓ Bot 采集
-Costik 会员数据库
+Nexus 会员数据库
         ↓ 群主授权关联
 pallet-entity-member (链上 Member 记录)
         ↓
@@ -863,7 +863,7 @@ pallet-entity-member (链上 Member 记录)
 | 功能 | 说明 | 依赖 |
 |------|------|------|
 | **新成员欢迎** | 可定制欢迎语 + 群规提醒 | `chat_member_updated` |
-| **反垃圾过滤** | 识别广告/诈骗消息并删除 | 复用 `costik-node/rule_engine.rs` 的 `LinkFilterRule` |
+| **反垃圾过滤** | 识别广告/诈骗消息并删除 | 复用 `nexus-node/rule_engine.rs` 的 `LinkFilterRule` |
 | **入群验证** | 简单验证码/问答防机器人 | 复用 `JoinRequestRule` |
 | **关键词提醒** | 群主设定关键词，触发时通知 | 新增 `KeywordAlertRule` |
 | **定时公告** | 定时发送群公告 | 新增定时任务 |
@@ -874,15 +874,15 @@ pallet-entity-member (链上 Member 记录)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                   Costik Official Bot                        │
+│                   Nexus Official Bot                        │
 │                                                             │
 │  ┌──────────────────────────────────────────────────┐       │
-│  │  官方代理服务 (costik-official-agent)             │       │
+│  │  官方代理服务 (nexus-official-agent)             │       │
 │  │                                                  │       │
-│  │  复用 costik-agent 核心:                          │       │
+│  │  复用 nexus-agent 核心:                          │       │
 │  │  ├── webhook.rs      — Webhook 接收              │       │
 │  │  ├── signer.rs       — Ed25519 签名              │       │
-│  │  ├── multicaster.rs  — 多播到 Costik 节点        │       │
+│  │  ├── multicaster.rs  — 多播到 Nexus 节点        │       │
 │  │  ├── executor.rs     — TG API 执行               │       │
 │  │  │                                               │       │
 │  │  新增模块:                                        │       │
@@ -896,7 +896,7 @@ pallet-entity-member (链上 Member 记录)
 │                          │                                   │
 │                          ↓                                   │
 │  ┌──────────────────────────────────────────────────┐       │
-│  │  Costik Node 集群 (共识验证)                      │       │
+│  │  Nexus Node 集群 (共识验证)                      │       │
 │  │  - 管理动作(ban/delete) 需经共识验证              │       │
 │  │  - 数据采集动作无需共识（只读操作）               │       │
 │  └──────────────────────────────────────────────────┘       │
@@ -1007,13 +1007,13 @@ pub struct GroupStats {
 **所有群主永久免费使用**，不设付费墙。Bot 通过在群内定期投放广告信息来覆盖运营成本并盈利。
 
 ```
-群主拉 @CostikBot 入群
+群主拉 @NexusBot 入群
     ↓
 免费获得全部群管功能（会员采集/统计/反垃圾/群管辅助）
     ↓
 Bot 定期在群内发送广告消息（Entity 投放的推广信息）
     ↓
-广告主 (Entity) 付费投放 → Costik 收取广告费
+广告主 (Entity) 付费投放 → Nexus 收取广告费
     ↓
 广告费覆盖运营成本 + 利润
     ↓
@@ -1038,18 +1038,18 @@ Bot 定期在群内发送广告消息（Entity 投放的推广信息）
 ```
 广告主 (Entity)
     ↓
-通过 Costik 广告后台提交广告:
+通过 Nexus 广告后台提交广告:
   - 广告内容（文案 + 链接/图片）
   - 目标群类别（行业/规模/地区/语言）
   - 投放预算（CPM 按千次展示付费）
   - 投放时段
     ↓
-Costik 广告引擎 (链上 + 链下):
+Nexus 广告引擎 (链上 + 链下):
   - 审核广告内容（AI 过滤 + 人工审核）
   - 匹配目标群（群画像 ↔ 广告标签）
   - 排期调度（优先高出价 + 轮换）
     ↓
-@CostikBot 在匹配的群内发送广告
+@NexusBot 在匹配的群内发送广告
     ↓
 记录展示/点击/转化数据 → 反馈给广告主
 ```
@@ -1077,9 +1077,9 @@ Costik 广告引擎 (链上 + 链下):
 │  └─────────────────────────────────────────────────┘     │
 │                          │                                │
 │  ┌─────────────────────────────────────────────────┐     │
-│  │  Layer 2: Costik 共识验证                        │     │
+│  │  Layer 2: Nexus 共识验证                        │     │
 │  │                                                 │     │
-│  │  广告发送指令经 Costik 多节点共识:                │     │
+│  │  广告发送指令经 Nexus 多节点共识:                │     │
 │  │  1. Bot 生成广告发送请求 → 签名 → 多播到 K 节点  │     │
 │  │  2. M/K 节点确认发送合法性（频率/内容/时段）     │     │
 │  │  3. Leader 节点执行发送 → TG API sendMessage     │     │
@@ -1116,7 +1116,7 @@ Costik 广告引擎 (链上 + 链下):
 │  │                                                 │     │
 │  │  点击量 (Click):                                 │     │
 │  │  ├── 广告链接附带 tracking 参数                  │     │
-│  │  │   例: https://entity.example/ad?ref=costik    │     │
+│  │  │   例: https://entity.example/ad?ref=nexus    │     │
 │  │  │       &ad_id=xxx&chat_id=yyy                  │     │
 │  │  └── 通过 redirect 服务统计点击次数              │     │
 │  │                                                 │     │
@@ -1196,7 +1196,7 @@ pub struct AdPerformance {
 
 | 作弊类型 | 检测方式 | 处罚 |
 |---------|---------|------|
-| **伪造投放** — 未发送但报告已发送 | TG API `getMessages` 抽查验证 + Costik 共识 | 广告费退还 + 节点罚没 |
+| **伪造投放** — 未发送但报告已发送 | TG API `getMessages` 抽查验证 + Nexus 共识 | 广告费退还 + 节点罚没 |
 | **重复投放** — 同一广告多次发送 | message_id 唯一性校验 + 频率硬限制 | 自动过滤重复 |
 | **刷量** — 向空群/僵尸群投放 | 群活跃度评分 < 阈值的群不投放 | 不计入展示量 |
 | **群主删广告** — 发送后立即删除 | 监听 `message_deleted` 事件 | 记录删除率，高删除率群降权 |
@@ -1210,10 +1210,10 @@ pub struct AdPerformance {
 按 CPM（千次展示）或 CPC（单次点击）扣费
     ↓
 收入分配:
-    ├── 70% → Costik 平台运营（服务器/开发/审核）
+    ├── 70% → Nexus 平台运营（服务器/开发/审核）
     ├── 20% → 群主激励（吸引更多群主加入）
     │         群主可选择: 提现 / 兑换增值功能 / 转为链上资产
-    └── 10% → Costik 节点运营者（共识验证激励）
+    └── 10% → Nexus 节点运营者（共识验证激励）
 ```
 
 **群主激励**：群主不仅免费用，还能通过接受广告获得收益。群越活跃、成员越多，分到的广告收入越高。
@@ -1246,7 +1246,7 @@ pub struct AdPerformance {
 
 #### Sprint 1: 基础框架（2 周）
 
-- [ ] 新建 `costik-official-agent/` 项目（复用 `costik-agent` 的核心模块）
+- [ ] 新建 `nexus-official-agent/` 项目（复用 `nexus-agent` 的核心模块）
 - [ ] 实现 `GroupRegistry`：Bot 入群/退群自动注册/注销
 - [ ] 实现 `MemberCollector`：通过 `chat_member_updated` + 消息事件采集成员数据
 - [ ] 数据持久化：sled 嵌入式 DB
@@ -1288,13 +1288,13 @@ pub struct AdPerformance {
 
 ```
 ┌─────────────────────┬────────────────────────┬─────────────────────────┐
-│                     │ 自建代理 costik-agent  │ 官方代理 @CostikBot     │
+│                     │ 自建代理 nexus-agent  │ 官方代理 @NexusBot     │
 ├─────────────────────┼────────────────────────┼─────────────────────────┤
 │ 部署方式             │ 群主自行部署 Docker     │ 无需部署，拉入群即用     │
-│ Bot Token           │ 群主自己的 Bot          │ Costik 官方 Bot         │
-│ 数据主权             │ 完全自主（本地存储）    │ Costik 集群托管         │
+│ Bot Token           │ 群主自己的 Bot          │ Nexus 官方 Bot         │
+│ 数据主权             │ 完全自主（本地存储）    │ Nexus 集群托管         │
 │ 费用                │ 服务器成本自付          │ 免费基础版              │
-│ 功能范围             │ 完整 Costik 协议功能    │ 会员采集 + 群管基础功能  │
+│ 功能范围             │ 完整 Nexus 协议功能    │ 会员采集 + 群管基础功能  │
 │ 共识验证             │ 管理动作经多节点验证    │ 管理动作经多节点验证     │
 │ 适用场景             │ Entity 运营方/技术用户  │ 所有群主/快速推广       │
 │ 链上关联             │ 原生支持               │ 付费版支持              │
@@ -1317,18 +1317,18 @@ pub struct AdPerformance {
 
 #### 10.9.1 核心思路
 
-当前 `costik-agent` 自建代理的群主需要自付服务器成本。如果群主**主动接受 Costik 广告网络的广告投放**，就能获得以下优惠/回报：
+当前 `nexus-agent` 自建代理的群主需要自付服务器成本。如果群主**主动接受 Nexus 广告网络的广告投放**，就能获得以下优惠/回报：
 
 ```
 自建代理群主 opt-in 接受广告
     ↓
-Costik 广告网络向该群投放广告（通过群主的 Bot 发送）
+Nexus 广告网络向该群投放广告（通过群主的 Bot 发送）
     ↓
 群主获得优惠:
     ├── 链上服务费折扣（质押费/交易手续费减免）
     ├── 广告收入分成（比官方代理群主更高，因为自付服务器成本）
     ├── 增值功能免费解锁（AI 客服/获客/高级分析）
-    └── Costik 积分/Token 奖励
+    └── Nexus 积分/Token 奖励
 ```
 
 #### 10.9.2 可行性分析
@@ -1339,20 +1339,20 @@ Costik 广告网络向该群投放广告（通过群主的 Bot 发送）
 
 | 组件 | 复用方式 | 改动量 |
 |------|---------|--------|
-| `costik-agent/webhook.rs` | 已有 Webhook 接收 + TG API 发送管道 | 低 — 新增广告消息类型 |
-| `costik-agent/executor.rs` | `TelegramExecutor` 已支持 `sendMessage` | 零改动 |
-| `costik-node/rule_engine.rs` | 扩展 Rule 链增加 `AdDeliveryRule` | 中 — 新增规则 |
+| `nexus-agent/webhook.rs` | 已有 Webhook 接收 + TG API 发送管道 | 低 — 新增广告消息类型 |
+| `nexus-agent/executor.rs` | `TelegramExecutor` 已支持 `sendMessage` | 零改动 |
+| `nexus-node/rule_engine.rs` | 扩展 Rule 链增加 `AdDeliveryRule` | 中 — 新增规则 |
 | `pallet-bot-consensus` | 广告发送经共识验证 | 低 — 复用现有共识流程 |
 | `pallet-bot-group-mgmt` | `log_action(AdDelivery)` 记录投放 | 低 — 新增 ActionType |
 
 **需新增的模块**：
 
 ```rust
-// costik-agent 新增: ad_receiver.rs（概念设计）
+// nexus-agent 新增: ad_receiver.rs（概念设计）
 
-/// 广告接收器 — 自建代理从 Costik 网络拉取匹配的广告
+/// 广告接收器 — 自建代理从 Nexus 网络拉取匹配的广告
 pub struct AdReceiver {
-    /// Costik 广告 API 端点
+    /// Nexus 广告 API 端点
     ad_api_endpoint: String,
     /// 本群的广告配置
     ad_config: AdConfig,
@@ -1374,21 +1374,21 @@ pub struct AdConfig {
 }
 
 impl AdReceiver {
-    /// 定时从 Costik 广告网络拉取匹配的广告
+    /// 定时从 Nexus 广告网络拉取匹配的广告
     async fn poll_ads(&self) -> Vec<AdContent> {
-        // 1. 向 Costik 广告 API 请求匹配广告
+        // 1. 向 Nexus 广告 API 请求匹配广告
         //    带上群画像（规模/类别/语言/活跃度）
         // 2. 过滤：排除屏蔽广告主 + 类别不匹配
         // 3. 返回待投放广告列表
     }
 
-    /// 投放广告（经 Costik 共识后执行）
+    /// 投放广告（经 Nexus 共识后执行）
     async fn deliver_ad(&self, ad: &AdContent) -> AdDeliveryResult {
         // 1. 签名广告发送请求
-        // 2. 多播到 K 个 Costik 节点
+        // 2. 多播到 K 个 Nexus 节点
         // 3. M/K 共识确认 → Leader 回传执行指令
         // 4. TelegramExecutor.send_message(ad.content)
-        // 5. 记录 message_id → 上报 Costik 网络
+        // 5. 记录 message_id → 上报 Nexus 网络
     }
 }
 ```
@@ -1396,26 +1396,26 @@ impl AdReceiver {
 **数据流**：
 
 ```
-Costik 广告网络 (中心化广告库)
+Nexus 广告网络 (中心化广告库)
         │
         │  广告 API: GET /ads/match?group_size=500&lang=zh&category=crypto
         ↓
-costik-agent (AdReceiver)
+nexus-agent (AdReceiver)
         │
-        │  签名 → 多播到 K 个 costik-node
+        │  签名 → 多播到 K 个 nexus-node
         ↓
-Costik 共识验证 (M/K 确认)
+Nexus 共识验证 (M/K 确认)
         │
         │  Leader 回传执行指令
         ↓
-costik-agent (TelegramExecutor)
+nexus-agent (TelegramExecutor)
         │
         │  sendMessage → Telegram 群
         ↓
 记录 message_id → 上报广告网络 → 链上存证
         │
         ↓
-Costik 网络结算 → 优惠/收入到群主链上账户
+Nexus 网络结算 → 优惠/收入到群主链上账户
 ```
 
 ##### 商业合理性：⭐⭐⭐⭐⭐ — 非常高
@@ -1426,7 +1426,7 @@ Costik 网络结算 → 优惠/收入到群主链上账户
 |--------|------|
 | **群主（自建代理）** | 服务器成本被广告收入覆盖甚至盈利；免费解锁高级功能 |
 | **广告主（Entity）** | 接触自建代理群的高价值用户（技术型群主 = 高质量社群） |
-| **Costik 网络** | 扩大广告库存（自建代理群 + 官方代理群）；增加网络参与者 |
+| **Nexus 网络** | 扩大广告库存（自建代理群 + 官方代理群）；增加网络参与者 |
 | **群成员** | 可能看到有价值的广告（经群主筛选 + AI 匹配） |
 
 **关键优势 — 相比官方代理群主的分成更高**：
@@ -1473,11 +1473,11 @@ Costik 网络结算 → 优惠/收入到群主链上账户
 │                                                                  │
 │  官方代理通道:                     自建代理通道:                    │
 │                                                                  │
-│  Costik 广告网络                   Costik 广告网络                 │
+│  Nexus 广告网络                   Nexus 广告网络                 │
 │       │                                 │                        │
 │       ↓                                 ↓                        │
-│  @CostikBot 直接发送               costik-agent 拉取广告          │
-│  (Costik 控制发送)                 (群主控制发送)                  │
+│  @NexusBot 直接发送               nexus-agent 拉取广告          │
+│  (Nexus 控制发送)                 (群主控制发送)                  │
 │       │                                 │                        │
 │       ↓                                 ↓                        │
 │  群主无法控制广告内容              群主可过滤广告类别/广告主        │
@@ -1485,7 +1485,7 @@ Costik 网络结算 → 优惠/收入到群主链上账户
 │       │                                 │                        │
 │       ↓                                 ↓                        │
 │  广告分成 20%                      广告分成 40%                   │
-│  (Costik 承担基础设施)             (群主自付基础设施)              │
+│  (Nexus 承担基础设施)             (群主自付基础设施)              │
 │                                                                  │
 │  两个通道共享同一个广告库、共识验证、链上存证系统                    │
 └──────────────────────────────────────────────────────────────────┘
@@ -1502,7 +1502,7 @@ pallet-bot-consensus 扩展:
               └── bot_id → AdDeliveryCount (投放计数)
 
 结算流程:
-    1. costik-agent 投放广告 → 链上记录 AdDelivery
+    1. nexus-agent 投放广告 → 链上记录 AdDelivery
     2. 每个结算周期（如每周）:
        - 统计 bot_id 的有效投放数
        - 计算广告收入分成
@@ -1513,7 +1513,7 @@ pallet-bot-consensus 扩展:
 ##### 群主操作体验
 
 ```bash
-# 在 costik-agent 配置中 opt-in 广告（环境变量方式）
+# 在 nexus-agent 配置中 opt-in 广告（环境变量方式）
 AD_ENABLED=true
 AD_MAX_DAILY=2
 AD_HOURS="10-22"
@@ -1531,7 +1531,7 @@ AD_BLOCKED_CATEGORIES="gambling,adult"
 | 风险 | 等级 | 缓解措施 |
 |------|------|---------|
 | 群主 opt-in 后立即删除广告消息 | 🟡 中 | 监听 `message_deleted` 事件；连续删除 → 降低分成/暂停 |
-| 群主伪造投放数据 | 🟡 中 | 所有投放经 Costik M/K 共识验证 + `message_id` 链上存证 |
+| 群主伪造投放数据 | 🟡 中 | 所有投放经 Nexus M/K 共识验证 + `message_id` 链上存证 |
 | 广告内容不适合群主社群 | 🟢 低 | 群主可设置类别过滤 + 屏蔽特定广告主 |
 | 群成员反感广告 → 退群 | 🟡 中 | 限制频率（最多 5 条/天）+ 群主自主控制 |
 | 自建代理群数量少导致广告库存不足 | 🟡 中 | 与官方代理共享广告库；自建代理群是高价值补充 |
@@ -1555,7 +1555,7 @@ AD_BLOCKED_CATEGORIES="gambling,adult"
 官方代理: 零门槛 + 免费 + 广告换功能 → 快速增长用户量
 自建代理: 高自主权 + 高分成 + 广告换优惠 → 服务高价值群主
     ↓
-共同构成 Costik 广告网络的供给侧
+共同构成 Nexus 广告网络的供给侧
     ↓
 广告主只需在一个后台投放 → 同时触达两类群
 ```
@@ -1564,9 +1564,9 @@ AD_BLOCKED_CATEGORIES="gambling,adult"
 
 建议在 **Sprint 2（统计与管理）** 之后、**Sprint 3（链上关联）** 中一并实现：
 
-- [ ] costik-agent 新增 `AdReceiver` 模块 + `AdConfig` 环境变量
-- [ ] costik-agent 新增 `/ad_optin`、`/ad_optout`、`/ad_earnings` 命令
-- [ ] costik-node 规则引擎新增 `AdDeliveryRule`
+- [ ] nexus-agent 新增 `AdReceiver` 模块 + `AdConfig` 环境变量
+- [ ] nexus-agent 新增 `/ad_optin`、`/ad_optout`、`/ad_earnings` 命令
+- [ ] nexus-node 规则引擎新增 `AdDeliveryRule`
 - [ ] `pallet-bot-consensus` 新增 `AdOptInConfig` 存储 + 结算逻辑
 - [ ] 广告 API 后端（链下服务）：广告库 + 匹配 + 分发
 - [ ] 链上结算：每周自动计算分成 + 转账
@@ -1585,7 +1585,7 @@ AD_BLOCKED_CATEGORIES="gambling,adult"
 4. **自动学习** — 从群主/管理员的回复中持续优化知识库
 
 **不做什么**：
-- 不代替群管功能（反垃圾/入群验证已由 `costik-node/rule_engine.rs` 处理）
+- 不代替群管功能（反垃圾/入群验证已由 `nexus-node/rule_engine.rs` 处理）
 - 不主动群发营销（那是 Phase 5 AI 主动获客的范畴）
 - 不处理涉及资金操作的请求（仅展示信息，操作需用户自行完成）
 
@@ -1596,7 +1596,7 @@ AD_BLOCKED_CATEGORIES="gambling,adult"
         │
         ↓
 ┌───────────────────────────────────────────────────────────────┐
-│ Step 1: costik-agent 接收 Telegram Webhook                    │
+│ Step 1: nexus-agent 接收 Telegram Webhook                    │
 │                                                               │
 │ webhook.rs: POST /webhook                                     │
 │   → 验证 secret → 解析 TelegramUpdate → Ed25519 签名          │
@@ -1605,7 +1605,7 @@ AD_BLOCKED_CATEGORIES="gambling,adult"
                     │
                     ↓
 ┌───────────────────────────────────────────────────────────────┐
-│ Step 2: costik-node 接收 + 四层验证                            │
+│ Step 2: nexus-node 接收 + 四层验证                            │
 │                                                               │
 │ api.rs: POST /v1/message                                      │
 │   → Ed25519 签名验证 → Bot 活跃检查 → 公钥匹配 → 目标节点检查 │
@@ -1655,7 +1655,7 @@ AD_BLOCKED_CATEGORIES="gambling,adult"
 ┌───────────────────────────────────────────────────────────────┐
 │ Step 6: 回传 Agent 执行 (executor.rs)                          │
 │                                                               │
-│ Leader → POST /v1/execute → costik-agent                      │
+│ Leader → POST /v1/execute → nexus-agent                      │
 │ TelegramExecutor.call_tg_api("sendMessage", {                 │
 │   chat_id, text, reply_to_message_id                          │
 │ })                                                            │
@@ -1664,15 +1664,15 @@ AD_BLOCKED_CATEGORIES="gambling,adult"
 
 最终效果:
   Bot 在群内回复: "套餐 A 价格为 $9.99/月，支持同时 5 台设备连接。
-  详情请查看: https://shop.example.com/product/123?ref=costik_ai"
+  详情请查看: https://shop.example.com/product/123?ref=nexus_ai"
 ```
 
 ### 11.3 核心模块设计
 
-#### 11.3.1 AiCustomerServiceRule（costik-node 规则引擎扩展）
+#### 11.3.1 AiCustomerServiceRule（nexus-node 规则引擎扩展）
 
 ```rust
-// costik-node/src/rule_engine.rs 新增规则
+// nexus-node/src/rule_engine.rs 新增规则
 
 /// AI 客服规则 — 在 LinkFilterRule 之后、DefaultRule 之前插入
 pub struct AiCustomerServiceRule {
@@ -1796,7 +1796,7 @@ impl AiCustomerServiceRule {
 #### 11.3.2 AI Handler（Leader 节点新增模块）
 
 ```rust
-// costik-node/src/ai_handler.rs（新建）
+// nexus-node/src/ai_handler.rs（新建）
 
 use crate::knowledge_base::KnowledgeBase;
 
@@ -1960,7 +1960,7 @@ impl AiHandler {
 #### 11.3.3 知识库管理器
 
 ```rust
-// costik-node/src/knowledge_base.rs（新建）
+// nexus-node/src/knowledge_base.rs（新建）
 
 /// 知识库管理器
 ///
@@ -2086,7 +2086,7 @@ impl KnowledgeManager {
 #### 11.3.4 安全过滤器
 
 ```rust
-// costik-node/src/safety_filter.rs（新建）
+// nexus-node/src/safety_filter.rs（新建）
 
 /// AI 回复安全过滤器
 pub struct SafetyFilter {
@@ -2131,7 +2131,7 @@ impl SafetyFilter {
 #### 11.3.5 对话历史管理
 
 ```rust
-// costik-node/src/conversation_cache.rs（新建）
+// nexus-node/src/conversation_cache.rs（新建）
 
 /// 对话缓存 — 维护每个用户的最近对话上下文
 ///
@@ -2289,7 +2289,7 @@ node-operator/src/llm_client.rs 已有:
 
 复用方式:
 ├── 抽取 llm_client.rs 为共享 crate: cosmos-llm-client
-├── costik-node 依赖 cosmos-llm-client
+├── nexus-node 依赖 cosmos-llm-client
 └── 三级模型同时初始化，按路由选择
 ```
 
@@ -2479,7 +2479,7 @@ referral_code = "ai_cs_{entity_id}"
 | **代理/分销群** | B 端合作 | 佣金政策、素材分发、培训 | "二级代理分成比例是多少？" |
 | **技术支持群** | 开发者 | API 文档、接入指南、Bug 反馈 | "Webhook 回调格式是什么？" |
 
-**核心矛盾**：同一个 Bot（`costik-agent`）+ 同一套 LLM 调用链路，需要在不同群里扮演不同的"角色"，回答完全不同领域的问题。
+**核心矛盾**：同一个 Bot（`nexus-agent`）+ 同一套 LLM 调用链路，需要在不同群里扮演不同的"角色"，回答完全不同领域的问题。
 
 #### 11.11.2 可行性分析
 
@@ -2602,9 +2602,9 @@ LLM 天然支持通过 system prompt 切换角色，**无需多个模型实例�
 
 ```
 方案 A（不可行）: 每种角色一个 Bot
-  售前咨询群 → @entity_presales_bot → costik-agent-1
-  售后服务群 → @entity_aftersales_bot → costik-agent-2
-  社区群     → @entity_community_bot → costik-agent-3
+  售前咨询群 → @entity_presales_bot → nexus-agent-1
+  售后服务群 → @entity_aftersales_bot → nexus-agent-2
+  社区群     → @entity_community_bot → nexus-agent-3
   ❌ 群主需管理 3 个 Bot，注册 3 次，运行 3 个 Agent
 
 方案 B（推荐）: 一个 Bot + 群级角色配置
@@ -2990,7 +2990,7 @@ fn filter_qa(qa: &HistoricalQA, current_role: &GroupCsRole) -> bool {
 
 #### 11.12.1 问题
 
-11.5 节设计的 LLM 调用策略依赖中心化 API（Claude / OpenAI / DeepSeek）。作为一个去中心化项目，Costik 能否调用其他**区块链 AI 项目**提供的去中心化大模型推理服务？
+11.5 节设计的 LLM 调用策略依赖中心化 API（Claude / OpenAI / DeepSeek）。作为一个去中心化项目，Nexus 能否调用其他**区块链 AI 项目**提供的去中心化大模型推理服务？
 
 #### 11.12.2 当前区块链 AI 推理项目全景
 
@@ -3065,7 +3065,7 @@ impl LlmClient for HyperbolicClient {
 - **零协议适配** — OpenAI 兼容 API，无需学习新 SDK
 - **模型丰富** — 支持 Llama 3.1 405B、Mixtral、DeepSeek 等开源模型
 - **价格优势** — 去中心化 GPU 供给，比 OpenAI 便宜 50%~80%
-- **去中心化叙事** — Costik 使用去中心化 AI 基础设施，品牌契合
+- **去中心化叙事** — Nexus 使用去中心化 AI 基础设施，品牌契合
 
 **劣势**：
 - 延迟可能比中心化 API 高 200-500ms（可接受，客服场景非实时）
@@ -3079,7 +3079,7 @@ Bittensor 基于 Substrate 构建（与 Cosmos 同为 Substrate 生态），技�
 **调用方式**：
 
 ```
-Costik Leader Node
+Nexus Leader Node
     │
     ↓ (HTTP/WebSocket)
 Bittensor Validator Node (Subnet 1: Text Prompting)
@@ -3149,7 +3149,7 @@ impl LlmClient for BittensorClient {
 Ritual 的核心价值是**可验证推理**（Verifiable Inference），每次 LLM 调用都可以产生密码学证明。
 
 ```
-Costik Leader Node
+Nexus Leader Node
     │
     ↓ (Infernet SDK / REST)
 Ritual Infernet Node
@@ -3158,10 +3158,10 @@ Ritual Infernet Node
 返回: { result: "...", proof: "0x..." }
 ```
 
-**对 Costik 的潜在价值**（远期可选增强）：
+**对 Nexus 的潜在价值**（远期可选增强）：
 
 ```
-当前 Costik 信任模型:
+当前 Nexus 信任模型:
   Leader Node 执行 AI 推理 → 返回结果 → 结果质量由市场竞争保障
   (Entity Owner 通过用户评价和切换 Node 来淘汰劣质服务)
 
@@ -3187,7 +3187,7 @@ Ritual Infernet Node
 不调用别人的 API，而是在去中心化 GPU 市场上**租用 GPU 自己部署模型**。
 
 ```
-Costik Node Operator
+Nexus Node Operator
     │ (租用 Akash/io.net GPU)
     ↓
 自己部署的 Llama 3.1 70B / DeepSeek V3 实例
@@ -3210,7 +3210,7 @@ Costik Node Operator
 #### 11.12.4 推荐策略：分层混合架构
 
 ```
-                    Costik AI 客服 LLM 调用策略
+                    Nexus AI 客服 LLM 调用策略
                     
     ┌──────────────────────────────────────────────────────┐
     │                   LlmRouter                          │
@@ -3363,7 +3363,7 @@ impl LlmRouter {
 
 #### 11.12.6 跨链代币支付
 
-使用去中心化 AI 服务需要用对应代币支付。Costik 如何处理？
+使用去中心化 AI 服务需要用对应代币支付。Nexus 如何处理？
 
 ```
 方案 A: Node Operator 自行管理多币种（推荐初期）
@@ -3373,7 +3373,7 @@ impl LlmRouter {
 
 方案 B: 链上代理支付（中期）
   - Entity Owner 用 COS 支付 AI 服务费
-  - Costik 链上 Oracle 获取 COS/TAO 汇率
+  - Nexus 链上 Oracle 获取 COS/TAO 汇率
   - 自动 swap → 支付给 Bittensor/Hyperbolic
   - 需要跨链桥或 DEX 集成
 
@@ -3396,7 +3396,7 @@ node-operator/
     LlmProvider enum ←────────  新增 Hyperbolic/Bittensor/Ritual 枚举值
     (新增) LlmRouter ←────────  智能路由 + fallback + 熔断
 
-costik-node/
+nexus-node/
   src/leader.rs
     AiHandler ←───────────────  调用 LlmRouter 而非单个 client
     (新增) RequestHint ←──────  标注请求特征（简单/复杂/需验证）
@@ -3451,21 +3451,21 @@ Phase 4 (远期):    + Ritual 可验证推理        → 信任升级，5 天集
 
 **建议**：Phase 2 首先集成 Hyperbolic（1 天工作量），作为 L1 廉价模型的替代。这既能立刻降低成本，又能在市场推广中宣传"去中心化 AI 基础设施"。
 
-### 11.13 Costik Agent 群主本地代理 — 自保管 Key 的合理性与可行性分析
+### 11.13 Nexus Agent 群主本地代理 — 自保管 Key 的合理性与可行性分析
 
 #### 11.13.1 问题定义
 
-Costik 架构的核心设计是：**每个群主自己运行 `costik-agent`，在本地保管所有敏感 Key**。这与传统 SaaS 模式（平台方统一托管所有 Bot）形成鲜明对比。
+Nexus 架构的核心设计是：**每个群主自己运行 `nexus-agent`，在本地保管所有敏感 Key**。这与传统 SaaS 模式（平台方统一托管所有 Bot）形成鲜明对比。
 
 ```
-传统 SaaS 模式（中心化）:              Costik 模式（群主自保管）:
+传统 SaaS 模式（中心化）:              Nexus 模式（群主自保管）:
 
   群主A ──→ ┌──────────────┐            群主A ──→ 自己的 Agent A（本地/VPS）
   群主B ──→ │  平台服务器    │            群主B ──→ 自己的 Agent B（本地/VPS）
   群主C ──→ │ 托管所有Bot   │            群主C ──→ 自己的 Agent C（本地/VPS）
              │              │                        │        │        │
              │ 所有BOT_TOKEN │                        ↓        ↓        ↓
-             │ 集中在这里！   │               costik-node 去中心化共识网络
+             │ 集中在这里！   │               nexus-node 去中心化共识网络
              └──────────────┘
              
   风险: 单点泄露 = 全部沦陷       风险: 每个 Agent 独立，互不影响
@@ -3475,17 +3475,17 @@ Costik 架构的核心设计是：**每个群主自己运行 `costik-agent`，�
 
 #### 11.13.2 群主需要保管哪些 Key
 
-基于 `costik-agent/src/config.rs` 和 `costik-agent/src/signer.rs` 的实际实现：
+基于 `nexus-agent/src/config.rs` 和 `nexus-agent/src/signer.rs` 的实际实现：
 
 | Key | 来源 | 敏感度 | 泄露后果 | 保管位置 |
 |-----|------|--------|---------|---------|
 | **BOT_TOKEN** | Telegram @BotFather 创建时获得 | 🔴 极高 | 攻击者可完全控制 Bot：发消息、踢人、读历史 | `.env` 环境变量 |
-| **Ed25519 私钥** | `costik-agent` 首次启动自动生成 | 🔴 极高 | 可伪造签名消息，欺骗共识网络 | `$DATA_DIR/agent.key` (权限 600) |
+| **Ed25519 私钥** | `nexus-agent` 首次启动自动生成 | 🔴 极高 | 可伪造签名消息，欺骗共识网络 | `$DATA_DIR/agent.key` (权限 600) |
 | **WEBHOOK_SECRET** | 自动生成或手动设置 | 🟡 中等 | 可伪造 Telegram Webhook 请求 | `.env` 环境变量 |
 | **LLM API Key** | （可选）群主自有的 Hyperbolic/OpenAI Key | 🟠 较高 | 攻击者消耗群主的 LLM 额度 | `.env` 环境变量或内存 |
 
 ```
-costik-agent 本地保管的 Key 清单:
+nexus-agent 本地保管的 Key 清单:
 
 $DATA_DIR/
 ├── agent.key          ← Ed25519 私钥 (32 bytes, chmod 600)
@@ -3506,13 +3506,13 @@ $DATA_DIR/
 ```bash
 # 群主只需一条 Docker 命令：
 docker run -d \
-  --name my-costik-agent \
+  --name my-nexus-agent \
   -p 8443:8443 \
-  -v costik-data:/data \
+  -v nexus-data:/data \
   -e BOT_TOKEN="123456:ABC-DEF..." \
   -e WEBHOOK_URL="https://my-server.com:8443" \
   -e NODES="node1@http://n1:8080,node2@http://n2:8080,node3@http://n3:8080" \
-  costik-agent
+  nexus-agent
 
 # 首次启动自动完成:
 # ✅ 生成 Ed25519 密钥对 → /data/agent.key
@@ -3524,12 +3524,12 @@ docker run -d \
 对比行业标准：
 - **Telegram Bot** 本身就设计为群主自己创建、自己持有 Token
 - **Matterbridge / Heisenbridge** 等开源桥接也是用户自部署
-- **Mastodon 实例** 的运营模式更重（数据库 + 存储），costik-agent 只需要 <100MB 内存
+- **Mastodon 实例** 的运营模式更重（数据库 + 存储），nexus-agent 只需要 <100MB 内存
 
 **A2. Key 自动生成，群主无需懂密码学**
 
 ```rust
-// costik-agent/src/signer.rs — 首次启动自动生成
+// nexus-agent/src/signer.rs — 首次启动自动生成
 pub fn load_or_generate(data_dir: &str) -> anyhow::Result<Self> {
     let key_path = Path::new(data_dir).join("agent.key");
     if key_path.exists() {
@@ -3558,7 +3558,7 @@ pub fn load_or_generate(data_dir: &str) -> anyhow::Result<Self> {
 **A3. 运维成本极低**
 
 ```
-costik-agent 资源消耗:
+nexus-agent 资源消耗:
 
 CPU:    < 1% (仅在收到 Webhook 时活跃)
 内存:   ~20MB (Rust 编译，无 GC)
@@ -3584,7 +3584,7 @@ CPU:    < 1% (仅在收到 Webhook 时活跃)
 中心化 SaaS 被攻破:
   攻击者获得 1 台服务器 → 控制 所有 Bot (数千/数万群)
   
-Costik Agent 被攻破:
+Nexus Agent 被攻破:
   攻击者获得群主A的 VPS → 控制 群主A的 1 个 Bot (1~几个群)
   群主B、C 完全不受影响
 ```
@@ -3592,7 +3592,7 @@ Costik Agent 被攻破:
 **B2. 已有的多层安全机制**
 
 ```
-                    costik-agent 安全层次
+                    nexus-agent 安全层次
 
 Layer 1: Telegram Webhook 验证
   ┌─────────────────────────────────────────────────┐
@@ -3609,10 +3609,10 @@ Layer 2: Ed25519 消息签名
 Layer 3: 序列号防重放
   ┌─────────────────────────────────────────────────┐
   │ sequence 原子递增 + 持久化                       │
-  │ → costik-node 有 ±10 容忍窗口 (SequenceTracker) │
+  │ → nexus-node 有 ±10 容忍窗口 (SequenceTracker) │
   └──────────────────────────┬──────────────────────┘
                              ↓
-Layer 4: costik-node 4 层验证
+Layer 4: nexus-node 4 层验证
   ┌─────────────────────────────────────────────────┐
   │ ① Ed25519 签名验证                              │
   │ ② Bot 活跃状态检查 (链上 pallet-bot-registry)   │
@@ -3638,7 +3638,7 @@ Layer 5: 多节点共识
 ```
 BOT_TOKEN 泄露时的攻击面对比:
 
-                    中心化 SaaS        Costik Agent
+                    中心化 SaaS        Nexus Agent
 能操控 Bot？          ✅ 能               ✅ 能 (相同)
 操控有链上记录？       N/A (无链)         ❌ 无 (因为不走共识)
 影响其他群主？         ✅ 可能             ❌ 不可能
@@ -3649,7 +3649,7 @@ BOT_TOKEN 泄露时的攻击面对比:
 
 ```
 agent.key 泄露 → 攻击者可以:
-  1. 伪造 SignedMessage → 欺骗 costik-node
+  1. 伪造 SignedMessage → 欺骗 nexus-node
   2. 触发错误的共识决策
   
 缓解:
@@ -3667,10 +3667,10 @@ agent.key 泄露 → 攻击者可以:
 
 ##### C. 运营可行性 — ✅ 对目标用户群完全可行
 
-**C1. Costik 的目标用户画像**
+**C1. Nexus 的目标用户画像**
 
 ```
-Costik 的目标用户不是普通消费者，而是:
+Nexus 的目标用户不是普通消费者，而是:
   
   ┌─────────────────────────────────────────────────┐
   │ Entity Owner（实体主） — 商家/社群运营者           │
@@ -3692,9 +3692,9 @@ Costik 的目标用户不是普通消费者，而是:
 | **WooCommerce** | 自部署 | 租 VPS → 装 WordPress → 装插件 | 技术商家 |
 | **Matterbridge** | 自部署 | 编译 → 配置 → 运行 | 技术用户 |
 | **Mastodon** | 自部署 | 租 VPS → docker-compose → 运维 | 社区运营者 |
-| **Costik Agent** | 自部署 | 租 VPS → docker run → 注册公钥 | Entity Owner |
+| **Nexus Agent** | 自部署 | 租 VPS → docker run → 注册公钥 | Entity Owner |
 
-Costik Agent 的部署复杂度**低于 Mastodon、低于 WooCommerce**，与 Matterbridge 相当。目标用户完全有能力运营。
+Nexus Agent 的部署复杂度**低于 Mastodon、低于 WooCommerce**，与 Matterbridge 相当。目标用户完全有能力运营。
 
 ##### D. 经济可行性 — ✅ 成本可控
 
@@ -3729,13 +3729,13 @@ Telegram 的设计哲学:
   - Webhook URL 由群主自己的服务器接收
   - Telegram 不托管 Bot 逻辑
 
-Costik 的设计哲学:
+Nexus 的设计哲学:
   - BOT_TOKEN 由群主自己保管           ← 与 TG 一致
   - Webhook 由群主本地 Agent 接收       ← 与 TG 一致
   - 消息处理逻辑由去中心化共识网络执行  ← 在 TG 基础上增强
 ```
 
-Costik Agent 本质上就是**群主本来就需要运行的 Bot 服务器**，只是多了 Ed25519 签名 + 共识网络多播。群主的额外负担接近于零。
+Nexus Agent 本质上就是**群主本来就需要运行的 Bot 服务器**，只是多了 Ed25519 签名 + 共识网络多播。群主的额外负担接近于零。
 
 ##### R2. "不信任平台方"是 Web3 核心价值
 
@@ -3748,9 +3748,9 @@ Costik Agent 本质上就是**群主本来就需要运行的 Bot 服务器**，�
   4. 平台方涨价 → 你没有替代方案
   5. 平台方数据泄露 → 所有消息被第三方获取
 
-Costik 自保管:
+Nexus 自保管:
 
-  1. Costik 团队跑路 → 你的 Agent 继续运行（只要 Node 在）
+  1. Nexus 团队跑路 → 你的 Agent 继续运行（只要 Node 在）
   2. 你的 Agent 被攻破 → 只影响你一个
   3. 无人可审查你的 Bot → 主权在你
   4. 成本透明（VPS + LLM）→ 不受单方定价
@@ -3760,7 +3760,7 @@ Costik 自保管:
 ##### R3. Key 分离设计合理
 
 ```
-Costik 的密钥分离架构:
+Nexus 的密钥分离架构:
 
   ┌──────────────────────────────────────────────────────────────────┐
   │                         角色分离                                  │
@@ -3813,14 +3813,14 @@ Costik 的密钥分离架构:
 
 ```bash
 # 模式 2: 官方一键部署脚本（推荐起步）
-curl -sSL https://install.costik.network | bash -s -- \
+curl -sSL https://install.nexus.network | bash -s -- \
   --bot-token "123456:ABC-DEF..." \
-  --domain "my-bot.costik.network" \
+  --domain "my-bot.nexus.network" \
   --auto-ssl
 
 # 脚本自动完成:
 # ✅ 安装 Docker
-# ✅ 拉取 costik-agent 镜像
+# ✅ 拉取 nexus-agent 镜像
 # ✅ 配置 Caddy 反向代理 + 自动 HTTPS
 # ✅ 启动 Agent
 # ✅ 输出公钥 + 链上注册指引
@@ -3850,5 +3850,5 @@ curl -sSL https://install.costik.network | bash -s -- \
 5. **哲学合理** — 与 Telegram Bot 设计一致，与 Web3 "Not Your Keys, Not Your Bot" 理念一致
 6. **密钥分离** — 群主持有 Bot 身份 Key，Node 持有 AI 能力 Key，链上只有公钥，无单点故障
 
-**一句话总结**：就像 Bitcoin 钱包让用户自保管私钥一样，Costik Agent 让群主自保管 Bot Token —— 这不是负担，而是主权。
+**一句话总结**：就像 Bitcoin 钱包让用户自保管私钥一样，Nexus Agent 让群主自保管 Bot Token —— 这不是负担，而是主权。
 

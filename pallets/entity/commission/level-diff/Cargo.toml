@@ -2,7 +2,7 @@
 name = "pallet-commission-level-diff"
 version = "0.1.0"
 description = "Commission level-diff plugin - grade differential commission"
-authors = ["COSMOS Team"]
+authors = ["NEXUS Team"]
 edition = "2021"
 license = "MIT"
 

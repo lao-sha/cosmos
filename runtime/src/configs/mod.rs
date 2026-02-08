@@ -277,8 +277,8 @@ impl pallet_trading_common::PricingProvider<Balance> for TradingPricingProvider 
 		}
 	}
 	
-	fn report_swap_order(timestamp: u64, price_usdt: u64, cos_qty: u128) -> sp_runtime::DispatchResult {
-		pallet_trading_pricing::Pallet::<Runtime>::add_swap_order(timestamp, price_usdt, cos_qty)
+	fn report_p2p_trade(timestamp: u64, price_usdt: u64, nxs_qty: u128) -> sp_runtime::DispatchResult {
+		pallet_trading_pricing::Pallet::<Runtime>::add_sell_trade(timestamp, price_usdt, nxs_qty)
 	}
 }
 
@@ -301,12 +301,12 @@ impl pallet_trading_maker::Config for Runtime {
 	type TreasuryAccount = TreasuryAccountId; // 国库账户
 }
 
-// -------------------- Bridge (桥接服务) --------------------
+// -------------------- P2P Trading (统一 Buy + Sell，替代 OTC + Swap) --------------------
 
-/// Bridge Maker 接口适配器
-pub struct BridgeMakerAdapter;
+/// P2P Maker 接口适配器（复用 OTC 的 OtcMakerAdapter）
+pub struct P2pMakerAdapter;
 
-impl pallet_trading_common::MakerInterface<AccountId, Balance> for BridgeMakerAdapter {
+impl pallet_trading_common::MakerInterface<AccountId, Balance> for P2pMakerAdapter {
 	fn get_maker_application(maker_id: u64) -> Option<pallet_trading_common::MakerApplicationInfo<AccountId, Balance>> {
 		pallet_trading_maker::Pallet::<Runtime>::maker_applications(maker_id).map(|app| {
 			pallet_trading_common::MakerApplicationInfo {
@@ -346,10 +346,10 @@ impl pallet_trading_common::MakerInterface<AccountId, Balance> for BridgeMakerAd
 	}
 }
 
-/// Bridge Credit 接口适配器
-pub struct BridgeCreditAdapter;
+/// P2P Maker Credit 适配器
+pub struct P2pMakerCreditAdapter;
 
-impl pallet_trading_common::MakerCreditInterface for BridgeCreditAdapter {
+impl pallet_trading_common::MakerCreditInterface for P2pMakerCreditAdapter {
 	fn record_maker_order_completed(maker_id: u64, order_id: u64, response_time_seconds: u32) -> sp_runtime::DispatchResult {
 		pallet_trading_credit::Pallet::<Runtime>::record_maker_order_completed(maker_id, order_id, response_time_seconds)
 	}
@@ -363,104 +363,12 @@ impl pallet_trading_common::MakerCreditInterface for BridgeCreditAdapter {
 	}
 }
 
-impl pallet_trading_swap::Config for Runtime {
-	type Currency = Balances;
-	type Escrow = pallet_escrow::Pallet<Runtime>;
-	type Pricing = TradingPricingProvider;
-	type MakerPallet = BridgeMakerAdapter;
-	type Credit = BridgeCreditAdapter;
-	type OcwSwapTimeoutBlocks = ConstU32<{ 1 * HOURS }>; // OCW 1小时超时
-	// 🆕 2026-01-20: TRC20 验证超时时间（2小时）
-	type VerificationTimeoutBlocks = ConstU32<{ 2 * HOURS }>;
-	// 🆕 2026-01-20: 验证权限（理事会 2/3 多数或 Root）
-	type VerificationOrigin = EitherOfDiverse<
-		EnsureRoot<AccountId>,
-		pallet_collective::EnsureProportionAtLeast<AccountId, pallet_collective::Instance1, 2, 3>,
-	>;
-	type MinSwapAmount = ConstU128<{ 10 * UNIT }>; // 最小兑换10 COS
-	// 🆕 存储膨胀防护：TRON 交易哈希 TTL（30天 = 432000 区块 @6秒/块）
-	type TxHashTtlBlocks = ConstU32<{ 30 * DAYS }>;
-	// 🆕 2026-02-04: 验证确认奖励（激励任何人调用 claim_verification_reward）
-	// 0.1 COS = 100_000_000_000 单位 (12位精度)
-	type VerificationReward = ConstU128<{ UNIT / 10 }>;
-	// 🆕 2026-02-04: Swap 手续费率 10 基点 = 0.1%
-	type SwapFeeRateBps = ConstU32<10>;
-	// 🆕 2026-02-04: 最低手续费 0.1 COS，确保小额交易也能覆盖验证奖励
-	type MinSwapFee = ConstU128<{ UNIT / 10 }>;
-	type WeightInfo = ();
-	// 🆕 P3: 仲裁证据 CID 锁定管理器（预留，待 submit_evidence 函数实现后启用）
-	type CidLockManager = pallet_storage_service::Pallet<Runtime>;
-}
+/// P2P Identity Provider — 暂时跳过 KYC 验证（复用 NullIdentityProvider 逻辑）
+pub struct P2pIdentityProvider;
 
-// -------------------- OTC (场外交易) --------------------
-
-/// OTC Maker 接口适配器
-pub struct OtcMakerAdapter;
-
-impl pallet_trading_common::MakerInterface<AccountId, Balance> for OtcMakerAdapter {
-	fn get_maker_application(maker_id: u64) -> Option<pallet_trading_common::MakerApplicationInfo<AccountId, Balance>> {
-		pallet_trading_maker::Pallet::<Runtime>::maker_applications(maker_id).map(|app| {
-			pallet_trading_common::MakerApplicationInfo {
-				account: app.owner,
-				tron_address: app.tron_address,
-				is_active: app.status == pallet_trading_maker::pallet::ApplicationStatus::Active,
-				_phantom: core::marker::PhantomData,
-			}
-		})
-	}
-
-	fn is_maker_active(maker_id: u64) -> bool {
-		pallet_trading_maker::Pallet::<Runtime>::is_maker_active(maker_id)
-	}
-
-	fn get_maker_id(who: &AccountId) -> Option<u64> {
-		pallet_trading_maker::Pallet::<Runtime>::get_maker_id(who)
-	}
-
-	fn get_deposit_usd_value(maker_id: u64) -> Result<u64, sp_runtime::DispatchError> {
-		pallet_trading_maker::Pallet::<Runtime>::get_deposit_usd_value(maker_id)
-	}
-
-	fn slash_deposit_for_severely_underpaid(
-		maker_id: u64,
-		swap_id: u64,
-		expected_usdt: u64,
-		actual_usdt: u64,
-		_penalty_rate_bps: u32,
-	) -> Result<u64, sp_runtime::DispatchError> {
-		let penalty_type = pallet_trading_maker::pallet::PenaltyType::SwapSeverelyUnderpaid {
-			swap_id,
-			expected_usdt,
-			actual_usdt,
-		};
-		pallet_trading_maker::Pallet::<Runtime>::deduct_maker_deposit(maker_id, penalty_type, None)
-	}
-}
-
-/// OTC Maker Credit 接口适配器
-pub struct OtcMakerCreditAdapter;
-
-impl pallet_trading_common::MakerCreditInterface for OtcMakerCreditAdapter {
-	fn record_maker_order_completed(maker_id: u64, order_id: u64, response_time_seconds: u32) -> sp_runtime::DispatchResult {
-		pallet_trading_credit::Pallet::<Runtime>::record_maker_order_completed(maker_id, order_id, response_time_seconds)
-	}
-
-	fn record_maker_order_timeout(maker_id: u64, order_id: u64) -> sp_runtime::DispatchResult {
-		pallet_trading_credit::Pallet::<Runtime>::record_maker_order_timeout(maker_id, order_id)
-	}
-
-	fn record_maker_dispute_result(maker_id: u64, order_id: u64, maker_win: bool) -> sp_runtime::DispatchResult {
-		pallet_trading_credit::Pallet::<Runtime>::record_maker_dispute_result(maker_id, order_id, maker_win)
-	}
-}
-
-/// OTC Identity Provider - 暂时跳过 KYC 验证
-pub struct NullIdentityProvider;
-
-impl pallet_trading_otc::pallet::IdentityVerificationProvider<AccountId> for NullIdentityProvider {
+impl pallet_trading_p2p::pallet::IdentityVerificationProvider<AccountId> for P2pIdentityProvider {
 	fn get_highest_judgement_priority(_who: &AccountId) -> Option<u8> {
-		// 暂时返回 KnownGood 等级，跳过 KYC 验证
-		Some(3)
+		Some(3) // KnownGood
 	}
 
 	fn has_problematic_judgement(_who: &AccountId) -> bool {
@@ -468,38 +376,48 @@ impl pallet_trading_otc::pallet::IdentityVerificationProvider<AccountId> for Nul
 	}
 }
 
-impl pallet_trading_otc::Config for Runtime {
+impl pallet_trading_p2p::Config for Runtime {
 	type Currency = Balances;
 	type Timestamp = TimestampProvider;
 	type Escrow = pallet_escrow::Pallet<Runtime>;
-	type Credit = pallet_trading_credit::Pallet<Runtime>;
-	type MakerCredit = OtcMakerCreditAdapter;
+	type BuyerCredit = pallet_trading_credit::Pallet<Runtime>;
+	type MakerCredit = P2pMakerCreditAdapter;
 	type Pricing = TradingPricingProvider;
-	type MakerPallet = OtcMakerAdapter;
+	type MakerPallet = P2pMakerAdapter;
 	type CommitteeOrigin = frame_system::EnsureRoot<AccountId>;
-	type IdentityProvider = NullIdentityProvider;
-	type OrderTimeout = ConstU64<3600000>; // 1小时（毫秒）
+	type IdentityProvider = P2pIdentityProvider;
+	type VerificationOrigin = EitherOfDiverse<
+		EnsureRoot<AccountId>,
+		pallet_collective::EnsureProportionAtLeast<AccountId, pallet_collective::Instance1, 2, 3>,
+	>;
+	type ArbitratorOrigin = frame_system::EnsureRoot<AccountId>;
+	type CidLockManager = pallet_storage_service::Pallet<Runtime>;
+	type WeightInfo = ();
+	// Buy-side 常量
+	type BuyOrderTimeout = ConstU64<3600000>; // 1小时（毫秒）
 	type EvidenceWindow = ConstU64<86400000>; // 24小时（毫秒）
-	type FirstPurchaseUsdValue = ConstU128<10_000_000>; // 10 USD (精度 10^6)
-	type MinFirstPurchaseCosAmount = ConstU128<{ 1 * UNIT }>; // 最小1 COS (防止汇率过高)
-	type MaxFirstPurchaseCosAmount = ConstU128<{ 100_000_000 * UNIT }>; // 最大1亿COS (防止汇率异常低)
+	type FirstPurchaseUsdValue = ConstU128<10_000_000>; // 10 USD
+	type MinFirstPurchaseCosAmount = ConstU128<{ 1 * UNIT }>;
+	type MaxFirstPurchaseCosAmount = ConstU128<{ 100_000_000 * UNIT }>;
 	type MaxOrderUsdAmount = ConstU64<200_000_000>; // 200 USD
 	type MinOrderUsdAmount = ConstU64<20_000_000>; // 20 USD
 	type FirstPurchaseUsdAmount = ConstU64<10_000_000>; // 10 USD
-	type AmountValidationTolerance = ConstU16<100>; // 1% 容差
+	type AmountValidationTolerance = ConstU16<100>; // 1%
 	type MaxFirstPurchaseOrdersPerMaker = ConstU32<5>;
-	// 🆕 2026-01-18: 买家押金机制配置（简化版）
-	// 规则：首购免押金，其他用户统一 10%
-	type MinDeposit = ConstU128<{ UNIT }>; // 最小押金 1 COS
-	type DepositRate = ConstU16<1000>; // 统一 10% 押金
-	type CancelPenaltyRate = ConstU16<3000>; // 取消订单扣除 30% 押金
-	type MinMakerDepositUsd = ConstU64<500_000_000>; // 做市商最低押金 500 USDT（精度10^6）
-	type DisputeResponseTimeout = ConstU64<86400>; // 24小时（秒）
-	type DisputeArbitrationTimeout = ConstU64<172800>; // 48小时（秒）
-	type ArbitratorOrigin = frame_system::EnsureRoot<AccountId>;
-	type WeightInfo = ();
-	// 🆕 P3: 争议证据 CID 锁定管理器
-	type CidLockManager = pallet_storage_service::Pallet<Runtime>;
+	type MinDeposit = ConstU128<{ UNIT }>; // 1 NXS
+	type DepositRate = ConstU16<1000>; // 10%
+	type CancelPenaltyRate = ConstU16<3000>; // 30%
+	type MinMakerDepositUsd = ConstU64<500_000_000>; // 500 USDT
+	type DisputeResponseTimeout = ConstU64<86400>; // 24小时
+	type DisputeArbitrationTimeout = ConstU64<172800>; // 48小时
+	// Sell-side 常量
+	type SellTimeoutBlocks = ConstU32<{ 1 * HOURS }>;
+	type VerificationTimeoutBlocks = ConstU32<{ 2 * HOURS }>;
+	type MinSellAmount = ConstU128<{ 10 * UNIT }>; // 10 NXS
+	type TxHashTtlBlocks = ConstU32<{ 30 * DAYS }>;
+	type VerificationReward = ConstU128<{ UNIT / 10 }>; // 0.1 NXS
+	type SellFeeRateBps = ConstU32<10>; // 0.1%
+	type MinSellFee = ConstU128<{ UNIT / 10 }>; // 0.1 NXS
 }
 
 // ============================================================================
@@ -633,16 +551,15 @@ impl pallet_arbitration::pallet::ArbitrationRouter<AccountId, Balance> for Unifi
 		use pallet_arbitration::pallet::domains;
 		
 		match domain {
-			// 需要验证参与方身份的域
 			d if d == domains::OTC_ORDER => {
-				pallet_trading_otc::Orders::<Runtime>::get(id)
+				pallet_trading_p2p::BuyOrders::<Runtime>::get(id)
 					.map(|order| order.taker == *who || order.maker == *who)
 					.unwrap_or(false)
 			},
-			// 需要验证对象存在的域
 			d if d == domains::MAKER => pallet_trading_maker::MakerApplications::<Runtime>::get(id).is_some(),
-			d if d == domains::SWAP => pallet_trading_swap::MakerSwaps::<Runtime>::get(id).is_some(),
-			// 其他域：任何人可以投诉
+			d if d == domains::SWAP => {
+				pallet_trading_p2p::SellOrders::<Runtime>::get(id).is_some()
+			},
 			_ => true,
 		}
 	}
@@ -653,10 +570,8 @@ impl pallet_arbitration::pallet::ArbitrationRouter<AccountId, Balance> for Unifi
 		
 		match domain {
 			d if d == domains::OTC_ORDER => {
-				// OTC 裁决执行：正确路由到支持 Partial 的函数
-				pallet_trading_otc::Pallet::<Runtime>::apply_arbitration_decision(id, decision)
+				pallet_trading_p2p::Pallet::<Runtime>::apply_arbitration_decision(id, decision)
 			},
-			// 其他域暂时无需额外操作，仲裁模块已处理押金分配
 			_ => Ok(())
 		}
 	}
@@ -668,13 +583,14 @@ impl pallet_arbitration::pallet::ArbitrationRouter<AccountId, Balance> for Unifi
 		
 		match domain {
 			d if d == domains::OTC_ORDER => {
-				let order = pallet_trading_otc::Orders::<Runtime>::get(id)
+				let order = pallet_trading_p2p::BuyOrders::<Runtime>::get(id)
 					.ok_or(DispatchError::Other("OrderNotFound"))?;
-				if order.taker == *initiator {
-					Ok(order.maker)
-				} else {
-					Ok(order.taker)
-				}
+				if order.taker == *initiator { Ok(order.maker) } else { Ok(order.taker) }
+			},
+			d if d == domains::SWAP => {
+				let sell = pallet_trading_p2p::SellOrders::<Runtime>::get(id)
+					.ok_or(DispatchError::Other("SellOrderNotFound"))?;
+				if sell.user == *initiator { Ok(sell.maker) } else { Ok(sell.user) }
 			},
 			d if d == domains::MAKER => {
 				let maker_app = pallet_trading_maker::MakerApplications::<Runtime>::get(id)
@@ -682,7 +598,6 @@ impl pallet_arbitration::pallet::ArbitrationRouter<AccountId, Balance> for Unifi
 				Ok(maker_app.owner)
 			},
 			_ => {
-				// 对于其他域，返回平台账户（PalletId 派生）
 				Ok(TreasuryAccountId::get())
 			}
 		}
@@ -695,12 +610,16 @@ impl pallet_arbitration::pallet::ArbitrationRouter<AccountId, Balance> for Unifi
 		
 		match domain {
 			d if d == domains::OTC_ORDER => {
-				let order = pallet_trading_otc::Orders::<Runtime>::get(id)
+				let order = pallet_trading_p2p::BuyOrders::<Runtime>::get(id)
 					.ok_or(DispatchError::Other("OrderNotFound"))?;
 				Ok(order.amount)
 			},
+			d if d == domains::SWAP => {
+				let sell = pallet_trading_p2p::SellOrders::<Runtime>::get(id)
+					.ok_or(DispatchError::Other("SellOrderNotFound"))?;
+				Ok(sell.nxs_amount)
+			},
 			_ => {
-				// 默认固定金额 10 UNIT
 				Ok(10 * UNIT)
 			}
 		}
@@ -712,12 +631,14 @@ impl pallet_arbitration::pallet::ArbitrationRouter<AccountId, Balance> for Unifi
 		
 		match domain {
 			d if d == domains::OTC_ORDER => {
-				// OTC 订单：从订单获取 maker_id
-				pallet_trading_otc::Orders::<Runtime>::get(id)
+				pallet_trading_p2p::BuyOrders::<Runtime>::get(id)
 					.map(|order| order.maker_id)
 			},
+			d if d == domains::SWAP => {
+				pallet_trading_p2p::SellOrders::<Runtime>::get(id)
+					.map(|sell| sell.maker_id)
+			},
 			d if d == domains::MAKER => {
-				// 做市商域：id 本身就是 maker_id
 				Some(id)
 			},
 			_ => None,
@@ -748,7 +669,7 @@ impl pallet_arbitration::pallet::Config for Runtime {
 	type ResponseDeadline = ConstU32<{ 7 * DAYS }>; // 7天应诉期限
 	type RejectedSlashBps = ConstU16<3000>; // 驳回时罚没30%
 	type PartialSlashBps = ConstU16<5000>; // 部分胜诉罚没50%
-	type ComplaintDeposit = ConstU128<{ UNIT / 10 }>; // 投诉押金兜底值 0.1 COS
+	type ComplaintDeposit = ConstU128<{ UNIT / 10 }>; // 投诉押金兜底值 0.1 NXS
 	type ComplaintDepositUsd = ConstU64<1_000_000>; // 投诉押金 1 USDT（精度10^6，使用pricing换算）
 	type Pricing = TradingPricingProvider; // 定价接口
 	type ComplaintSlashBps = ConstU16<5000>; // 投诉败诉罚没50%
@@ -1062,7 +983,7 @@ parameter_types! {
 	pub const AssetAccountDeposit: Balance = UNIT;
 	/// 元数据押金基础: 10 COS
 	pub const MetadataDepositBase: Balance = 10 * UNIT;
-	/// 元数据押金每字节: 0.1 COS
+	/// 元数据押金每字节: 0.1 NXS
 	pub const MetadataDepositPerByte: Balance = UNIT / 10;
 	/// 授权押金: 1 COS
 	pub const ApprovalDeposit: Balance = UNIT;
@@ -1441,12 +1362,12 @@ impl pallet_entity_market::Config for Runtime {
 	type BlocksPerDay = ConstU32<{ 24 * 600 }>;
 	type BlocksPerWeek = ConstU32<{ 7 * 24 * 600 }>;
 	type CircuitBreakerDuration = ConstU32<600>;  // 1 小时
-	type VerificationReward = ConstU128<{ UNIT / 10 }>;  // 0.1 COS
+	type VerificationReward = ConstU128<{ UNIT / 10 }>;  // 0.1 NXS
 	type RewardSource = MarketTreasuryAccount;
 	type BuyerDepositRate = ConstU16<1000>;  // 10%
 	type MinBuyerDeposit = ConstU128<{ UNIT }>;  // 1 COS
 	type DepositForfeitRate = ConstU16<5000>;  // 50%
-	type UsdtToCosRate = ConstU64<100_000>;  // 1 USDT = 0.1 COS
+	type UsdtToNxsRate = ConstU64<100_000>;  // 1 USDT = 0.1 NXS
 	type TreasuryAccount = MarketTreasuryAccount;
 }
 
@@ -1499,7 +1420,7 @@ impl pallet_entity_tokensale::Config for Runtime {
 }
 
 // ============================================================================
-// Costik Bot Pallets Config
+// Nexus Bot Pallets Config
 // ============================================================================
 
 parameter_types! {

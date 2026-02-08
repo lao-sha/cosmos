@@ -62,8 +62,8 @@ impl_opaque_keys! {
 // https://docs.substrate.io/main-docs/build/upgrade#runtime-versioning
 #[sp_version::runtime_version]
 pub const VERSION: RuntimeVersion = RuntimeVersion {
-	spec_name: alloc::borrow::Cow::Borrowed("cosmos"),
-	impl_name: alloc::borrow::Cow::Borrowed("cosmos"),
+	spec_name: alloc::borrow::Cow::Borrowed("nexus"),
+	impl_name: alloc::borrow::Cow::Borrowed("nexus"),
 	authoring_version: 1,
 	// The version of the runtime specification. A full node will not attempt to use its native
 	//   runtime in substitute for the on-chain Wasm runtime unless all of `spec_name`,
@@ -267,11 +267,8 @@ mod runtime {
 	#[runtime::pallet_index(52)]
 	pub type TradingMaker = pallet_trading_maker;
 
-	#[runtime::pallet_index(53)]
-	pub type TradingSwap = pallet_trading_swap;
-
-	#[runtime::pallet_index(54)]
-	pub type TradingOtc = pallet_trading_otc;
+	#[runtime::pallet_index(55)]
+	pub type TradingP2p = pallet_trading_p2p;
 
 	// ============================================================================
 	// Escrow, Referral, IPFS Pallets
@@ -359,7 +356,7 @@ mod runtime {
 	pub type EntityTokenSale = pallet_entity_tokensale;
 
 	// ============================================================================
-	// Costik Bot Pallets
+	// Nexus Bot Pallets
 	// ============================================================================
 
 	#[runtime::pallet_index(140)]

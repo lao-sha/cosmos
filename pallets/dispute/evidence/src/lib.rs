@@ -1416,7 +1416,7 @@ pub mod pallet {
     impl<T: Config> Pallet<T> {
         /// 计算 Evidence 承诺哈希
         ///
-        /// 使用 cosmos-media-common 的 HashHelper 计算标准格式的承诺哈希:
+        /// 使用 nexus-media-common 的 HashHelper 计算标准格式的承诺哈希:
         /// H(ns || subject_id || cid || salt || version)
         ///
         /// # 参数
@@ -1465,7 +1465,7 @@ pub mod pallet {
 
         /// 验证 CID 格式（单个）
         ///
-        /// 使用 cosmos-media-common 的 IpfsHelper 验证单个 CID 格式。
+        /// 使用 nexus-media-common 的 IpfsHelper 验证单个 CID 格式。
         pub fn validate_single_cid(cid: &[u8]) -> Result<(), Error<T>> {
             let cid_str = core::str::from_utf8(cid)
                 .map_err(|_| Error::<T>::InvalidCidFormat)?;
@@ -1476,7 +1476,7 @@ pub mod pallet {
 
         /// 验证内容完整性
         ///
-        /// 使用 cosmos-media-common 的 IpfsHelper 验证内容与 CID 的对应关系。
+        /// 使用 nexus-media-common 的 IpfsHelper 验证内容与 CID 的对应关系。
         /// 注意：此函数仅在有实际内容数据时使用。
         pub fn verify_content_integrity(content_data: &[u8], cid: &str) -> bool {
             IpfsHelper::verify_content(content_data, cid)
@@ -1596,7 +1596,7 @@ pub mod pallet {
 
         /// 函数级中文注释：校验一组 CID 的格式与去重要求。
         /// 规则：每个 CID 必须非空、符合IPFS格式规范；组内不得重复。
-        /// 使用 cosmos-media-common 的 IpfsHelper 进行规范验证。
+        /// 使用 nexus-media-common 的 IpfsHelper 进行规范验证。
         fn validate_cid_vec(list: &Vec<BoundedVec<u8, T::MaxCidLen>>) -> Result<(), Error<T>> {
             let mut set: BTreeSet<Vec<u8>> = BTreeSet::new();
             for cid in list.iter() {
@@ -1608,7 +1608,7 @@ pub mod pallet {
                 let cid_str = core::str::from_utf8(cid.as_slice())
                     .map_err(|_| Error::<T>::InvalidCidFormat)?;
 
-                // 使用 cosmos-media-common 的 IpfsHelper 进行规范验证
+                // 使用 nexus-media-common 的 IpfsHelper 进行规范验证
                 IpfsHelper::validate_cid(cid_str)
                     .map_err(|_| Error::<T>::InvalidCidFormat)?;
 

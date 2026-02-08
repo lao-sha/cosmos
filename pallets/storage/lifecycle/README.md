@@ -370,4 +370,4 @@ MIT License
 
 ## 作者
 
-Cosmos Team
+Nexus Team

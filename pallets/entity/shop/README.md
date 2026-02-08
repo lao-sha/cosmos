@@ -1,6 +1,6 @@
 # Shop 模块 (pallet-entity-shop)
 
-> 🏪 COSMOS 业务层店铺管理模块
+> 🏪 NEXUS 业务层店铺管理模块
 
 ## 概述
 
@@ -144,7 +144,7 @@ EntityShop::create_shop(
     b"北京旗舰店".to_vec().try_into().unwrap(),
     ShopType::PhysicalStore,
     MemberMode::Inherit, // 继承 Entity 会员
-    100_000_000_000,     // 100 COS 运营资金
+    100_000_000_000,     // 100 NXS 运营资金
 )?;
 ```
 

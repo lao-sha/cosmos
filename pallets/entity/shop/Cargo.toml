@@ -1,8 +1,8 @@
 [package]
 name = "pallet-entity-shop"
 version = "0.1.0"
-description = "COSMOS Entity Shop 模块 - 业务层店铺管理"
-authors = ["COSMOS Team"]
+description = "NEXUS Entity Shop 模块 - 业务层店铺管理"
+authors = ["NEXUS Team"]
 edition = "2021"
 license = "MIT"
 
