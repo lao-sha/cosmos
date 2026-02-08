@@ -1,12 +1,12 @@
-# 独立中继链设计方案
+# Cosmos Core — 独立中继链设计方案
 
-> 基于 Polkadot SDK 从零构建独立中继链，支持平行链接入、共享安全、XCM 跨链。
+> 基于 Polkadot SDK 从零构建 **Cosmos Core** 独立中继链，支持平行链接入、共享安全、XCM 跨链。
 
 ---
 
 ## 1. 项目定位
 
-从零创建**完全独立的中继链**（非 Cosmos 升级），具备：
+从零创建 **Cosmos Core** — 一条完全独立的中继链，具备：
 
 - 自主验证人网络，提供共享安全
 - 多条平行链接入，区块验证与终局性
@@ -16,7 +16,7 @@
 
 | 维度 | Polkadot | 本项目 |
 |------|----------|--------|
-| 网络 | 公共中继链 | 独立中继链 |
+| 网络 | 公共中继链 | Cosmos Core 独立中继链 |
 | 验证人 | 数百个 NPoS | 初期 4-20，逐步扩展 |
 | 平行链接入 | 拍卖插槽 | 治理注册（初期） |
 | 治理 | OpenGov | Sudo → Council（渐进） |
@@ -29,6 +29,7 @@
 
 ```toml
 [workspace.dependencies]
+# cosmos-core workspace
 polkadot-sdk = { git = "https://github.com/nickelshack/polkadot-sdk", tag = "stable2409" }
 ```
 
@@ -47,7 +48,7 @@ polkadot-sdk = { git = "https://github.com/nickelshack/polkadot-sdk", tag = "sta
 ## 3. 项目结构
 
 ```
-my-relay-chain/
+cosmos-core/
 ├── Cargo.toml                      # Workspace
 ├── rust-toolchain.toml
 │
@@ -111,7 +112,7 @@ pub type Nonce = u32;
 pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
 pub type Block = generic::Block<Header, OpaqueExtrinsic>;
 
-pub const TOKEN_SYMBOL: &str = "RELAY";
+pub const TOKEN_SYMBOL: &str = "CORE";
 pub const TOKEN_DECIMALS: u32 = 12;
 pub const UNIT: Balance = 1_000_000_000_000;
 pub const EXISTENTIAL_DEPOSIT: Balance = UNIT / 1_000;
@@ -210,8 +211,8 @@ pub const SESSIONS_PER_ERA: u32 = 6; // 1 Era ≈ 24h
 | Era 周期 | 24 小时 (6 session) | 奖励分发周期 |
 | 解绑期 | 28 Era ≈ 28 天 | 防攻击后撤出 |
 | 惩罚延迟 | 14 Era ≈ 14 天 | 给治理时间撤销误判 |
-| 最低验证人质押 | 10,000 RELAY | 验证人门槛 |
-| 最低提名质押 | 100 RELAY | 提名人门槛 |
+| 最低验证人质押 | 10,000 CORE | 验证人门槛 |
+| 最低提名质押 | 100 CORE | 提名人门槛 |
 | 验证人上限 | 100 | 根据平行链数调整 |
 | 理想质押率 | 50% | 通胀曲线最优点 |
 | 通胀范围 | 2%-10% 年化 | 质押率低→高通胀激励质押 |
@@ -228,7 +229,7 @@ pub const SESSIONS_PER_ERA: u32 = 6; // 1 Era ≈ 24h
 | max_validators_per_core | 5 | 每核心验证人 |
 | hrmp_channel_max_capacity | 1000 | HRMP 消息容量 |
 | hrmp_channel_max_message_size | 100 KB | 单条消息上限 |
-| 注册押金 | 100 RELAY | 平行链注册押金 |
+| 注册押金 | 100 CORE | 平行链注册押金 |
 
 ---
 
@@ -295,7 +296,7 @@ impl_opaque_keys! {
 
 ### 9.2 中继链 XCM 角色
 
-- **储备链**：原生代币 RELAY 的储备所有权在中继链
+- **储备链**：原生代币 CORE 的储备所有权在中继链
 - **路由器**：平行链间 HRMP 消息通过中继链路由
 - **不执行业务逻辑**：中继链只处理资产转移和系统级 XCM
 
@@ -353,10 +354,10 @@ pub type LocalAssetTransactor = FungibleAdapter<
 
 | 属性 | 值 |
 |------|-----|
-| 符号 | RELAY |
+| 符号 | CORE |
 | 精度 | 12 位小数 |
-| 初始供应 | 100,000,000 RELAY |
-| 存在性押金 | 0.001 RELAY |
+| 初始供应 | 100,000,000 CORE |
+| 存在性押金 | 0.001 CORE |
 
 ### 11.2 通胀曲线
 

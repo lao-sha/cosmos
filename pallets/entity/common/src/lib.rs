@@ -127,10 +127,10 @@ pub enum GovernanceMode {
 // 实体相关类型
 // ============================================================================
 
-/// 实体状态（原 ShopStatus）
+/// 实体状态（Entity 组织层状态）
 #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
 pub enum EntityStatus {
-    /// 待审核（历史兼容，新创建不再使用）
+    /// 待审核（reopen_entity 重新开业时使用，新建 create_entity 跳过此状态直接 Active）
     #[default]
     Pending,
     /// 正常运营
@@ -145,8 +145,69 @@ pub enum EntityStatus {
     PendingClose,
 }
 
-/// 向后兼容：ShopStatus 别名（Entity 级别状态）
-pub type ShopStatus = EntityStatus;
+// ============================================================================
+// Shop 有效状态（实时计算，不存储）
+// ============================================================================
+
+/// Shop 有效运营状态（由 EntityStatus + ShopOperatingStatus 实时计算）
+#[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, Copy, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+pub enum EffectiveShopStatus {
+    /// 正常营业
+    Active,
+    /// Shop 自身暂停（manager 主动）
+    PausedBySelf,
+    /// Entity 暂停导致不可运营
+    PausedByEntity,
+    /// Shop 资金耗尽
+    FundDepleted,
+    /// Shop 已关闭（自身关闭）
+    Closed,
+    /// Entity 已关闭/封禁，Shop 强制关闭
+    ClosedByEntity,
+    /// 待激活
+    Pending,
+}
+
+impl EffectiveShopStatus {
+    /// 是否可运营（接单、上架等）
+    pub fn is_operational(&self) -> bool {
+        matches!(self, Self::Active)
+    }
+
+    /// 是否因 Entity 导致不可用
+    pub fn is_entity_caused(&self) -> bool {
+        matches!(self, Self::PausedByEntity | Self::ClosedByEntity)
+    }
+
+    /// 计算有效状态
+    pub fn compute(entity_status: &EntityStatus, shop_status: &ShopOperatingStatus) -> Self {
+        // 1. Entity 终态优先（Banned/Closed → Shop 强制关闭）
+        match entity_status {
+            EntityStatus::Banned | EntityStatus::Closed => {
+                return Self::ClosedByEntity;
+            }
+            EntityStatus::Suspended | EntityStatus::PendingClose | EntityStatus::Pending => {
+                // Entity 非 Active → Shop 不可运营
+                // 如果 Shop 自身已 Closed，优先显示 Closed
+                if *shop_status == ShopOperatingStatus::Closed {
+                    return Self::Closed;
+                }
+                return Self::PausedByEntity;
+            }
+            EntityStatus::Active => { /* 继续判断 Shop 自身状态 */ }
+        }
+
+        // 2. Entity Active → 看 Shop 自身状态
+        match shop_status {
+            ShopOperatingStatus::Active => Self::Active,
+            ShopOperatingStatus::Paused => Self::PausedBySelf,
+            ShopOperatingStatus::FundDepleted => Self::FundDepleted,
+            ShopOperatingStatus::Closed => Self::Closed,
+            ShopOperatingStatus::Closing => Self::Closed,
+            ShopOperatingStatus::Pending => Self::Pending,
+        }
+    }
+}
 
 // ============================================================================
 // Shop 类型枚举 (Entity-Shop 分离架构)
@@ -506,6 +567,9 @@ pub trait EntityProvider<AccountId> {
     /// 检查实体是否激活
     fn is_entity_active(entity_id: u64) -> bool;
     
+    /// 获取实体状态
+    fn entity_status(entity_id: u64) -> Option<EntityStatus>;
+    
     /// 获取实体所有者
     fn entity_owner(entity_id: u64) -> Option<AccountId>;
     
@@ -631,6 +695,18 @@ pub trait ShopProvider<AccountId> {
     
     // ==================== 控制接口 ====================
     
+    /// 获取 Shop 自身状态（不考虑 Entity）
+    fn shop_own_status(shop_id: u64) -> Option<ShopOperatingStatus> {
+        let _ = shop_id;
+        None
+    }
+    
+    /// 获取 Shop 有效状态（考虑 Entity 状态）
+    fn effective_status(shop_id: u64) -> Option<EffectiveShopStatus> {
+        let _ = shop_id;
+        None
+    }
+    
     /// 暂停 Shop
     fn pause_shop(shop_id: u64) -> Result<(), DispatchError> {
         let _ = shop_id;
@@ -729,6 +805,7 @@ pub struct NullEntityProvider;
 impl<AccountId: Default> EntityProvider<AccountId> for NullEntityProvider {
     fn entity_exists(_entity_id: u64) -> bool { false }
     fn is_entity_active(_entity_id: u64) -> bool { false }
+    fn entity_status(_entity_id: u64) -> Option<EntityStatus> { None }
     fn entity_owner(_entity_id: u64) -> Option<AccountId> { None }
     fn entity_account(_entity_id: u64) -> AccountId { AccountId::default() }
     fn update_entity_stats(_entity_id: u64, _sales_amount: u128, _order_count: u32) -> Result<(), DispatchError> { Ok(()) }
@@ -750,6 +827,8 @@ impl<AccountId: Default> ShopProvider<AccountId> for NullShopProvider {
     fn shop_type(_shop_id: u64) -> Option<ShopType> { None }
     fn shop_member_mode(_shop_id: u64) -> MemberMode { MemberMode::default() }
     fn is_shop_manager(_shop_id: u64, _account: &AccountId) -> bool { false }
+    fn shop_own_status(_shop_id: u64) -> Option<ShopOperatingStatus> { None }
+    fn effective_status(_shop_id: u64) -> Option<EffectiveShopStatus> { None }
     fn update_shop_stats(_shop_id: u64, _sales_amount: u128, _order_count: u32) -> Result<(), DispatchError> { Ok(()) }
     fn update_shop_rating(_shop_id: u64, _rating: u8) -> Result<(), DispatchError> { Ok(()) }
     fn deduct_operating_fund(_shop_id: u64, _amount: u128) -> Result<(), DispatchError> { Ok(()) }

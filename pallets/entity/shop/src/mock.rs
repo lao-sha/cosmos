@@ -43,6 +43,14 @@ impl pallet_entity_common::EntityProvider<u64> for MockEntityProvider {
         entity_id == 1 || entity_id == 2
     }
 
+    fn entity_status(entity_id: u64) -> Option<pallet_entity_common::EntityStatus> {
+        match entity_id {
+            1 | 2 => Some(pallet_entity_common::EntityStatus::Active),
+            3 => Some(pallet_entity_common::EntityStatus::Suspended),
+            _ => None,
+        }
+    }
+
     fn entity_owner(entity_id: u64) -> Option<u64> {
         match entity_id {
             1 => Some(1), // Entity 1 owned by account 1

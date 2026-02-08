@@ -1,563 +1,431 @@
 # pallet-entity-registry
 
-> �️ Entity 组织层管理模块 - Entity-Shop 分离架构
+> Entity 组织层管理模块 — Entity-Shop 分离架构 | Runtime Index: 120
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Substrate](https://img.shields.io/badge/Substrate-polkadot--sdk-blue)](https://github.com/paritytech/polkadot-sdk)
+## 概述
 
-## 📖 概述
-
-`pallet-entity-registry` 是 Entity-Shop 分离架构的**组织层**模块，负责 Entity（组织实体）的生命周期管理。
-
-### Entity-Shop 分离架构
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Entity (组织层)                              │
-│  • 所有权/治理      • 代币发行      • KYC/合规                   │
-│  • 组织金库         • 管理员权限    • 1:N Shop 关系              │
-├─────────────────────────────────────────────────────────────────┤
-│                      Shop (业务层)                               │
-│  • 日常运营         • 商品管理      • 订单处理                   │
-│  • 运营资金         • 门店管理员    • 会员体系                   │
-└─────────────────────────────────────────────────────────────────┘
-```
+`pallet-entity-registry` 是 Entity-Shop 分离架构的**组织层**模块，负责 Entity（组织实体）的完整生命周期管理。作为 `pallets/entity/` 子系统的基石，有 9 个下游 pallet 通过 `EntityProvider = EntityRegistry` 依赖本模块。
 
 ### 核心功能
 
-- �️ **Entity 创建** - 自动创建 Primary Shop
-- � **管理员管理** - 添加/移除管理员
-- 🔄 **类型升级** - Merchant → DAO/Enterprise
-- 🏛️ **治理模式** - None/Advisory/DualTrack/Committee/FullDAO
-- ✅ **认证验证** - 官方认证标记
+- **Entity 创建** — 付费即激活，自动创建 Primary Shop
+- **金库资金** — 50 USDT 等值 COS 转入派生账户，支撑运营费用
+- **管理员体系** — owner + admins 两层权限，admin 继承到 Shop 管理
+- **类型升级** — Merchant → DAO/Enterprise/Community/Project 等
+- **治理模式** — None/Advisory/DualTrack/Committee/FullDAO/Tiered
+- **官方认证** — 治理授权的 verified 标记
+- **双层状态模型** — Entity 暂停/关闭自动抑制 Shop，反向不成立
 
-## 🏗️ 架构
+## 架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                   pallet-entity-registry                        │
-│                      (组织层管理)                                │
+│                   (组织层 · pallet_index=120)                   │
 ├─────────────────────────────────────────────────────────────────┤
 │  Entity                                                         │
-│  ├── id, owner, name                                            │
+│  ├── id, owner, name, logo_cid, description_cid                │
 │  ├── entity_type (Merchant/DAO/Enterprise/...)                  │
-│  ├── governance_mode                                            │
-│  ├── shop_ids: Vec<shop_id>  ◄── 1:N 关系                       │
-│  └── primary_shop_id         ◄── 主 Shop                        │
+│  ├── governance_mode (None/Advisory/DualTrack/...)              │
+│  ├── admins: BoundedVec<AccountId, MaxAdmins>                  │
+│  ├── verified, metadata_uri                                     │
+│  ├── shop_id: u64  ◄── 1:1 关联                                │
+│  └── total_sales, total_orders (汇总统计)                       │
+├─────────────────────────────────────────────────────────────────┤
+│  双层状态模型                                                    │
+│                                                                 │
+│  EntityStatus ──┐                                               │
+│  (组织层独立)    ├──► EffectiveShopStatus (实时计算，不存储)     │
+│  ShopOperating ─┘    compute(entity_status, shop_status)        │
+│  Status                                                         │
+│  (业务层独立)    Entity↓影响Shop  Shop↑不影响Entity             │
 └─────────────────────────────────────────────────────────────────┘
          │                              │
-         │ EntityProvider               │ 创建时调用
+         │ EntityProvider trait          │ 创建时调用 ShopProvider
          ▼                              ▼
 ┌─────────────────────┐    ┌─────────────────────────────────────┐
-│  pallet-entity-shop │    │     pallet-entity-member/token      │
-│    (业务层管理)      │◄───│         (业务模块)                   │
-│  • Shop CRUD        │    │  • 通过 ShopProvider 查询 Shop       │
-│  • 运营资金         │    │  • 通过 EntityProvider 查询 Entity   │
+│  pallet-entity-shop │    │  pallet-entity-{member,token,...}   │
+│  (业务层 · 129)     │    │  pallet-commission-core (127)       │
+│  • Shop CRUD        │    │  pallet-entity-governance (130)     │
+│  • 运营资金         │    │  pallet-entity-disclosure (131)     │
+│  • 独立状态管理     │    │  pallet-entity-sale (128)           │
 └─────────────────────┘    └─────────────────────────────────────┘
 ```
 
-## 💰 运营资金机制
+## 双层状态模型
 
-### 核心设计
-
-创建店铺时，系统会根据实时 COS/USDT 价格计算 **50 USDT 等值的 COS** 转入**店铺派生账户**。
+Entity 和 Shop 拥有**独立的状态枚举**，Shop 的有效状态在查询时实时计算：
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    店铺派生账户余额结构                          │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │              全部余额（不可提取）                         │   │
-│  │                                                         │   │
-│  │  ✅ 可消费：IPFS Pin、存储租金、手续费                   │   │
-│  │  ✅ 可充值：店主随时充值                                 │   │
-│  │  ❌ 不可提取：运营期间锁定                               │   │
-│  │  ✅ 关闭退还：治理审批关闭后全额退还                     │   │
-│  │                                                         │   │
-│  │  ⚠️ 低于最低余额时店铺自动暂停                          │   │
-│  │                                                         │   │
-│  └─────────────────────────────────────────────────────────┘   │
-│                                                                 │
-│  地址: PalletId(*b"et/shop/").into_sub_account(shop_id)        │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+Shop 有效状态 = EffectiveShopStatus::compute(EntityStatus, ShopOperatingStatus)
 ```
 
-### 资金健康状态
+### EntityStatus（组织层）
 
-| 状态 | 条件 | 说明 |
-|------|------|------|
-| `Healthy` | 余额 > 预警阈值 | 正常运营 |
-| `Warning` | 最低余额 < 余额 ≤ 预警阈值 | 发出预警 |
-| `Critical` | 余额 ≤ 最低余额 | 店铺暂停 |
-| `Depleted` | 余额 = 0 | 资金耗尽 |
+```rust
+pub enum EntityStatus {
+    Pending,      // 待审核（reopen 后等待治理审批）
+    Active,       // 正常运营
+    Suspended,    // 暂停（治理/资金不足）
+    Banned,       // 封禁
+    Closed,       // 已关闭
+    PendingClose, // 待关闭审批
+}
+```
+
+### EffectiveShopStatus（实时计算）
+
+```rust
+pub enum EffectiveShopStatus {
+    Active,         // 正常营业（Entity Active + Shop Active）
+    PausedBySelf,   // Shop 自身暂停
+    PausedByEntity, // Entity 非 Active 导致不可运营
+    FundDepleted,   // Shop 资金耗尽
+    Closed,         // Shop 自身关闭
+    ClosedByEntity, // Entity 关闭/封禁，Shop 强制关闭
+    Pending,        // 待激活
+}
+```
+
+### 级联规则
+
+| Entity 操作 | 对 Shop 的影响 | 机制 |
+|---|---|---|
+| `suspend_entity` | Shop 不可运营 | **查询时计算**（不物理写入 Shop） |
+| `resume_entity` | Shop 恢复其原有独立状态 | **查询时计算**（不物理写入 Shop） |
+| `approve_close_entity` | Shop 强制关闭 | **物理写入**（终态，不可逆） |
+| `ban_entity` | Shop 强制关闭 | **物理写入**（终态，不可逆） |
+| Shop 暂停/关闭 | Entity **不受影响** | 无级联 |
+
+**核心原则**：临时状态（Suspend/Resume）不级联写入，终态（Close/Ban）级联写入。
+
+### 场景示例
+
+```
+T1: Entity=Active,  Shop=Active   → 有效状态: Active         ✅
+T2: Entity=Active,  Shop=Paused   → 有效状态: PausedBySelf   ❌ manager 暂停
+T3: Entity=Suspend, Shop=Paused   → 有效状态: PausedByEntity ❌ Entity 暂停
+T4: Entity=Active,  Shop=Paused   → 有效状态: PausedBySelf   ❌ Entity 恢复，Shop 仍暂停 ✅
+T5: Entity=Active,  Shop=Active   → 有效状态: Active         ✅ manager 恢复
+```
+
+## 金库资金机制
+
+创建 Entity 时，根据实时 COS/USDT 价格计算 **50 USDT 等值的 COS** 转入 **Entity 金库派生账户**。
+
+```
+地址: PalletId(*b"et/enty/").into_sub_account_truncating(entity_id)
+```
 
 ### 计算公式
 
 ```
-COS 运营资金 = USDT 金额 × 10^12 / COS价格
+COS 金额 = USDT 金额 × 10^12 / COS价格
+final_fund = clamp(COS金额, MinInitialFundCos, MaxInitialFundCos)
 ```
 
-### 示例
+### 资金健康状态
 
-| COS/USDT 价格 | 50 USDT 等值 COS |
-|---------------|------------------|
-| 0.000001 | 50,000,000 COS |
-| 0.0001 | 500,000 COS |
-| 0.001 | 50,000 COS |
-| 0.01 | 5,000 COS |
-| 0.1 | 500 COS |
+| 状态 | 条件 | 行为 |
+|------|------|------|
+| `Healthy` | 余额 > 预警阈值 | 正常运营 |
+| `Warning` | 最低余额 < 余额 ≤ 预警阈值 | 发出 `FundWarning` 事件 |
+| `Critical` | 余额 ≤ 最低余额 | 自动暂停 Entity |
+| `Depleted` | 余额 = 0 | 资金耗尽 |
 
-### 安全限制
+### 资金规则
+
+- **不可提取** — 运营期间锁定在派生账户
+- **可充值** — owner 随时通过 `top_up_fund` 充值
+- **可消费** — 其他模块通过 `deduct_operating_fee` 扣费（IPFS Pin、存储租金等）
+- **关闭退还** — 治理审批关闭后全额退还 owner
+- **封禁没收** — 可选没收至平台账户
+
+## Runtime 配置
 
 ```rust
-// 初始资金限制在合理范围内
-let final_fund = cos_amount
-    .max(T::MinInitialFundCos::get())  // 最小 10 COS
-    .min(T::MaxInitialFundCos::get()); // 最大 100,000 COS
-```
-
-## 📦 安装
-
-### Cargo.toml
-
-```toml
-[dependencies]
-pallet-entity-shop = { path = "pallets/entity/shop", default-features = false }
-
-[features]
-std = [
-    "pallet-entity-shop/std",
-]
-```
-
-## ⚙️ Runtime 配置
-
-```rust
-parameter_types! {
-    /// 初始运营资金：50 USDT（精度 10^6）
-    pub const InitialFundUsdt: u64 = 50_000_000;
-    /// 最小初始资金：10 COS
-    pub const MinInitialFundCos: Balance = 10 * UNIT;
-    /// 最大初始资金：100,000 COS
-    pub const MaxInitialFundCos: Balance = 100_000 * UNIT;
-    /// 最低运营余额：100 COS（低于此值店铺暂停）
-    pub const MinOperatingBalance: Balance = 100 * UNIT;
-    /// 资金预警阈值：200 COS
-    pub const FundWarningThreshold: Balance = 200 * UNIT;
-}
-
-impl pallet_entity_shop::Config for Runtime {
+impl pallet_entity_registry::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type Currency = Balances;
-    type MaxShopNameLength = ConstU32<64>;
+    type MaxEntityNameLength = ConstU32<64>;
     type MaxCidLength = ConstU32<64>;
     type GovernanceOrigin = EnsureRoot<AccountId>;
-    type PricingProvider = TradingPricing;
-    type InitialFundUsdt = InitialFundUsdt;
-    type MinInitialFundCos = MinInitialFundCos;
-    type MaxInitialFundCos = MaxInitialFundCos;
-    type MinOperatingBalance = MinOperatingBalance;
-    type FundWarningThreshold = FundWarningThreshold;
+    type PricingProvider = EntityPricingProvider;
+    type InitialFundUsdt = ConstU64<50_000_000>;     // 50 USDT
+    type MinInitialFundCos = EntityMinDeposit;
+    type MaxInitialFundCos = ConstU128<{ 1000 * UNIT }>;
+    type MinOperatingBalance = ConstU128<{ UNIT / 10 }>;
+    type FundWarningThreshold = ConstU128<{ UNIT }>;
+    type MaxAdmins = ConstU32<10>;
+    type MaxEntitiesPerUser = ConstU32<3>;
+    type ShopProvider = EntityShop;
+    type PlatformAccount = EntityPlatformAccount;
 }
 ```
 
-### 配置参数说明
+### 配置参数
 
-| 参数 | 类型 | 说明 | 示例值 |
-|------|------|------|--------|
-| `Currency` | Currency + ReservableCurrency | 货币类型 | `Balances` |
-| `MaxShopNameLength` | u32 | 店铺名称最大长度 | 64 |
-| `MaxCidLength` | u32 | CID 最大长度 | 64 |
-| `GovernanceOrigin` | EnsureOrigin | 治理 Origin | `EnsureRoot` |
-| `PricingProvider` | PricingProvider | 定价提供者 | `TradingPricing` |
-| `InitialFundUsdt` | u64 | **初始资金 USDT（精度 10^6）** | 50_000_000 |
-| `MinInitialFundCos` | Balance | **最小初始资金 COS** | 10 UNIT |
-| `MaxInitialFundCos` | Balance | **最大初始资金 COS** | 100,000 UNIT |
-| `MinOperatingBalance` | Balance | **最低运营余额** | 100 UNIT |
-| `FundWarningThreshold` | Balance | **资金预警阈值** | 200 UNIT |
-
-## 📊 数据结构
-
-### Entity - 组织实体（Entity-Shop 分离架构）
-
-```rust
-pub struct Entity<AccountId, Balance, BlockNumber, ...> {
-    // 基本信息
-    pub id: u64,                              // Entity ID
-    pub owner: AccountId,                     // 所有者账户
-    pub name: BoundedVec<u8, MaxNameLen>,     // 名称
-    pub logo_cid: Option<...>,                // Logo CID
-    pub description_cid: Option<...>,         // 描述 CID
-    pub status: EntityStatus,                 // 状态
-    pub created_at: BlockNumber,              // 创建时间
-    
-    // 组织层字段
-    pub entity_type: EntityType,              // 类型 (Merchant/DAO/Enterprise/...)
-    pub admins: BoundedVec<AccountId>,        // 管理员列表
-    pub governance_mode: GovernanceMode,      // 治理模式
-    pub verified: bool,                       // 是否已认证
-    pub metadata_uri: Option<...>,            // 元数据 URI
-    pub treasury_fund: Balance,               // 金库资金
-    
-    // Entity-Shop 关联
-    pub shop_ids: BoundedVec<u64, MaxShops>,  // 下属 Shop ID 列表
-    pub primary_shop_id: u64,                 // 主 Shop ID
-    
-    // 汇总统计
-    pub total_sales: Balance,                 // 累计销售额（所有 Shop）
-    pub total_orders: u64,                    // 累计订单数（所有 Shop）
-}
-```
-
-### EntityType - 实体类型
-
-```rust
-pub enum EntityType {
-    Merchant,        // 商户（默认）
-    Enterprise,      // 企业
-    DAO,             // 去中心化自治组织
-    Community,       // 社区
-    Project,         // 项目方
-    ServiceProvider, // 服务提供商
-    Fund,            // 基金
-    Custom(u8),      // 自定义类型
-}
-```
-
-### EntityStatus - 实体状态
-
-```rust
-pub enum EntityStatus {
-    Pending,    // 待审核
-    Active,     // 正常运营
-    Suspended,  // 暂停运营
-    Banned,     // 被封禁
-    Closed,     // 已关闭
-}
-```
-
-### GovernanceMode - 治理模式
-
-```rust
-pub enum GovernanceMode {
-    None,       // 无治理（管理员全权控制）
-    Advisory,   // 咨询型（提案不自动执行）
-    DualTrack,  // 双轨制（重大决策需投票）
-    Committee,  // 委员会投票
-    FullDAO,    // 完全 DAO
-    Tiered,     // 分层治理
-}
-```
-
-### FundHealth - 资金健康状态
-
-```rust
-pub enum FundHealth {
-    Healthy,   // 健康（余额 > 预警阈值）
-    Warning,   // 预警（最低余额 < 余额 ≤ 预警阈值）
-    Critical,  // 危险（余额 ≤ 最低余额）
-    Depleted,  // 耗尽（余额 = 0）
-}
-```
-
-### FeeType - 运营费用类型
-
-```rust
-pub enum FeeType {
-    IpfsPin,        // IPFS Pin 费用
-    StorageRent,    // 链上存储租金
-    TransactionFee, // 交易手续费
-    Promotion,      // 推广费用
-    Other,          // 其他费用
-}
-```
-
-## 🔧 Extrinsics
-
-### 1. create_shop
-
-创建店铺（转入运营资金到派生账户）。
-
-```rust
-fn create_shop(
-    origin: OriginFor<T>,
-    name: Vec<u8>,
-    logo_cid: Option<Vec<u8>>,
-    description_cid: Option<Vec<u8>>,
-) -> DispatchResult
-```
-
-**运营资金计算：**
-- 获取实时 COS/USDT 价格
-- 计算 50 USDT 等值的 COS
-- 限制在 [MinInitialFundCos, MaxInitialFundCos] 范围内
-- 转入店铺派生账户（不可提取）
-
-### 2. update_shop
-
-更新店铺信息。
-
-```rust
-fn update_shop(
-    origin: OriginFor<T>,
-    shop_id: u64,
-    name: Option<Vec<u8>>,
-    logo_cid: Option<Vec<u8>>,
-    description_cid: Option<Vec<u8>>,
-    customer_service: Option<AccountId>,
-) -> DispatchResult
-```
-
-**权限：** 仅店主
-
-**参数：**
-- `customer_service` - 客服聊天账户（用于 Pallet Chat，None 表示使用店主账户）
-
-### 3. request_close_shop
-
-申请关闭店铺（需治理审批）。
-
-```rust
-fn request_close_shop(origin: OriginFor<T>, shop_id: u64) -> DispatchResult
-```
-
-**权限：** 仅店主
-**说明：** 申请后需等待治理审批，审批通过后全部余额退还
-
-### 4. top_up_fund
-
-充值运营资金。
-
-```rust
-fn top_up_fund(
-    origin: OriginFor<T>,
-    shop_id: u64,
-    amount: BalanceOf<T>,
-) -> DispatchResult
-```
-
-**权限：** 仅店主
-**说明：** 如果店铺因资金不足暂停，充值后自动恢复
-
-### 5. approve_shop（治理）
-
-审核通过店铺。
-
-```rust
-fn approve_shop(origin: OriginFor<T>, shop_id: u64) -> DispatchResult
-```
-
-**权限：** GovernanceOrigin
-
-### 6. approve_close_shop（治理）
-
-审批关闭店铺（退还全部余额）。
-
-```rust
-fn approve_close_shop(origin: OriginFor<T>, shop_id: u64) -> DispatchResult
-```
-
-**权限：** GovernanceOrigin
-**说明：** 退还派生账户全部余额给店主
-
-### 7. suspend_shop（治理）
-
-暂停店铺营业。
-
-```rust
-fn suspend_shop(origin: OriginFor<T>, shop_id: u64) -> DispatchResult
-```
-
-**权限：** GovernanceOrigin
-
-### 8. resume_shop（治理）
-
-恢复店铺营业（需资金充足）。
-
-```rust
-fn resume_shop(origin: OriginFor<T>, shop_id: u64) -> DispatchResult
-```
-
-**权限：** GovernanceOrigin
-**前提：** 派生账户余额 ≥ 最低运营余额
-
-### 9. ban_shop（治理）
-
-封禁店铺（可选没收资金）。
-
-```rust
-fn ban_shop(
-    origin: OriginFor<T>,
-    shop_id: u64,
-    confiscate_fund: bool,
-) -> DispatchResult
-```
-
-**权限：** GovernanceOrigin
-**参数：** `confiscate_fund` - 是否没收资金
-
-## 📡 Events
-
-| 事件 | 说明 | 字段 |
+| 参数 | 类型 | 说明 |
 |------|------|------|
-| `ShopCreated` | 店铺已创建 | `shop_id`, `owner`, `shop_account`, `initial_fund` |
-| `ShopUpdated` | 店铺已更新 | `shop_id` |
-| `ShopStatusChanged` | 店铺状态已变更 | `shop_id`, `status` |
-| `FundToppedUp` | **运营资金已充值** | `shop_id`, `amount`, `new_balance` |
-| `OperatingFeeDeducted` | **运营费用已扣除** | `shop_id`, `fee`, `fee_type`, `remaining_balance` |
-| `FundWarning` | **资金预警** | `shop_id`, `current_balance`, `warning_threshold` |
-| `ShopSuspendedLowFund` | **店铺因资金不足暂停** | `shop_id`, `current_balance`, `minimum_balance` |
-| `ShopResumedAfterFunding` | **充值后店铺恢复** | `shop_id` |
-| `ShopCloseRequested` | **店主申请关闭店铺** | `shop_id` |
-| `ShopClosed` | 店铺已关闭 | `shop_id`, `fund_refunded` |
-| `ShopBanned` | **店铺被封禁** | `shop_id`, `fund_confiscated` |
-| `FundConfiscated` | **资金被没收** | `shop_id`, `amount` |
+| `Currency` | `Currency` | 货币类型 |
+| `MaxEntityNameLength` | `u32` | 名称最大长度 |
+| `MaxCidLength` | `u32` | IPFS CID 最大长度 |
+| `GovernanceOrigin` | `EnsureOrigin` | 治理 Origin |
+| `PricingProvider` | `PricingProvider` | COS/USDT 定价接口 |
+| `InitialFundUsdt` | `u64` | 初始资金 USDT（精度 10^6） |
+| `MinInitialFundCos` | `Balance` | 最小初始资金 COS |
+| `MaxInitialFundCos` | `Balance` | 最大初始资金 COS |
+| `MinOperatingBalance` | `Balance` | 最低运营余额（低于自动暂停） |
+| `FundWarningThreshold` | `Balance` | 资金预警阈值 |
+| `MaxAdmins` | `u32` | 每个 Entity 最大管理员数 |
+| `MaxEntitiesPerUser` | `u32` | 每个用户最大 Entity 数 |
+| `ShopProvider` | `ShopProvider` | Shop 模块（创建 Primary Shop） |
+| `PlatformAccount` | `AccountId` | 平台账户（没收/运营费用接收方） |
 
-## ❌ Errors
+## 数据结构
+
+### Entity
+
+```rust
+pub struct Entity<AccountId, Balance, BlockNumber, MaxNameLen, MaxCidLen, MaxAdmins> {
+    pub id: u64,                                      // Entity ID
+    pub owner: AccountId,                             // 所有者
+    pub name: BoundedVec<u8, MaxNameLen>,             // 名称
+    pub logo_cid: Option<BoundedVec<u8, MaxCidLen>>,  // Logo IPFS CID
+    pub description_cid: Option<BoundedVec<u8, MaxCidLen>>, // 描述 CID
+    pub status: EntityStatus,                         // 实体状态
+    pub created_at: BlockNumber,                      // 创建区块
+    pub entity_type: EntityType,                      // 类型（默认 Merchant）
+    pub admins: BoundedVec<AccountId, MaxAdmins>,     // 管理员列表
+    pub governance_mode: GovernanceMode,              // 治理模式（默认 None）
+    pub verified: bool,                               // 官方认证
+    pub metadata_uri: Option<BoundedVec<u8, MaxCidLen>>, // 元数据 URI
+    pub shop_id: u64,                                 // 关联 Shop ID（0=未创建）
+    pub total_sales: Balance,                         // 累计销售额
+    pub total_orders: u64,                            // 累计订单数
+}
+```
+
+### 存储项
+
+| 存储 | 类型 | 说明 |
+|------|------|------|
+| `NextEntityId` | `StorageValue<u64>` | 自增 Entity ID |
+| `Entities` | `StorageMap<u64, Entity>` | Entity 主数据 |
+| `UserEntity` | `StorageMap<AccountId, BoundedVec<u64, 3>>` | 用户→Entity 索引 |
+| `EntityStats` | `StorageValue<EntityStatistics>` | 全局统计 |
+| `EntityCloseRequests` | `StorageMap<u64, BlockNumber>` | 关闭申请时间 |
+| `GovernanceSuspended` | `StorageMap<u64, bool>` | 治理暂停标记（区分治理 vs 资金不足暂停） |
+
+## Extrinsics
+
+### 用户操作
+
+| Index | 函数 | 权限 | 说明 |
+|-------|------|------|------|
+| 0 | `create_entity(name, logo_cid, description_cid)` | signed | 创建 Entity + 自动创建 Primary Shop，付费即激活 |
+| 1 | `update_entity(entity_id, name, logo_cid, description_cid, _)` | owner | 更新名称/Logo/描述（`customer_service` 参数已废弃，被忽略） |
+| 2 | `request_close_entity(entity_id)` | owner | 申请关闭（Active/Suspended → PendingClose） |
+| 3 | `top_up_fund(entity_id, amount)` | owner | 充值金库，仅资金不足暂停可自动恢复（治理暂停不可） |
+| 9 | `add_admin(entity_id, new_admin)` | owner | 添加管理员 |
+| 10 | `remove_admin(entity_id, admin)` | owner | 移除管理员 |
+| 11 | `transfer_ownership(entity_id, new_owner)` | owner | 转移所有权 |
+| 15 | `reopen_entity(entity_id)` | owner | 重新开业（Closed → Pending，需重新缴纳押金） |
+
+### 治理操作
+
+| Index | 函数 | 权限 | 说明 |
+|-------|------|------|------|
+| 4 | `approve_entity(entity_id)` | governance | 审批激活 Pending 实体 |
+| 5 | `approve_close_entity(entity_id)` | governance | 审批关闭，退还资金，级联关闭 Shop |
+| 6 | `suspend_entity(entity_id)` | governance | 暂停（不级联写入 Shop） |
+| 7 | `resume_entity(entity_id)` | governance | 恢复（需资金充足，不级联写入 Shop） |
+| 8 | `ban_entity(entity_id, confiscate_fund)` | governance | 封禁（仅 Active/Suspended/PendingClose），可没收资金，级联关闭 Shop |
+| 12 | `upgrade_entity_type(entity_id, new_type, new_governance)` | governance/owner | 类型升级（治理可任意升级，owner 受路径限制） |
+| 13 | `change_governance_mode(entity_id, new_mode)` | governance | 变更治理模式 |
+| 14 | `verify_entity(entity_id)` | governance | 官方认证 |
+
+### 类型升级规则
+
+| 当前类型 | Owner 可升级为 | 治理可升级为 |
+|----------|---------|---------|
+| Merchant | 任何类型 | 任何类型 |
+| Community | DAO | 任何类型 |
+| Project | DAO, Enterprise | 任何类型 |
+| DAO / Enterprise / 其他 | ❌ 不可 | 任何类型 |
+
+## Events
+
+| 事件 | 说明 |
+|------|------|
+| `EntityCreated { entity_id, owner, treasury_account, initial_fund }` | Entity 已创建 |
+| `ShopAddedToEntity { entity_id, shop_id }` | Shop 已关联 |
+| `EntityUpdated { entity_id }` | 信息已更新 |
+| `EntityStatusChanged { entity_id, status }` | 状态已变更 |
+| `FundToppedUp { entity_id, amount, new_balance }` | 金库已充值 |
+| `OperatingFeeDeducted { entity_id, fee, fee_type, remaining_balance }` | 运营费已扣除 |
+| `FundWarning { entity_id, current_balance, warning_threshold }` | 资金预警 |
+| `EntitySuspendedLowFund { entity_id, current_balance, minimum_balance }` | 资金不足暂停 |
+| `EntityResumedAfterFunding { entity_id }` | 充值后恢复 |
+| `EntityCloseRequested { entity_id }` | 申请关闭 |
+| `EntityClosed { entity_id, fund_refunded }` | 已关闭（资金退还） |
+| `EntityBanned { entity_id, fund_confiscated }` | 已封禁 |
+| `FundConfiscated { entity_id, amount }` | 资金已没收 |
+| `AdminAdded { entity_id, admin }` | 管理员已添加 |
+| `AdminRemoved { entity_id, admin }` | 管理员已移除 |
+| `EntityTypeUpgraded { entity_id, old_type, new_type }` | 类型已升级 |
+| `GovernanceModeChanged { entity_id, old_mode, new_mode }` | 治理模式已变更 |
+| `EntityVerified { entity_id }` | 已认证 |
+| `EntityReopened { entity_id, owner, initial_fund }` | 重新开业申请 |
+| `OwnershipTransferred { entity_id, old_owner, new_owner }` | 所有权已转移 |
+
+## Errors
 
 | 错误 | 说明 |
 |------|------|
-| `ShopNotFound` | 店铺不存在 |
-| `ShopAlreadyExists` | 用户已有店铺 |
-| `NotShopOwner` | 不是店主 |
-| `ShopNotActive` | 店铺未激活 |
-| `ShopHasPendingOrders` | 店铺有进行中的订单 |
-| `InsufficientOperatingFund` | **运营资金不足** |
-| `InvalidShopStatus` | 无效的店铺状态 |
+| `EntityNotFound` | 实体不存在 |
+| `MaxEntitiesReached` | 用户实体数量已达上限（3） |
+| `NotEntityOwner` | 不是实体所有者 |
+| `InsufficientOperatingFund` | 运营资金不足 |
+| `InvalidEntityStatus` | 无效的实体状态（Banned/Closed 实体拒绝修改操作） |
+| `NameEmpty` | 名称为空 |
 | `NameTooLong` | 名称过长 |
 | `CidTooLong` | CID 过长 |
 | `PriceUnavailable` | 价格不可用 |
 | `ArithmeticOverflow` | 算术溢出 |
-| `InsufficientBalanceForInitialFund` | **余额不足以支付初始资金** |
+| `InsufficientBalanceForInitialFund` | 余额不足以支付初始资金 |
+| `NotAdmin` | 不是管理员 |
+| `AdminAlreadyExists` | 管理员已存在 |
+| `AdminNotFound` | 管理员不存在 |
+| `MaxAdminsReached` | 管理员数量已达上限（10） |
+| `CannotRemoveOwner` | 不能移除所有者 |
+| `DAORequiresGovernance` | DAO 类型需要治理模式 |
+| `InvalidEntityTypeUpgrade` | 无效的类型升级 |
+| `EntityAlreadyHasShop` | Entity 已有 Shop（1:1 限制） |
 
-## 🔌 ShopProvider Trait
+## EntityProvider Trait
 
-本模块实现了 `ShopProvider` trait，供其他模块调用：
+本模块实现 `EntityProvider` trait，供 9 个下游 pallet 调用：
 
 ```rust
-pub trait ShopProvider<AccountId> {
-    fn shop_exists(shop_id: u64) -> bool;
-    fn is_shop_active(shop_id: u64) -> bool;
-    fn shop_owner(shop_id: u64) -> Option<AccountId>;
-    fn update_shop_stats(shop_id: u64, sales_amount: u128, order_count: u32) -> Result<(), DispatchError>;
-    fn update_shop_rating(shop_id: u64, rating: u8) -> Result<(), DispatchError>;
+pub trait EntityProvider<AccountId> {
+    fn entity_exists(entity_id: u64) -> bool;
+    fn is_entity_active(entity_id: u64) -> bool;
+    fn entity_status(entity_id: u64) -> Option<EntityStatus>;
+    fn entity_owner(entity_id: u64) -> Option<AccountId>;
+    fn entity_account(entity_id: u64) -> AccountId;
+    fn update_entity_stats(entity_id, sales_amount, order_count) -> DispatchResult;
+    fn update_entity_rating(entity_id, rating) -> DispatchResult;
+    fn register_shop(entity_id, shop_id) -> DispatchResult;
+    fn unregister_shop(entity_id, shop_id) -> DispatchResult;
+    fn is_entity_admin(entity_id, account) -> bool;
+    fn entity_shops(entity_id) -> Vec<u64>;
 }
 ```
 
-## 🔌 辅助函数
+## 辅助函数
 
 ```rust
 impl<T: Config> Pallet<T> {
-    /// 获取店铺派生账户
-    pub fn shop_account(shop_id: u64) -> T::AccountId;
-    
-    /// 计算初始运营资金
+    /// 获取 Entity 金库派生账户
+    pub fn entity_treasury_account(entity_id: u64) -> T::AccountId;
+    /// 计算初始运营资金（USDT 等值 COS）
     pub fn calculate_initial_fund() -> Result<BalanceOf<T>, DispatchError>;
-    
     /// 获取资金健康状态
     pub fn get_fund_health(balance: BalanceOf<T>) -> FundHealth;
-    
-    /// 获取店铺运营资金余额
-    pub fn get_shop_fund_balance(shop_id: u64) -> BalanceOf<T>;
-    
+    /// 获取金库资金余额
+    pub fn get_entity_fund_balance(entity_id: u64) -> BalanceOf<T>;
     /// 扣除运营费用（供其他模块调用）
-    pub fn deduct_operating_fee(shop_id: u64, fee: BalanceOf<T>, fee_type: FeeType) -> DispatchResult;
+    pub fn deduct_operating_fee(entity_id, fee, fee_type) -> DispatchResult;
+    /// 获取当前初始资金金额（供前端查询）
+    pub fn get_current_initial_fund() -> Result<BalanceOf<T>, DispatchError>;
+    /// 获取初始资金计算详情
+    pub fn get_initial_fund_details() -> (u64, u64, u128);
+    /// 检查是否是管理员（owner 或 admins）
+    pub fn is_admin(entity_id: u64, who: &T::AccountId) -> bool;
+    /// 确保调用者是管理员
+    pub fn ensure_admin(entity_id: u64, who: &T::AccountId) -> DispatchResult;
+    /// 验证实体类型升级规则
+    pub fn validate_entity_type_upgrade(current, new) -> DispatchResult;
 }
 ```
 
-## 💡 店铺生命周期
+## Entity 生命周期
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        店铺生命周期                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  1. 创建店铺                                                     │
-│     ├── 计算 50 USDT 等值 COS                                   │
-│     ├── 转入派生账户（不可提取）                                 │
-│     └── 状态: Pending                                           │
-│                                                                 │
-│  2. 治理审核                                                     │
-│     └── approve_shop() → 状态: Active                           │
-│                                                                 │
-│  3. 正常运营                                                     │
-│     ├── 消费运营费用（IPFS Pin 等）                              │
-│     ├── 可随时充值                                               │
-│     └── 资金不足 → 状态: Suspended                              │
-│                                                                 │
-│  4. 充值恢复                                                     │
-│     └── top_up_fund() → 状态: Active                            │
-│                                                                 │
-│  5. 申请关闭                                                     │
-│     └── request_close_shop() → 状态: Pending                    │
-│                                                                 │
-│  6. 治理审批关闭                                                 │
-│     └── approve_close_shop() → 状态: Closed                     │
-│         └── 全部余额退还给店主                                   │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+路径 A: 新建（付费即激活）           路径 B: 重开（需治理审批）
+═══════════════════════             ═══════════════════════
+create_entity                       reopen_entity (Closed → Pending)
+  │ 缴纳 50 USDT 押金                │ 重新缴纳押金
+  │ 自动创建 Primary Shop            │
+  ▼                                  ▼
+Active ◄─────────────────────────── approve_entity (Pending → Active)
+  │    │                             │ 同时 resume_shop 恢复 Shop
+  │    │                             │
+  │    ▼              ▲
+  │  Suspended ───► top_up_fund()（充值恢复）
+  │  (治理暂停/资金不足)
+  │
+  ├──► PendingClose ──► Closed ──► 可走路径 B 重开
+  │    (owner 申请)      (治理审批，退还资金)
+  │
+  └──► Banned (治理封禁，可没收资金)
 ```
 
-## 🔐 安全机制
+### 两条激活路径的设计意图
 
-### 1. 派生账户隔离
+| | 路径 A: 新建 | 路径 B: 重开 |
+|---|---|---|
+| **入口** | `create_entity` (call_index 0) | `reopen_entity` (call_index 15) → `approve_entity` (call_index 4) |
+| **初始状态** | 直接 `Active` | `Pending` → 治理审批后 `Active` |
+| **信任锚点** | 押金（经济担保） | 押金 + 治理审批（双重担保） |
+| **适用场景** | 无历史记录的新 Entity | 曾被关闭/封禁，有风险记录 |
+| **Shop 创建** | `create_entity` 内自动创建 | `approve_entity` 内恢复已有 Shop |
 
-```rust
-const SHOP_PALLET_ID: PalletId = PalletId(*b"et/shop/");
+> **注意**：`approve_entity` 当前**仅**由 `reopen_entity` 产生的 `Pending` 状态触发。
+> `create_entity` 跳过 `Pending` 直接进入 `Active`。
 
-pub fn shop_account(shop_id: u64) -> T::AccountId {
-    SHOP_PALLET_ID.into_sub_account_truncating(shop_id)
-}
-```
+### 未来扩展：新建审批模式
 
-每个店铺有独立的派生账户，资金隔离。
+若需要新建 Entity 也经过审批流程，需修改以下三处：
 
-### 2. 资金不可提取
+1. `create_entity` 初始状态改为 `EntityStatus::Pending`
+2. `active_entities` 统计递增延后到 `approve_entity`
+3. Primary Shop 创建延后到 `approve_entity`（避免 Pending 期间产生可运营的 Shop）
 
-运营期间资金完全锁定在派生账户，仅可用于：
-- 支付运营费用
-- 治理关闭后退还
+## 安全机制
 
-### 3. 资金健康监控
+- **派生账户隔离** — `PalletId(*b"et/enty/")` + entity_id，每个 Entity 独立金库
+- **资金不可提取** — 运营期间锁定，仅关闭退还或封禁没收
+- **资金健康监控** — 低于阈值自动预警/暂停
+- **每用户上限** — `MaxEntitiesPerUser = 3`，防止刷 Entity
+- **双层状态隔离** — Entity 暂停不物理修改 Shop，避免状态覆盖
 
-| 状态 | 触发条件 | 行为 |
-|------|----------|------|
-| Warning | 余额 ≤ 预警阈值 | 发出预警事件 |
-| Critical | 余额 ≤ 最低余额 | 自动暂停店铺 |
+## 已知技术债
 
-### 4. 一用户一店铺
+| 项目 | 状态 | 说明 |
+|------|------|------|
+| Weight benchmarking | 🔴 待做 | 所有 extrinsic 使用硬编码占位值（20k~50k, proof_size=0），生产前需基于 `frame_benchmarking` 重新计算 |
+| `update_entity` customer_service 参数 | 🟡 已废弃 | 已移至 Shop 层，参数被忽略。下一个 breaking change 版本移除 |
 
-```rust
-ensure!(!UserShop::<T>::contains_key(&who), Error::<T>::ShopAlreadyExists);
-```
-
-**目的**：防止刷店铺
-
-## 🧪 测试
-
-```bash
-# 运行单元测试
-cargo test -p pallet-entity-shop
-
-# 运行特定测试
-cargo test -p pallet-entity-shop test_create_shop
-```
-
-## 📝 版本历史
+## 版本历史
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
 | v0.1.0 | 2026-01-31 | 从 pallet-mall 拆分 |
-| v0.2.0 | 2026-02-01 | 实现 USDT 等值 COS 押金机制 |
+| v0.2.0 | 2026-02-01 | 实现 USDT 等值 COS 金库机制 |
+| v0.3.0 | 2026-02-03 | 重构为 Entity，支持多种实体类型和治理模式 |
+| v0.4.0 | 2026-02-05 | Entity-Shop 分离架构，1:1 关联，Primary Shop |
+| v0.5.0 | 2026-02-07 | 多实体支持，UserEntity BoundedVec |
+| v0.6.0 | 2026-02-08 | 双层状态模型，EffectiveShopStatus 实时计算 |
+| v0.6.1 | 2026-02-08 | 移除 treasury_fund 字段，治理可任意升级类型，reopen 防御性去重 |
+| v0.6.2 | 2026-02-08 | 安全审计修复：ban 状态限制、GovernanceSuspended 防绕过、Banned/Closed 拒绝修改、NameEmpty 错误、清理未用代码 |
 
-## 📄 许可证
+## 相关模块
 
-MIT License
-
-## 🔗 相关链接
-
-- [pallet-entity-product](../product/README.md)
-- [pallet-entity-common](../common/README.md)
-- [pallet-trading-pricing](../../trading/pricing/README.md)
+- [pallet-entity-common](../common/) — 共享类型 + Trait 接口
+- [pallet-entity-shop](../shop/) — Shop 业务层管理
+- [pallet-entity-member](../member/) — 会员体系
+- [pallet-entity-token](../token/) — 实体代币
+- [pallet-entity-governance](../governance/) — 治理模块
+- [pallet-commission-core](../../commission/core/) — 佣金核心

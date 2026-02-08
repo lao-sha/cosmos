@@ -43,7 +43,8 @@ pub mod pallet {
     };
     use frame_system::pallet_prelude::*;
     use pallet_entity_common::{
-        CommissionFundGuard, EntityProvider, MemberMode, ShopOperatingStatus, ShopProvider, ShopType,
+        CommissionFundGuard, EffectiveShopStatus, EntityProvider, EntityStatus,
+        MemberMode, ShopOperatingStatus, ShopProvider, ShopType,
     };
     use sp_runtime::{
         traits::{AccountIdConversion, Saturating, Zero},
@@ -797,6 +798,18 @@ pub mod pallet {
             Shops::<T>::get(shop_id)
                 .map(|s| Self::can_manage_shop(&s, account))
                 .unwrap_or(false)
+        }
+
+        fn shop_own_status(shop_id: u64) -> Option<ShopOperatingStatus> {
+            Shops::<T>::get(shop_id).map(|s| s.status)
+        }
+
+        fn effective_status(shop_id: u64) -> Option<EffectiveShopStatus> {
+            let shop = Shops::<T>::get(shop_id)?;
+            let entity_id = ShopEntity::<T>::get(shop_id)?;
+            let entity_status = T::EntityProvider::entity_status(entity_id)
+                .unwrap_or(EntityStatus::Pending);
+            Some(EffectiveShopStatus::compute(&entity_status, &shop.status))
         }
 
         fn update_shop_stats(shop_id: u64, sales_amount: u128, order_count: u32) -> Result<(), DispatchError> {
