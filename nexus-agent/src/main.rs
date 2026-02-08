@@ -6,6 +6,8 @@ mod multicaster;
 mod rate_limiter;
 mod signer;
 mod types;
+pub mod local_store;
+pub mod local_processor;
 mod webhook;
 
 use std::sync::Arc;
@@ -26,6 +28,7 @@ pub struct AppState {
     pub sequence_manager: SequenceManager,
     pub executor: executor::TelegramExecutor,
     pub config_store: group_config::ConfigStore,
+    pub local_store: local_store::LocalStore,
     pub http_client: reqwest::Client,
     pub nodes: RwLock<Vec<NodeInfo>>,
     pub start_time: Instant,
@@ -86,16 +89,33 @@ async fn main() -> anyhow::Result<()> {
     // 群配置存储
     let config_store = group_config::ConfigStore::new(&config.data_dir);
 
+    // 本地状态存储（防刷屏、警告计数等）
+    let local_store = local_store::LocalStore::new();
+    info!("LocalStore 已初始化");
+
     let state = Arc::new(AppState {
         config: config.clone(),
         key_manager,
         sequence_manager,
         executor: tg_executor,
         config_store,
+        local_store,
         http_client,
         nodes: RwLock::new(nodes),
         start_time: Instant::now(),
     });
+
+    // 定时清理 LocalStore 过期数据 (每 60 秒)
+    {
+        let state_ref = state.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                state_ref.local_store.cleanup_expired();
+            }
+        });
+    }
 
     // 注册 Telegram Webhook
     info!("正在注册 Telegram Webhook...");

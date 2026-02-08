@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tracing::{info, debug};
 
-use crate::types::{ActionType, MessageAction, AdminAction, SignedMessage, GroupConfig, JoinApprovalPolicy};
+use crate::types::{ActionType, MessageAction, AdminAction, QueryAction, SignedMessage, GroupConfig, JoinApprovalPolicy};
 use crate::chain_cache::ChainCache;
 
 /// 规则引擎
@@ -70,6 +70,10 @@ impl RuleEngine {
         let rules: Vec<Box<dyn Rule + Send + Sync>> = vec![
             Box::new(JoinRequestRule),
             Box::new(CommandRule),
+            Box::new(AntifloodRule),
+            Box::new(BlacklistRule),
+            Box::new(LockRule),
+            Box::new(WelcomeRule),
             Box::new(LinkFilterRule),
             Box::new(DefaultRule),
         ];
@@ -278,6 +282,90 @@ impl Rule for CommandRule {
                     reason: "command_delete".into(),
                 })
             }
+            "unban" => {
+                let user_id = ctx.reply_to_user_id.unwrap_or(0);
+                if user_id == 0 { return None; }
+                Some(RuleAction {
+                    action_type: ActionType::Admin(AdminAction::Unban),
+                    chat_id: ctx.chat_id,
+                    params: serde_json::json!({ "user_id": user_id }),
+                    reason: "command_unban".into(),
+                })
+            }
+            "warn" => {
+                let user_id = ctx.reply_to_user_id.unwrap_or(0);
+                if user_id == 0 { return None; }
+                let reason = ctx.command_args.clone().unwrap_or_default();
+                Some(RuleAction {
+                    action_type: ActionType::Admin(AdminAction::Mute), // placeholder — Agent handles warn logic
+                    chat_id: ctx.chat_id,
+                    params: serde_json::json!({
+                        "user_id": user_id,
+                        "warn_action": "add",
+                        "reason": reason,
+                    }),
+                    reason: "command_warn".into(),
+                })
+            }
+            "unwarn" => {
+                let user_id = ctx.reply_to_user_id.unwrap_or(0);
+                if user_id == 0 { return None; }
+                Some(RuleAction {
+                    action_type: ActionType::NoAction,
+                    chat_id: ctx.chat_id,
+                    params: serde_json::json!({
+                        "user_id": user_id,
+                        "warn_action": "remove",
+                    }),
+                    reason: "command_unwarn".into(),
+                })
+            }
+            "warns" => {
+                let user_id = ctx.reply_to_user_id.unwrap_or(ctx.sender_id);
+                Some(RuleAction {
+                    action_type: ActionType::Query(QueryAction::GetChatMember),
+                    chat_id: ctx.chat_id,
+                    params: serde_json::json!({
+                        "user_id": user_id,
+                        "warn_action": "query",
+                    }),
+                    reason: "command_warns".into(),
+                })
+            }
+            "resetwarns" => {
+                let user_id = ctx.reply_to_user_id.unwrap_or(0);
+                if user_id == 0 { return None; }
+                Some(RuleAction {
+                    action_type: ActionType::NoAction,
+                    chat_id: ctx.chat_id,
+                    params: serde_json::json!({
+                        "user_id": user_id,
+                        "warn_action": "reset",
+                    }),
+                    reason: "command_resetwarns".into(),
+                })
+            }
+            "help" => {
+                Some(RuleAction {
+                    action_type: ActionType::Message(MessageAction::Send),
+                    chat_id: ctx.chat_id,
+                    params: serde_json::json!({
+                        "text": "📋 Available commands:\n/ban - Ban user\n/unban - Unban user\n/mute <sec> - Mute user\n/unmute - Unmute user\n/kick - Kick user\n/warn - Warn user\n/unwarn - Remove warning\n/warns - View warnings\n/pin - Pin message\n/del - Delete message\n/help - This message",
+                    }),
+                    reason: "command_help".into(),
+                })
+            }
+            "id" => {
+                let target_id = ctx.reply_to_user_id.unwrap_or(ctx.sender_id);
+                Some(RuleAction {
+                    action_type: ActionType::Message(MessageAction::Send),
+                    chat_id: ctx.chat_id,
+                    params: serde_json::json!({
+                        "text": format!("🆔 User ID: {}\n💬 Chat ID: {}", target_id, ctx.chat_id),
+                    }),
+                    reason: "command_id".into(),
+                })
+            }
             _ => None,
         }
     }
@@ -320,6 +408,302 @@ impl Rule for LinkFilterRule {
         }
 
         None
+    }
+}
+
+/// 防刷屏规则
+///
+/// 统计每个用户在时间窗口内的消息数，超过阈值触发动作。
+/// 实际执行在 Agent 本地快速路径（LocalProcessor），此处用于 Node 侧验证。
+///
+/// 参考: FallenRobot/modules/antiflood.py — CHAT_FLOOD 内存字典 + 5 种 flood_type
+struct AntifloodRule;
+
+impl Rule for AntifloodRule {
+    fn name(&self) -> &str { "antiflood" }
+
+    fn evaluate(&self, ctx: &RuleContext) -> Option<RuleAction> {
+        let config = ctx.group_config.as_ref()?;
+
+        if config.antiflood_limit == 0 {
+            return None;
+        }
+
+        // 跳过命令消息
+        if ctx.is_command || ctx.is_join_request || ctx.is_callback {
+            return None;
+        }
+
+        // 跳过白名单和管理员
+        let sender_str = ctx.sender_id.to_string();
+        if config.whitelist.contains(&sender_str) || config.admins.contains(&sender_str) {
+            return None;
+        }
+
+        // Node 侧标记：需要 Agent 检查防刷屏（实际计数在 Agent LocalStore）
+        // 这里返回 NoAction + metadata，Agent LocalProcessor 负责实际检查
+        None
+    }
+}
+
+/// 黑名单关键词过滤规则
+///
+/// 检查消息文本是否包含黑名单关键词。
+///
+/// 参考: FallenRobot/modules/blacklist.py — SQL blacklist 表 + 正则匹配
+/// 参考: tg-spam/lib/tgspam/detector.go — stopWords 精确匹配
+struct BlacklistRule;
+
+impl Rule for BlacklistRule {
+    fn name(&self) -> &str { "blacklist" }
+
+    fn evaluate(&self, ctx: &RuleContext) -> Option<RuleAction> {
+        let config = ctx.group_config.as_ref()?;
+
+        if config.blacklist_words.is_empty() || ctx.text.is_empty() {
+            return None;
+        }
+
+        // 跳过命令消息
+        if ctx.is_command || ctx.is_join_request || ctx.is_callback {
+            return None;
+        }
+
+        // 跳过白名单和管理员
+        let sender_str = ctx.sender_id.to_string();
+        if config.whitelist.contains(&sender_str) || config.admins.contains(&sender_str) {
+            return None;
+        }
+
+        let text_lower = ctx.text.to_lowercase();
+        let matched = match &config.blacklist_mode {
+            crate::types::BlacklistMode::Exact => {
+                config.blacklist_words.iter().any(|w| text_lower == w.to_lowercase())
+            }
+            crate::types::BlacklistMode::Contains => {
+                config.blacklist_words.iter().any(|w| text_lower.contains(&w.to_lowercase()))
+            }
+            crate::types::BlacklistMode::Regex => {
+                config.blacklist_words.iter().any(|pattern| {
+                    regex::Regex::new(pattern)
+                        .map(|re| re.is_match(&text_lower))
+                        .unwrap_or(false)
+                })
+            }
+        };
+
+        if !matched {
+            return None;
+        }
+
+        let msg_id = ctx.message.telegram_update
+            .pointer("/message/message_id")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+
+        if msg_id == 0 {
+            return None;
+        }
+
+        // 根据 blacklist_action 决定动作
+        match &config.blacklist_action {
+            crate::types::BlacklistAction::Delete => {
+                Some(RuleAction {
+                    action_type: ActionType::Message(MessageAction::Delete),
+                    chat_id: ctx.chat_id,
+                    params: serde_json::json!({ "message_id": msg_id }),
+                    reason: "blacklist_delete".into(),
+                })
+            }
+            crate::types::BlacklistAction::DeleteAndWarn => {
+                Some(RuleAction {
+                    action_type: ActionType::Message(MessageAction::Delete),
+                    chat_id: ctx.chat_id,
+                    params: serde_json::json!({
+                        "message_id": msg_id,
+                        "user_id": ctx.sender_id,
+                        "also_warn": true,
+                    }),
+                    reason: "blacklist_delete_warn".into(),
+                })
+            }
+            crate::types::BlacklistAction::DeleteAndMute => {
+                Some(RuleAction {
+                    action_type: ActionType::Admin(AdminAction::Mute),
+                    chat_id: ctx.chat_id,
+                    params: serde_json::json!({
+                        "message_id": msg_id,
+                        "user_id": ctx.sender_id,
+                        "duration_seconds": config.auto_mute_duration,
+                        "also_delete": true,
+                    }),
+                    reason: "blacklist_delete_mute".into(),
+                })
+            }
+            crate::types::BlacklistAction::DeleteAndBan => {
+                Some(RuleAction {
+                    action_type: ActionType::Admin(AdminAction::Ban),
+                    chat_id: ctx.chat_id,
+                    params: serde_json::json!({
+                        "message_id": msg_id,
+                        "user_id": ctx.sender_id,
+                        "also_delete": true,
+                    }),
+                    reason: "blacklist_delete_ban".into(),
+                })
+            }
+        }
+    }
+}
+
+/// 消息类型锁定规则
+///
+/// 检查消息类型是否在锁定列表中。
+///
+/// 参考: FallenRobot/modules/locks.py — LOCK_TYPES 字典 (25 种)
+struct LockRule;
+
+impl Rule for LockRule {
+    fn name(&self) -> &str { "lock" }
+
+    fn evaluate(&self, ctx: &RuleContext) -> Option<RuleAction> {
+        let config = ctx.group_config.as_ref()?;
+
+        if config.lock_types.is_empty() {
+            return None;
+        }
+
+        if ctx.is_command || ctx.is_join_request || ctx.is_callback {
+            return None;
+        }
+
+        // 跳过白名单和管理员
+        let sender_str = ctx.sender_id.to_string();
+        if config.whitelist.contains(&sender_str) || config.admins.contains(&sender_str) {
+            return None;
+        }
+
+        let update = &ctx.message.telegram_update;
+        let msg = update.get("message")?;
+
+        // 检测消息类型
+        let detected_type = if msg.get("photo").is_some() {
+            Some(crate::types::LockType::Photo)
+        } else if msg.get("video").is_some() {
+            Some(crate::types::LockType::Video)
+        } else if msg.get("audio").is_some() {
+            Some(crate::types::LockType::Audio)
+        } else if msg.get("document").is_some() {
+            Some(crate::types::LockType::Document)
+        } else if msg.get("sticker").is_some() {
+            Some(crate::types::LockType::Sticker)
+        } else if msg.get("animation").is_some() {
+            Some(crate::types::LockType::Gif)
+        } else if msg.get("voice").is_some() {
+            Some(crate::types::LockType::Voice)
+        } else if msg.get("contact").is_some() {
+            Some(crate::types::LockType::Contact)
+        } else if msg.get("location").is_some() {
+            Some(crate::types::LockType::Location)
+        } else if msg.get("poll").is_some() {
+            Some(crate::types::LockType::Poll)
+        } else if msg.get("game").is_some() {
+            Some(crate::types::LockType::Game)
+        } else if msg.get("forward_from").is_some() || msg.get("forward_from_chat").is_some() {
+            Some(crate::types::LockType::Forward)
+        } else if msg.get("via_bot").is_some() {
+            Some(crate::types::LockType::Inline)
+        } else {
+            None
+        };
+
+        let lock_type = detected_type?;
+
+        if !config.lock_types.contains(&lock_type) {
+            return None;
+        }
+
+        let msg_id = msg.get("message_id")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+
+        if msg_id == 0 {
+            return None;
+        }
+
+        Some(RuleAction {
+            action_type: ActionType::Message(MessageAction::Delete),
+            chat_id: ctx.chat_id,
+            params: serde_json::json!({ "message_id": msg_id }),
+            reason: format!("lock_{:?}", lock_type),
+        })
+    }
+}
+
+/// 欢迎消息规则
+///
+/// 新成员加入时发送欢迎消息。
+///
+/// 参考: FallenRobot/modules/welcome.py — 支持变量替换 {first}/{chatname}/{id}
+struct WelcomeRule;
+
+impl Rule for WelcomeRule {
+    fn name(&self) -> &str { "welcome" }
+
+    fn evaluate(&self, ctx: &RuleContext) -> Option<RuleAction> {
+        let config = ctx.group_config.as_ref()?;
+
+        if config.welcome_message.is_empty() {
+            return None;
+        }
+
+        let update = &ctx.message.telegram_update;
+        let new_members = update.pointer("/message/new_chat_members")?;
+        let members = new_members.as_array()?;
+
+        if members.is_empty() {
+            return None;
+        }
+
+        // 取第一个新成员做变量替换
+        let member = &members[0];
+        let first_name = member.get("first_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("User");
+        let last_name = member.get("last_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let user_id = member.get("id")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let username = member.get("username")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let chat_name = update.pointer("/message/chat/title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Group");
+
+        let fullname = if last_name.is_empty() {
+            first_name.to_string()
+        } else {
+            format!("{} {}", first_name, last_name)
+        };
+
+        let text = config.welcome_message
+            .replace("{first}", first_name)
+            .replace("{last}", last_name)
+            .replace("{fullname}", &fullname)
+            .replace("{username}", username)
+            .replace("{id}", &user_id.to_string())
+            .replace("{chatname}", chat_name);
+
+        Some(RuleAction {
+            action_type: ActionType::Message(MessageAction::Send),
+            chat_id: ctx.chat_id,
+            params: serde_json::json!({ "text": text }),
+            reason: "welcome_message".into(),
+        })
     }
 }
 

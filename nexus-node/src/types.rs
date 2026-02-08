@@ -37,6 +37,12 @@ pub enum AdminAction {
     DeclineJoinRequest,
     /// 设置群权限
     SetPermissions,
+    /// 踢出用户（ban + 立即 unban）
+    Kick,
+    /// 提升为管理员
+    Promote,
+    /// 降级管理员
+    Demote,
 }
 
 /// 查询操作（只读，不需要共识）
@@ -325,6 +331,97 @@ pub struct SeenRecord {
 // 群配置（全节点同步，不上链）
 // ═══════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════
+// Bot 功能枚举类型
+// ═══════════════════════════════════════════════════════════════
+
+/// 防刷屏动作
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum FloodAction {
+    /// 禁言（默认）
+    Mute,
+    /// 踢出
+    Kick,
+    /// 封禁
+    Ban,
+    /// 仅删除消息
+    DeleteOnly,
+}
+
+impl Default for FloodAction {
+    fn default() -> Self { Self::Mute }
+}
+
+/// 警告超限动作
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum WarnAction {
+    /// 封禁（默认）
+    Ban,
+    /// 踢出
+    Kick,
+    /// 禁言
+    Mute,
+}
+
+impl Default for WarnAction {
+    fn default() -> Self { Self::Ban }
+}
+
+/// 黑名单匹配模式
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BlacklistMode {
+    /// 精确匹配
+    Exact,
+    /// 包含匹配（默认）
+    Contains,
+    /// 正则匹配
+    Regex,
+}
+
+impl Default for BlacklistMode {
+    fn default() -> Self { Self::Contains }
+}
+
+/// 黑名单触发动作
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BlacklistAction {
+    /// 仅删除（默认）
+    Delete,
+    /// 删除 + 警告
+    DeleteAndWarn,
+    /// 删除 + 禁言
+    DeleteAndMute,
+    /// 删除 + 封禁
+    DeleteAndBan,
+}
+
+impl Default for BlacklistAction {
+    fn default() -> Self { Self::Delete }
+}
+
+/// 可锁定的消息类型
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
+pub enum LockType {
+    Audio,
+    Video,
+    Photo,
+    Document,
+    Sticker,
+    Gif,
+    Url,
+    Forward,
+    Voice,
+    Contact,
+    Location,
+    Poll,
+    Game,
+    Inline,
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 群配置（全节点同步，不上链）
+// ═══════════════════════════════════════════════════════════════
+
 /// 入群审批策略
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum JoinApprovalPolicy {
@@ -374,7 +471,53 @@ pub struct GroupConfig {
     pub quiet_hours_end: Option<u8>,
     /// 最后更新时间戳
     pub updated_at: u64,
+
+    // ═══ Bot 功能扩展字段 ═══
+
+    /// 防刷屏阈值（N 条/时间窗口，0 = 关闭）
+    #[serde(default)]
+    pub antiflood_limit: u16,
+    /// 防刷屏时间窗口（秒，默认 10）
+    #[serde(default = "default_antiflood_window")]
+    pub antiflood_window: u16,
+    /// 防刷屏动作
+    #[serde(default)]
+    pub antiflood_action: FloodAction,
+
+    /// 警告上限（达到后执行 warn_action，默认 3）
+    #[serde(default = "default_warn_limit")]
+    pub warn_limit: u8,
+    /// 超限动作
+    #[serde(default)]
+    pub warn_action: WarnAction,
+
+    /// 黑名单关键词列表
+    #[serde(default)]
+    pub blacklist_words: Vec<String>,
+    /// 黑名单匹配模式
+    #[serde(default)]
+    pub blacklist_mode: BlacklistMode,
+    /// 黑名单触发动作
+    #[serde(default)]
+    pub blacklist_action: BlacklistAction,
+
+    /// 锁定的消息类型列表
+    #[serde(default)]
+    pub lock_types: Vec<LockType>,
+
+    /// 反垃圾检测开关
+    #[serde(default)]
+    pub spam_detection_enabled: bool,
+    /// 反垃圾：最大 emoji 数（0 = 不限）
+    #[serde(default)]
+    pub spam_max_emoji: u8,
+    /// 反垃圾：只检查新成员的前 N 条消息（0 = 检查所有）
+    #[serde(default)]
+    pub spam_first_messages_only: u8,
 }
+
+fn default_antiflood_window() -> u16 { 10 }
+fn default_warn_limit() -> u8 { 3 }
 
 /// 签名的群配置（含 Agent Ed25519 签名，保证完整性）
 #[derive(Debug, Clone, Serialize, Deserialize)]

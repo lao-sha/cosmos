@@ -2,7 +2,7 @@
 
 ## 概述
 
-`pallet-trading-maker` 是 Nexus 交易系统的核心模块之一，负责做市商的完整生命周期管理。做市商是 OTC 交易和 Bridge 兑换服务的核心参与者，本模块提供了从申请、审核、押金管理到服务运营的全流程支持。
+`pallet-trading-maker` 是 Nexus 交易系统的核心模块之一，负责做市商的完整生命周期管理。做市商是 P2P Buy（USDT→NXS）和 Sell（NXS→USDT）交易的核心参与者，本模块提供了从申请、审核、押金管理到服务运营的全流程支持。
 
 ### 主要功能
 
@@ -17,6 +17,7 @@
 ### 版本历史
 
 - **v0.1.0** (2025-11-03): 从 `pallet-trading` 拆分而来
+- **v0.2.0** (2026-02-08): 适配 P2P 统一模型，OTC/Bridge 术语更新为 Buy/Sell
 
 ---
 
@@ -48,8 +49,8 @@ DepositLocked → PendingReview → Active/Rejected/Cancelled
 #### 押金扣除
 
 当做市商发生违规行为时，系统会从押金中扣除相应金额：
-- OTC 订单超时：50 USD
-- Bridge 兑换超时：30 USD
+- Buy 订单超时：50 USD
+- Sell 兑换超时：30 USD
 - 争议仲裁败诉：损失金额的 10% + 20 USD 仲裁费
 - 信用分过低：每日 1 USD
 - 恶意行为：50-200 USD（根据严重程度）
@@ -95,11 +96,11 @@ pub enum ApplicationStatus {
 
 ```rust
 pub enum Direction {
-    /// 仅买入（仅Bridge）- 做市商购买COS，支付USDT
+    /// 仅 Buy 方向 — 做市商出售 NXS，收取 USDT
     Buy = 0,
-    /// 仅卖出（仅OTC）- 做市商出售COS，收取USDT
+    /// 仅 Sell 方向 — 做市商购买 NXS，支付 USDT
     Sell = 1,
-    /// 双向（OTC + Bridge）- 既可以买入也可以卖出
+    /// 双向（Buy + Sell）— 既可以买入也可以卖出
     BuyAndSell = 2,
 }
 ```
@@ -121,10 +122,10 @@ pub enum WithdrawalStatus {
 
 ```rust
 pub enum PenaltyType {
-    /// OTC订单超时
-    OtcTimeout { order_id: u64, timeout_hours: u32 },
-    /// Bridge兑换超时
-    BridgeTimeout { swap_id: u64, timeout_hours: u32 },
+    /// Buy 订单超时
+    BuyTimeout { order_id: u64, timeout_hours: u32 },
+    /// Sell 兑换超时
+    SellTimeout { swap_id: u64, timeout_hours: u32 },
     /// 争议败诉
     ArbitrationLoss { case_id: u64, loss_amount: u64 },
     /// 信用分过低
@@ -235,7 +236,7 @@ pub struct ArchivedPenaltyL2 {
     pub maker_id: u64,
     /// 扣除的USD价值
     pub usd_value: u64,
-    /// 惩罚类型代码 (0=OtcTimeout, 1=BridgeTimeout, 2=ArbitrationLoss, 3=LowCredit, 4=Malicious)
+    /// 惩罚类型代码 (0=BuyTimeout, 1=SellTimeout, 2=ArbitrationLoss, 3=LowCredit, 4=Malicious)
     pub penalty_type_code: u8,
     /// 申诉结果 (0=未申诉, 1=申诉成功, 2=申诉失败)
     pub appeal_status: u8,
@@ -334,8 +335,8 @@ pub struct ArchivedPenaltyL2 {
 | `AlreadyAppealed` | 已经申诉过 |
 | `AppealDeadlineExpired` | 申诉期限已过 |
 | `EvidenceTooLong` | 证据太长 |
-| `OrderNotFound` | 订单不存在 |
-| `SwapNotFound` | 兑换不存在 |
+| `OrderNotFound` | Buy 订单不存在 |
+| `SwapNotFound` | Sell 订单不存在 |
 | `CalculationOverflow` | 计算溢出 |
 
 ---

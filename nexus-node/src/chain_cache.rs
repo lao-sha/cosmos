@@ -331,6 +331,18 @@ mod tests {
             quiet_hours_start: None,
             quiet_hours_end: None,
             updated_at: 1000,
+            antiflood_limit: 0,
+            antiflood_window: 10,
+            antiflood_action: crate::types::FloodAction::default(),
+            warn_limit: 3,
+            warn_action: crate::types::WarnAction::default(),
+            blacklist_words: vec![],
+            blacklist_mode: crate::types::BlacklistMode::default(),
+            blacklist_action: crate::types::BlacklistAction::default(),
+            lock_types: vec![],
+            spam_detection_enabled: false,
+            spam_max_emoji: 0,
+            spam_first_messages_only: 0,
         }
     }
 

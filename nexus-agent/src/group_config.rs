@@ -25,6 +25,75 @@ pub enum JoinApprovalPolicy {
     },
 }
 
+/// 防刷屏动作
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum FloodAction {
+    Mute,
+    Kick,
+    Ban,
+    DeleteOnly,
+}
+
+impl Default for FloodAction {
+    fn default() -> Self { Self::Mute }
+}
+
+/// 警告超限动作
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum WarnAction {
+    Ban,
+    Kick,
+    Mute,
+}
+
+impl Default for WarnAction {
+    fn default() -> Self { Self::Ban }
+}
+
+/// 黑名单匹配模式
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BlacklistMode {
+    Exact,
+    Contains,
+    Regex,
+}
+
+impl Default for BlacklistMode {
+    fn default() -> Self { Self::Contains }
+}
+
+/// 黑名单触发动作
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum BlacklistAction {
+    Delete,
+    DeleteAndWarn,
+    DeleteAndMute,
+    DeleteAndBan,
+}
+
+impl Default for BlacklistAction {
+    fn default() -> Self { Self::Delete }
+}
+
+/// 可锁定的消息类型
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
+pub enum LockType {
+    Audio,
+    Video,
+    Photo,
+    Document,
+    Sticker,
+    Gif,
+    Url,
+    Forward,
+    Voice,
+    Contact,
+    Location,
+    Poll,
+    Game,
+    Inline,
+}
+
 /// 群配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupConfig {
@@ -42,7 +111,41 @@ pub struct GroupConfig {
     pub quiet_hours_start: Option<u8>,
     pub quiet_hours_end: Option<u8>,
     pub updated_at: u64,
+
+    // ═══ Bot 功能扩展字段 ═══
+
+    #[serde(default)]
+    pub antiflood_limit: u16,
+    #[serde(default = "default_antiflood_window")]
+    pub antiflood_window: u16,
+    #[serde(default)]
+    pub antiflood_action: FloodAction,
+
+    #[serde(default = "default_warn_limit")]
+    pub warn_limit: u8,
+    #[serde(default)]
+    pub warn_action: WarnAction,
+
+    #[serde(default)]
+    pub blacklist_words: Vec<String>,
+    #[serde(default)]
+    pub blacklist_mode: BlacklistMode,
+    #[serde(default)]
+    pub blacklist_action: BlacklistAction,
+
+    #[serde(default)]
+    pub lock_types: Vec<LockType>,
+
+    #[serde(default)]
+    pub spam_detection_enabled: bool,
+    #[serde(default)]
+    pub spam_max_emoji: u8,
+    #[serde(default)]
+    pub spam_first_messages_only: u8,
 }
+
+fn default_antiflood_window() -> u16 { 10 }
+fn default_warn_limit() -> u8 { 3 }
 
 /// 签名的群配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +173,19 @@ pub struct UpdateGroupConfigRequest {
     pub admins: Option<Vec<String>>,
     pub quiet_hours_start: Option<u8>,
     pub quiet_hours_end: Option<u8>,
+    // Bot 功能扩展
+    pub antiflood_limit: Option<u16>,
+    pub antiflood_window: Option<u16>,
+    pub antiflood_action: Option<FloodAction>,
+    pub warn_limit: Option<u8>,
+    pub warn_action: Option<WarnAction>,
+    pub blacklist_words: Option<Vec<String>>,
+    pub blacklist_mode: Option<BlacklistMode>,
+    pub blacklist_action: Option<BlacklistAction>,
+    pub lock_types: Option<Vec<LockType>>,
+    pub spam_detection_enabled: Option<bool>,
+    pub spam_max_emoji: Option<u8>,
+    pub spam_first_messages_only: Option<u8>,
     /// 钱包签名认证 (hex): sign(bot_id_hash + timestamp)
     pub auth_signature: String,
     /// 签名时间戳
@@ -224,6 +340,18 @@ pub async fn handle_update_config(
             quiet_hours_start: None,
             quiet_hours_end: None,
             updated_at: now,
+            antiflood_limit: 0,
+            antiflood_window: default_antiflood_window(),
+            antiflood_action: FloodAction::default(),
+            warn_limit: default_warn_limit(),
+            warn_action: WarnAction::default(),
+            blacklist_words: vec![],
+            blacklist_mode: BlacklistMode::default(),
+            blacklist_action: BlacklistAction::default(),
+            lock_types: vec![],
+            spam_detection_enabled: false,
+            spam_max_emoji: 0,
+            spam_first_messages_only: 0,
         });
 
     let new_config = GroupConfig {
@@ -241,6 +369,18 @@ pub async fn handle_update_config(
         quiet_hours_start: req.quiet_hours_start.or(base.quiet_hours_start),
         quiet_hours_end: req.quiet_hours_end.or(base.quiet_hours_end),
         updated_at: now,
+        antiflood_limit: req.antiflood_limit.unwrap_or(base.antiflood_limit),
+        antiflood_window: req.antiflood_window.unwrap_or(base.antiflood_window),
+        antiflood_action: req.antiflood_action.unwrap_or(base.antiflood_action),
+        warn_limit: req.warn_limit.unwrap_or(base.warn_limit),
+        warn_action: req.warn_action.unwrap_or(base.warn_action),
+        blacklist_words: req.blacklist_words.unwrap_or(base.blacklist_words),
+        blacklist_mode: req.blacklist_mode.unwrap_or(base.blacklist_mode),
+        blacklist_action: req.blacklist_action.unwrap_or(base.blacklist_action),
+        lock_types: req.lock_types.unwrap_or(base.lock_types),
+        spam_detection_enabled: req.spam_detection_enabled.unwrap_or(base.spam_detection_enabled),
+        spam_max_emoji: req.spam_max_emoji.unwrap_or(base.spam_max_emoji),
+        spam_first_messages_only: req.spam_first_messages_only.unwrap_or(base.spam_first_messages_only),
     };
 
     // 3. Agent 签名

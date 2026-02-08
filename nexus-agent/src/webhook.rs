@@ -45,6 +45,27 @@ pub async fn handle_webhook(
     let update_id = update.update_id;
     debug!(update_id, "收到 Telegram Update");
 
+    // 2.5 本地快速路径（防刷屏/黑名单/锁定/欢迎/反垃圾）
+    let raw_update: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+    let group_config = state.config_store.get().map(|c| c.config);
+    let local_actions = crate::local_processor::LocalProcessor::process(
+        &raw_update,
+        group_config.as_ref(),
+        &state.local_store,
+    );
+
+    if !local_actions.is_empty() {
+        let state_for_local = state.clone();
+        let actions_clone = local_actions.clone();
+        tokio::spawn(async move {
+            for action in actions_clone {
+                if let Err(e) = execute_local_action(&state_for_local, &action).await {
+                    warn!(error = %e, reason = action.reason, "本地快速路径执行失败");
+                }
+            }
+        });
+    }
+
     // 3. 签名 + 构造 SignedMessage
     let raw_json = body.to_vec();
     let timestamp = chrono::Utc::now().timestamp() as u64;
@@ -232,6 +253,146 @@ fn verify_leader_action(
             debug!(leader = action.leader_node_id, "Leader 签名验证通过");
         }
         // 空签名暂时允许（向后兼容，开发阶段）
+    }
+
+    Ok(())
+}
+
+/// 执行本地快速路径动作（直接调用 TG API，不走共识）
+///
+/// 支持的动作:
+///   - DeleteMessage → deleteMessage
+///   - MuteUser → restrictChatMember (can_send_messages: false)
+///   - BanUser → banChatMember
+///   - KickUser → banChatMember + unbanChatMember
+///   - SendMessage → sendMessage
+async fn execute_local_action(
+    state: &Arc<AppState>,
+    action: &crate::local_processor::LocalAction,
+) -> Result<(), String> {
+    use crate::local_processor::LocalActionType;
+
+    let bot_token = &state.config.bot_token;
+    let base = format!("https://api.telegram.org/bot{}", bot_token);
+
+    match &action.action {
+        LocalActionType::DeleteMessage => {
+            let msg_id = action.params.get("message_id")
+                .and_then(|v| v.as_i64()).unwrap_or(0);
+            if msg_id == 0 { return Ok(()); }
+
+            let url = format!("{}/deleteMessage", base);
+            let _ = state.http_client.post(&url)
+                .json(&serde_json::json!({
+                    "chat_id": action.chat_id,
+                    "message_id": msg_id,
+                }))
+                .send().await
+                .map_err(|e| format!("deleteMessage failed: {}", e))?;
+
+            debug!(chat_id = action.chat_id, msg_id, reason = action.reason, "本地删除消息");
+        }
+        LocalActionType::MuteUser => {
+            let user_id = action.params.get("user_id")
+                .and_then(|v| v.as_i64()).unwrap_or(0);
+            let duration = action.params.get("duration_seconds")
+                .and_then(|v| v.as_u64()).unwrap_or(300);
+            if user_id == 0 { return Ok(()); }
+
+            let until_date = chrono::Utc::now().timestamp() + duration as i64;
+            let url = format!("{}/restrictChatMember", base);
+            let _ = state.http_client.post(&url)
+                .json(&serde_json::json!({
+                    "chat_id": action.chat_id,
+                    "user_id": user_id,
+                    "permissions": { "can_send_messages": false },
+                    "until_date": until_date,
+                }))
+                .send().await
+                .map_err(|e| format!("restrictChatMember failed: {}", e))?;
+
+            // 如果也需要删除消息
+            if let Some(msg_id) = action.params.get("message_id").and_then(|v| v.as_i64()) {
+                let del_url = format!("{}/deleteMessage", base);
+                let _ = state.http_client.post(&del_url)
+                    .json(&serde_json::json!({
+                        "chat_id": action.chat_id,
+                        "message_id": msg_id,
+                    }))
+                    .send().await;
+            }
+
+            debug!(chat_id = action.chat_id, user_id, duration, reason = action.reason, "本地禁言");
+        }
+        LocalActionType::BanUser => {
+            let user_id = action.params.get("user_id")
+                .and_then(|v| v.as_i64()).unwrap_or(0);
+            if user_id == 0 { return Ok(()); }
+
+            let url = format!("{}/banChatMember", base);
+            let _ = state.http_client.post(&url)
+                .json(&serde_json::json!({
+                    "chat_id": action.chat_id,
+                    "user_id": user_id,
+                }))
+                .send().await
+                .map_err(|e| format!("banChatMember failed: {}", e))?;
+
+            // 如果也需要删除消息
+            if let Some(msg_id) = action.params.get("message_id").and_then(|v| v.as_i64()) {
+                let del_url = format!("{}/deleteMessage", base);
+                let _ = state.http_client.post(&del_url)
+                    .json(&serde_json::json!({
+                        "chat_id": action.chat_id,
+                        "message_id": msg_id,
+                    }))
+                    .send().await;
+            }
+
+            debug!(chat_id = action.chat_id, user_id, reason = action.reason, "本地封禁");
+        }
+        LocalActionType::KickUser => {
+            let user_id = action.params.get("user_id")
+                .and_then(|v| v.as_i64()).unwrap_or(0);
+            if user_id == 0 { return Ok(()); }
+
+            // ban then immediately unban = kick
+            let ban_url = format!("{}/banChatMember", base);
+            let _ = state.http_client.post(&ban_url)
+                .json(&serde_json::json!({
+                    "chat_id": action.chat_id,
+                    "user_id": user_id,
+                }))
+                .send().await
+                .map_err(|e| format!("banChatMember(kick) failed: {}", e))?;
+
+            let unban_url = format!("{}/unbanChatMember", base);
+            let _ = state.http_client.post(&unban_url)
+                .json(&serde_json::json!({
+                    "chat_id": action.chat_id,
+                    "user_id": user_id,
+                    "only_if_banned": true,
+                }))
+                .send().await;
+
+            debug!(chat_id = action.chat_id, user_id, reason = action.reason, "本地踢出");
+        }
+        LocalActionType::SendMessage => {
+            let text = action.params.get("text")
+                .and_then(|v| v.as_str()).unwrap_or("");
+            if text.is_empty() { return Ok(()); }
+
+            let url = format!("{}/sendMessage", base);
+            let _ = state.http_client.post(&url)
+                .json(&serde_json::json!({
+                    "chat_id": action.chat_id,
+                    "text": text,
+                }))
+                .send().await
+                .map_err(|e| format!("sendMessage failed: {}", e))?;
+
+            debug!(chat_id = action.chat_id, reason = action.reason, "本地发送消息");
+        }
     }
 
     Ok(())

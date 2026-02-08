@@ -7,7 +7,7 @@
 ### 特点
 
 - ✅ **纯 Rust crate**：无链上存储，仅提供工具函数和类型定义
-- ✅ **跨模块共享**：可被 OTC、Swap、Maker、Credit 等多个 pallet 引用
+- ✅ **跨模块共享**：可被 P2P、Maker、Credit、Pricing 等多个 pallet 引用
 - ✅ **no_std 兼容**：支持 WebAssembly 运行时环境
 
 ## 模块结构
@@ -36,11 +36,10 @@ pub type TronAddress = BoundedVec<u8, ConstU32<34>>;
 
 **说明**：
 - TRC20 地址以 `T` 开头，长度固定为 34 字符
-- 用于 OTC 订单收款地址和 Swap 兑换地址
+- 用于 P2P Buy 订单收款地址和 Sell 兑换地址
 
 **使用者**：
-- `pallet-trading-otc`：做市商收款地址
-- `pallet-trading-swap`：用户 USDT 接收地址
+- `pallet-trading-p2p`：做市商收款地址 / 用户 USDT 接收地址
 - `pallet-trading-maker`：做市商注册地址
 
 ### MomentOf
@@ -52,7 +51,7 @@ pub type MomentOf = u64;
 ```
 
 **说明**：
-- 用于 OTC 订单的时间字段
+- 用于 P2P 订单的时间字段
 - 精度为秒（非毫秒）
 
 ### Cid
@@ -77,7 +76,7 @@ pub type TxHash = BoundedVec<u8, ConstU32<128>>;
 
 **说明**：
 - 用于存储 TRON TRC20 交易哈希
-- Swap 模块中使用
+- P2P Sell 侧使用
 
 ### MakerApplicationInfo
 
@@ -103,8 +102,8 @@ pub trait PricingProvider<Balance> {
     /// 返回 Some(rate) 表示当前汇率，None 表示价格不可用
     fn get_cos_to_usd_rate() -> Option<Balance>;
     
-    /// 上报 Swap 交易到价格聚合
-    fn report_swap_order(
+    /// 上报 P2P 成交到价格聚合
+    fn report_p2p_trade(
         timestamp: u64,    // 交易时间戳（Unix 毫秒）
         price_usdt: u64,   // USDT 单价（精度 10^6）
         cos_qty: u128,    // NXS 数量（精度 10^12）
@@ -113,8 +112,7 @@ pub trait PricingProvider<Balance> {
 ```
 
 **使用者**：
-- `pallet-trading-otc`：计算订单金额
-- `pallet-trading-swap`：计算兑换金额
+- `pallet-trading-p2p`：计算 Buy/Sell 订单金额
 - `pallet-trading-maker`：计算押金价值
 
 **实现者**：
@@ -141,8 +139,7 @@ pub trait MakerInterface<AccountId, Balance> {
 ```
 
 **使用者**：
-- `pallet-trading-otc`：验证做市商和获取收款地址
-- `pallet-trading-swap`：验证做市商状态
+- `pallet-trading-p2p`：验证做市商和获取收款地址
 
 **实现者**：
 - `pallet-trading-maker`：提供做市商管理
@@ -176,8 +173,7 @@ pub trait MakerCreditInterface {
 ```
 
 **使用者**：
-- `pallet-trading-otc`：订单完成/超时/争议时调用
-- `pallet-trading-swap`：兑换完成/超时/争议时调用
+- `pallet-trading-p2p`：Buy/Sell 订单完成/超时/争议时调用
 
 **实现者**：
 - `pallet-trading-credit`：提供信用分管理
@@ -427,6 +423,7 @@ let remaining = estimate_remaining_seconds(timeout_block, current_block);
 | v0.2.0 | 2026-01-18 | 添加统一的 MakerCreditInterface trait |
 | v0.3.0 | 2026-01-18 | 添加时间转换工具函数 |
 | v0.4.0 | 2026-01-18 | 统一公共类型和 Trait 定义 |
+| v0.5.0 | 2026-02-08 | 适配 P2P 统一模型：report_swap_order → report_p2p_trade |
 
 ## 依赖关系
 

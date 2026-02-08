@@ -2,7 +2,7 @@
 
 ## 📋 模块概述
 
-`pallet-credit` 是 Nexus 区块链的 **统一信用管理系统**，整合了买家信用（Buyer Credit）和做市商信用（Maker Credit）两个子系统，并提供买家额度管理（Buyer Quota）功能。该模块通过多维度信任评估、动态风控机制和信用等级管理，为 OTC 交易市场提供完善的信用风控体系。
+`pallet-credit` 是 Nexus 区块链的 **统一信用管理系统**，整合了买家信用（Buyer Credit）和做市商信用（Maker Credit）两个子系统，并提供买家额度管理（Buyer Quota）功能。该模块通过多维度信任评估、动态风控机制和信用等级管理，为 P2P 交易市场提供完善的信用风控体系。
 
 ### 核心特性
 
@@ -1576,23 +1576,21 @@ impl pallet_credit::Config for Runtime {
 
 ### 与其他模块的集成
 
-#### 1. pallet-otc-order 集成
+#### 1. pallet-trading-p2p 集成
 
-**订单创建时检查买家限额**：
+**Buy 订单创建时检查买家限额**：
 
 ```rust
-// otc-order/src/lib.rs
+// p2p/src/lib.rs
 use pallet_credit::Pallet as Credit;
 
-pub fn create_order(
-    origin: OriginFor<T>,
-    amount_usdt: u64,
+pub fn do_create_buy_order(
+    buyer: &T::AccountId,
+    amount_usd: u64,
     // ...
 ) -> DispatchResult {
-    let buyer = ensure_signed(origin)?;
-
     // 检查买家限额
-    Credit::<T>::check_buyer_limit(&buyer, amount_usdt)?;
+    Credit::<T>::check_buyer_limit(buyer, amount_usd)?;
 
     // 创建订单...
 }
@@ -1601,12 +1599,12 @@ pub fn create_order(
 **订单完成时更新信用**：
 
 ```rust
-pub fn complete_order(order_id: u64) -> DispatchResult {
-    let order = Orders::<T>::get(order_id)?;
+pub fn do_release_nxs(order_id: u64) -> DispatchResult {
+    let order = BuyOrders::<T>::get(order_id)?;
 
     // 更新买家信用
     Credit::<T>::update_credit_on_success(
-        &order.buyer,
+        &order.taker,
         order.amount_usdt,
         payment_time_seconds,
     );
@@ -1625,11 +1623,11 @@ pub fn complete_order(order_id: u64) -> DispatchResult {
 **订单超时时惩罚**：
 
 ```rust
-pub fn timeout_order(order_id: u64) -> DispatchResult {
-    let order = Orders::<T>::get(order_id)?;
+pub fn do_expire_buy_order(order_id: u64) -> DispatchResult {
+    let order = BuyOrders::<T>::get(order_id)?;
 
     // 买家超时：违约惩罚
-    Credit::<T>::penalize_default(&order.buyer);
+    Credit::<T>::penalize_default(&order.taker);
 
     // 做市商超时：扣信用分
     Credit::<T>::record_maker_order_timeout(order.maker_id, order_id)?;
@@ -1687,74 +1685,41 @@ pub fn resolve_dispute(
 
 ### 买家额度管理接口（方案C+）
 
-**供 pallet-otc-order 调用**：
+**供 pallet-trading-p2p 调用**：
 
 ```rust
 use pallet_credit::quota::{BuyerQuotaInterface, ViolationType};
 
-// 创建订单时占用额度
-pub fn create_order(buyer: &T::AccountId, amount_usd: u64) -> DispatchResult {
-    // 检查并占用额度
-    <pallet_credit::Pallet<T> as BuyerQuotaInterface<T::AccountId>>::occupy_quota(
-        buyer,
-        amount_usd
-    )?;
-
+// Buy 订单创建时占用额度
+pub fn do_create_buy_order(buyer: &T::AccountId, amount_usd: u64) -> DispatchResult {
+    T::BuyerCredit::occupy_quota(buyer, amount_usd)?;
     // 创建订单...
     Ok(())
 }
 
 // 订单完成时释放额度并提升信用
-pub fn complete_order(order_id: u64) -> DispatchResult {
-    let order = Orders::<T>::get(order_id)?;
-
-    // 释放额度
-    <pallet_credit::Pallet<T> as BuyerQuotaInterface<T::AccountId>>::release_quota(
-        &order.buyer,
-        order.amount_usd
-    )?;
-
-    // 记录订单完成
-    <pallet_credit::Pallet<T> as BuyerQuotaInterface<T::AccountId>>::record_order_completed(
-        &order.buyer,
-        order_id
-    )?;
-
+pub fn do_release_nxs(order_id: u64) -> DispatchResult {
+    let order = BuyOrders::<T>::get(order_id)?;
+    T::BuyerCredit::release_quota(&order.taker, order.amount_usd)?;
+    T::BuyerCredit::record_order_completed(&order.taker, order_id)?;
     Ok(())
 }
 
 // 订单取消时释放额度
-pub fn cancel_order(order_id: u64) -> DispatchResult {
-    let order = Orders::<T>::get(order_id)?;
-
-    // 释放额度
-    <pallet_credit::Pallet<T> as BuyerQuotaInterface<T::AccountId>>::release_quota(
-        &order.buyer,
-        order.amount_usd
-    )?;
-
-    // 记录订单取消
-    <pallet_credit::Pallet<T> as BuyerQuotaInterface<T::AccountId>>::record_order_cancelled(
-        &order.buyer,
-        order_id
-    )?;
-
+pub fn do_cancel_buy_order(order_id: u64) -> DispatchResult {
+    let order = BuyOrders::<T>::get(order_id)?;
+    T::BuyerCredit::release_quota(&order.taker, order.amount_usd)?;
+    T::BuyerCredit::record_order_cancelled(&order.taker, order_id)?;
     Ok(())
 }
 
 // 订单超时时记录违约
-pub fn timeout_order(order_id: u64) -> DispatchResult {
-    let order = Orders::<T>::get(order_id)?;
-
-    // 记录违约
-    <pallet_credit::Pallet<T> as BuyerQuotaInterface<T::AccountId>>::record_violation(
-        &order.buyer,
-        ViolationType::OrderTimeout {
-            order_id,
-            timeout_minutes: 120,
-        }
+pub fn do_expire_buy_order(order_id: u64) -> DispatchResult {
+    let order = BuyOrders::<T>::get(order_id)?;
+    T::BuyerCredit::record_violation(
+        &order.taker,
+        ViolationType::OrderTimeout { order_id, timeout_minutes: 120 }
     )?;
-
     Ok(())
 }
 ```
@@ -1963,7 +1928,11 @@ await rateMaker(
 
 ## 📝 版本历史
 
-### v0.1.0（当前版本）
+### v0.2.0 (2026-02-08)
+
+- ✅ 适配 P2P 统一模型，pallet-otc-order 引用更新为 pallet-trading-p2p
+
+### v0.1.0
 
 - ✅ 实现买家信用管理
 - ✅ 实现做市商信用管理
@@ -1987,7 +1956,7 @@ await rateMaker(
 
 ## 📞 联系方式
 
-- **GitHub**: https://github.com/memoio/memopark
+- **GitHub**: https://github.com/lao-sha/cosmos
 - **License**: Unlicense
 
 ---

@@ -47,6 +47,9 @@ chrono = { version = "0.4", features = ["serde"] }
 # Atomic file operations (sequence 持久化)
 atomicwrites = "0.4"
 
+# Regex (BlacklistRule)
+regex = "1"
+
 [[bin]]
 name = "nexus-agent"
 path = "src/main.rs"

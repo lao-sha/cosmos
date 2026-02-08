@@ -34,6 +34,9 @@ pub enum AdminAction {
     ApproveJoinRequest,
     DeclineJoinRequest,
     SetPermissions,
+    Kick,
+    Promote,
+    Demote,
 }
 
 /// 查询操作（只读，不需要共识）
@@ -201,6 +204,54 @@ impl TelegramExecutor {
             ActionType::Admin(AdminAction::SetPermissions) => {
                 // TODO: setChatPermissions — requires permissions object
                 Ok(("setChatPermissions".to_string(), serde_json::json!({"ok": true})))
+            }
+            ActionType::Admin(AdminAction::Kick) => {
+                let user_id = action.params.get("user_id")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                // Kick = ban + immediate unban
+                let ban_result = self.call_tg_api("banChatMember", serde_json::json!({
+                    "chat_id": action.chat_id,
+                    "user_id": user_id,
+                })).await;
+                if ban_result.is_ok() {
+                    let _ = self.call_tg_api("unbanChatMember", serde_json::json!({
+                        "chat_id": action.chat_id,
+                        "user_id": user_id,
+                        "only_if_banned": true,
+                    })).await;
+                }
+                ban_result.map(|(_, resp)| ("kick".to_string(), resp))
+            }
+            ActionType::Admin(AdminAction::Promote) => {
+                let user_id = action.params.get("user_id")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                self.call_tg_api("promoteChatMember", serde_json::json!({
+                    "chat_id": action.chat_id,
+                    "user_id": user_id,
+                    "can_manage_chat": true,
+                    "can_delete_messages": true,
+                    "can_restrict_members": true,
+                    "can_pin_messages": true,
+                    "can_invite_users": true,
+                })).await
+            }
+            ActionType::Admin(AdminAction::Demote) => {
+                let user_id = action.params.get("user_id")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                self.call_tg_api("promoteChatMember", serde_json::json!({
+                    "chat_id": action.chat_id,
+                    "user_id": user_id,
+                    "can_manage_chat": false,
+                    "can_delete_messages": false,
+                    "can_restrict_members": false,
+                    "can_pin_messages": false,
+                    "can_invite_users": false,
+                    "can_promote_members": false,
+                    "can_change_info": false,
+                })).await
             }
             ActionType::Query(QueryAction::GetChatMember) => {
                 let user_id = action.params.get("user_id")
