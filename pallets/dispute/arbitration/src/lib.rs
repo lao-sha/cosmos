@@ -46,8 +46,6 @@ pub mod pallet {
         pub const SWAP: [u8; 8] = *b"swap____";
         /// 会员投诉域
         pub const MEMBER: [u8; 8] = *b"member__";
-        /// 推荐分成投诉域
-        pub const AFFILIATE: [u8; 8] = *b"affiliat";
         /// 信用系统申诉域
         pub const CREDIT: [u8; 8] = *b"credit__";
         /// 其他
@@ -118,12 +116,6 @@ pub mod pallet {
         /// 会员服务质量问题
         MemberServiceQuality,
         
-        // ========== 推荐分成投诉 (域: affiliat) ==========
-        /// 佣金分配争议
-        AffiliateCommissionDispute,
-        /// 推荐关系争议
-        AffiliateRelationDispute,
-        
         // ========== 信用系统申诉 (域: credit__) ==========
         /// 信用评分争议
         CreditScoreDispute,
@@ -162,9 +154,6 @@ pub mod pallet {
                 
                 // 会员
                 Self::MemberBenefitNotProvided | Self::MemberServiceQuality => domains::MEMBER,
-                
-                // 推荐分成
-                Self::AffiliateCommissionDispute | Self::AffiliateRelationDispute => domains::AFFILIATE,
                 
                 // 信用系统
                 Self::CreditScoreDispute | Self::CreditPenaltyAppeal => domains::CREDIT,

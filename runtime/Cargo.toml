@@ -34,7 +34,6 @@ pallet-transaction-payment-rpc-runtime-api = { version = "45.0.0", workspace = t
 pallet-transaction-payment = { version = "45.0.0", workspace = true }
 # Contracts pallet
 pallet-contracts = { version = "45.0.1", workspace = true }
-pallet-affiliate = { workspace = true }
 # Trading pallets
 pallet-trading-common = { workspace = true }
 pallet-trading-pricing = { workspace = true }
@@ -44,7 +43,6 @@ pallet-trading-swap = { workspace = true }
 pallet-trading-otc = { workspace = true }
 # Escrow, Referral, IPFS pallets
 pallet-escrow = { workspace = true }
-pallet-referral = { workspace = true }
 pallet-storage-service = { workspace = true }
 # Evidence pallet
 pallet-evidence = { workspace = true }
@@ -122,7 +120,6 @@ std = [
 	"pallet-transaction-payment/std",
 	# Contracts pallet std
 	"pallet-contracts/std",
-	"pallet-affiliate/std",
 	# Trading pallets std
 	"pallet-trading-common/std",
 	"pallet-trading-pricing/std",
@@ -132,7 +129,6 @@ std = [
 	"pallet-trading-otc/std",
 	# Escrow, Referral, IPFS pallets std
 	"pallet-escrow/std",
-	"pallet-referral/std",
 	"pallet-storage-service/std",
 	# Evidence pallet std
 	"pallet-evidence/std",
@@ -206,7 +202,6 @@ runtime-benchmarks = [
 	"pallet-trading-swap/runtime-benchmarks",
 	"pallet-trading-otc/runtime-benchmarks",
 	# Escrow, Referral pallets benchmarks
-	"pallet-referral/runtime-benchmarks",
 	# Evidence pallet benchmarks
 	"pallet-evidence/runtime-benchmarks",
 	# Arbitration pallet benchmarks
@@ -236,7 +231,6 @@ try-runtime = [
 	"pallet-trading-swap/try-runtime",
 	"pallet-trading-otc/try-runtime",
 	# Escrow, Referral pallets try-runtime
-	"pallet-referral/try-runtime",
 	# Evidence pallet try-runtime
 	"pallet-evidence/try-runtime",
 	# Arbitration pallet try-runtime

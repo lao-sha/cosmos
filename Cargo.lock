@@ -1619,7 +1619,6 @@ dependencies = [
  "frame-system-rpc-runtime-api",
  "frame-try-runtime",
  "hex",
- "pallet-affiliate",
  "pallet-arbitration",
  "pallet-assets",
  "pallet-aura",
@@ -1652,7 +1651,6 @@ dependencies = [
  "pallet-evidence",
  "pallet-grandpa",
  "pallet-membership",
- "pallet-referral",
  "pallet-storage-lifecycle",
  "pallet-storage-service",
  "pallet-sudo",
@@ -6268,25 +6266,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 
 [[package]]
-name = "pallet-affiliate"
-version = "1.0.0"
-dependencies = [
- "frame-benchmarking",
- "frame-support",
- "frame-system",
- "pallet-balances",
- "pallet-referral",
- "pallet-timestamp",
- "pallet-trading-common",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-io",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
 name = "pallet-arbitration"
 version = "0.1.0"
 dependencies = [
@@ -6959,22 +6938,6 @@ dependencies = [
  "polkadot-sdk-frame",
  "scale-info",
  "sp-mmr-primitives",
-]
-
-[[package]]
-name = "pallet-referral"
-version = "1.0.0"
-dependencies = [
- "frame-benchmarking",
- "frame-support",
- "frame-system",
- "pallet-balances",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-io",
- "sp-runtime",
- "sp-std",
 ]
 
 [[package]]

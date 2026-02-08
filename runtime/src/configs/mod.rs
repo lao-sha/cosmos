@@ -173,28 +173,6 @@ parameter_types! {
 	pub BurnAccountId: AccountId = BurnPalletId::get().into_account_truncating();
 }
 
-// Stub implementation for AffiliateDistributor until pallet_affiliate is integrated
-pub struct StubAffiliateDistributor;
-
-impl pallet_affiliate::types::AffiliateDistributor<AccountId, u128, BlockNumber> for StubAffiliateDistributor {
-	fn distribute_rewards(
-		_buyer: &AccountId,
-		_amount: u128,
-		_target: Option<(u8, u64)>,
-	) -> Result<u128, sp_runtime::DispatchError> {
-		Ok(0)
-	}
-}
-
-// UserFundingProvider 实现 - 使用存储服务模块的派生账户
-pub struct StorageUserFundingProvider;
-
-impl pallet_affiliate::UserFundingProvider<AccountId> for StorageUserFundingProvider {
-	fn derive_user_funding_account(user: &AccountId) -> AccountId {
-		pallet_storage_service::Pallet::<Runtime>::derive_user_funding_account(user)
-	}
-}
-
 // ============================================================================
 // 随机数生成器
 // ============================================================================
@@ -556,51 +534,6 @@ impl pallet_escrow::Config for Runtime {
 	type AdminOrigin = frame_system::EnsureRoot<AccountId>;
 	type MaxExpiringPerBlock = ConstU32<100>;
 	type ExpiryPolicy = DefaultExpiryPolicy;
-}
-
-// -------------------- Referral (推荐关系) --------------------
-
-parameter_types! {
-	/// 联盟分成最低 USDT 要求（精度 10^6，30_000_000 = 30 USDT）
-	pub const AffiliateMinUsdt: u64 = 30_000_000;
-}
-
-/// 基于余额的会员验证 - 账户余额 >= 30 USDT 等值 COS 才有资格获得联盟分成
-/// 使用 pricing 模块的实时 COS/USDT 价格进行换算
-pub struct BalanceBasedMembership;
-
-impl pallet_referral::MembershipProvider<AccountId> for BalanceBasedMembership {
-	fn is_valid_member(who: &AccountId) -> bool {
-		// 获取账户可用余额
-		let balance = pallet_balances::Pallet::<Runtime>::free_balance(who);
-
-		// 获取 COS/USDT 价格（精度 10^6）
-		let price_usdt = pallet_trading_pricing::Pallet::<Runtime>::get_cos_market_price_weighted();
-
-		// 价格为 0 时使用保底逻辑（要求最低 ED）
-		if price_usdt == 0 {
-			return balance >= EXISTENTIAL_DEPOSIT;
-		}
-
-		// 计算 30 USDT 等值的 COS 数量
-		// min_cos = 30_USDT * 10^12 / price_usdt
-		// 其中 30_USDT = 30_000_000（精度 10^6）
-		let min_usdt = AffiliateMinUsdt::get() as u128;
-		let min_cos = min_usdt
-			.saturating_mul(1_000_000_000_000u128)  // 10^12 COS 精度
-			.checked_div(price_usdt as u128)
-			.unwrap_or(0);
-
-		balance >= min_cos
-	}
-}
-
-impl pallet_referral::Config for Runtime {
-	type MembershipProvider = BalanceBasedMembership;
-	type MaxCodeLen = ConstU32<32>;
-	type MaxSearchHops = ConstU32<20>;
-	type MaxDownlines = ConstU32<1000>;
-	type WeightInfo = pallet_referral::weights::SubstrateWeight<Runtime>;
 }
 
 // -------------------- Storage Service (存储服务) --------------------

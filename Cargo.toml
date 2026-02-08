@@ -8,7 +8,6 @@ edition = "2021"
 [workspace]
 members = [
     "node",
-    "pallets/affiliate",
     "pallets/trading/common",
     "pallets/trading/pricing",
     "pallets/trading/credit",
@@ -16,7 +15,6 @@ members = [
     "pallets/trading/swap",
     "pallets/trading/otc",
     "pallets/dispute/escrow",
-    "pallets/affiliate/referral",
     "pallets/storage/service",
     "pallets/dispute/evidence",
     "pallets/dispute/arbitration",
@@ -53,7 +51,6 @@ exclude = ["node-operator", "costik-agent", "costik-node"]
 
 [workspace.dependencies]
 cosmos-runtime = { path = "./runtime", default-features = false }
-pallet-affiliate = { path = "./pallets/affiliate", default-features = false }
 # Trading pallets
 pallet-trading-common = { path = "./pallets/trading/common", default-features = false }
 pallet-trading-pricing = { path = "./pallets/trading/pricing", default-features = false }
@@ -63,7 +60,6 @@ pallet-trading-swap = { path = "./pallets/trading/swap", default-features = fals
 pallet-trading-otc = { path = "./pallets/trading/otc", default-features = false }
 # Escrow, Referral, IPFS pallets
 pallet-escrow = { path = "./pallets/dispute/escrow", default-features = false }
-pallet-referral = { path = "./pallets/affiliate/referral", default-features = false }
 pallet-storage-service = { path = "./pallets/storage/service", default-features = false }
 # Cosmos common libraries
 media-utils = { path = "./media-utils", default-features = false }

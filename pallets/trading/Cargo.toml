@@ -33,7 +33,6 @@ pallet-timestamp = { git = "https://github.com/paritytech/polkadot-sdk.git", bra
 pallet-pricing = { path = "../pricing", default-features = false }
 pallet-escrow = { workspace = true }
 pallet-credit = { path = "../credit", default-features = false }
-pallet-affiliate = { path = "../affiliate", default-features = false }
 pallet-evidence = { workspace = true }
 
 [dev-dependencies]
@@ -63,7 +62,6 @@ std = [
 	"pallet-pricing/std",
 	"pallet-escrow/std",
 	"pallet-credit/std",
-	"pallet-affiliate/std",
 	"pallet-evidence/std",
 ]
 runtime-benchmarks = [
