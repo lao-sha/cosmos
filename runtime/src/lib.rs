@@ -255,19 +255,6 @@ mod runtime {
 	pub type ContentMembership = pallet_collective_membership<Instance4>;
 
 	// ============================================================================
-	// Chat Pallets
-	// ============================================================================
-
-	#[runtime::pallet_index(40)]
-	pub type ChatPermission = pallet_chat_permission;
-
-	#[runtime::pallet_index(41)]
-	pub type ChatCore = pallet_chat_core;
-
-	#[runtime::pallet_index(42)]
-	pub type ChatGroup = pallet_chat_group;
-
-	// ============================================================================
 	// Trading Pallets
 	// ============================================================================
 

@@ -30,7 +30,6 @@ pallet-trading-credit = { workspace = true }
 pallet-trading-pricing = { workspace = true }
 pallet-trading-maker = { workspace = true }
 pallet-trading-common = { workspace = true }
-pallet-chat-permission = { workspace = true }
 pallet-timestamp = { workspace = true }
 pallet-storage-lifecycle = { workspace = true }
 pallet-storage-service = { path = "../../storage/service", default-features = false }
@@ -55,7 +54,6 @@ std = [
     "pallet-trading-pricing/std",
     "pallet-trading-maker/std",
     "pallet-trading-common/std",
-    "pallet-chat-permission/std",
     "pallet-timestamp/std",
     "pallet-storage-lifecycle/std",
     "pallet-storage-service/std",

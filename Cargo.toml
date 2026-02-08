@@ -9,11 +9,6 @@ edition = "2021"
 members = [
     "node",
     "pallets/affiliate",
-    "pallets/chat/common",
-    "pallets/chat/permission",
-    "pallets/chat/core",
-    "pallets/chat/group",
-    "pallets/chat/contacts",
     "pallets/trading/common",
     "pallets/trading/pricing",
     "pallets/trading/credit",
@@ -59,12 +54,6 @@ exclude = ["node-operator", "costik-agent", "costik-node"]
 [workspace.dependencies]
 cosmos-runtime = { path = "./runtime", default-features = false }
 pallet-affiliate = { path = "./pallets/affiliate", default-features = false }
-# Chat pallets
-pallet-chat-common = { path = "./pallets/chat/common", default-features = false }
-pallet-chat-permission = { path = "./pallets/chat/permission", default-features = false }
-pallet-chat-core = { path = "./pallets/chat/core", default-features = false }
-pallet-chat-group = { path = "./pallets/chat/group", default-features = false }
-pallet-chat-contacts = { path = "./pallets/chat/contacts", default-features = false }
 # Trading pallets
 pallet-trading-common = { path = "./pallets/trading/common", default-features = false }
 pallet-trading-pricing = { path = "./pallets/trading/pricing", default-features = false }

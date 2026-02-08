@@ -272,7 +272,6 @@ impl MakerCreditInterface for () {
 /// 所有需要保证金的模块都应使用此接口
 ///
 /// ## 使用者
-/// - `pallet-chat-group`: 群组创建保证金
 /// - `pallet-livestream`: 直播间创建保证金
 /// - `pallet-storage-service`: 运营者保证金
 /// - `pallet-affiliate`: 提案押金

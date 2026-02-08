@@ -600,7 +600,6 @@ let count = OtcOrder::get_maker_first_purchase_count(maker_id);
 | `pallet-escrow` | 托管服务，锁定/释放 COS |
 | `pallet-trading-credit` | 买家信用记录和额度管理 |
 | `pallet-trading-common` | 公共类型和 Trait 定义 |
-| `pallet-chat-permission` | 聊天权限管理 |
 | `pallet-identity` | KYC 身份认证 |
 | `pallet-arbitration` | 统一仲裁服务 |
 | `pallet-cosmos-ipfs` | CID 锁定管理（争议证据） |

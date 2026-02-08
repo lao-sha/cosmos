@@ -35,11 +35,6 @@ pallet-transaction-payment = { version = "45.0.0", workspace = true }
 # Contracts pallet
 pallet-contracts = { version = "45.0.1", workspace = true }
 pallet-affiliate = { workspace = true }
-# Chat pallets
-pallet-chat-common = { workspace = true }
-pallet-chat-permission = { workspace = true }
-pallet-chat-core = { workspace = true }
-pallet-chat-group = { workspace = true }
 # Trading pallets
 pallet-trading-common = { workspace = true }
 pallet-trading-pricing = { workspace = true }
@@ -128,11 +123,6 @@ std = [
 	# Contracts pallet std
 	"pallet-contracts/std",
 	"pallet-affiliate/std",
-	# Chat pallets std
-	"pallet-chat-common/std",
-	"pallet-chat-permission/std",
-	"pallet-chat-core/std",
-	"pallet-chat-group/std",
 	# Trading pallets std
 	"pallet-trading-common/std",
 	"pallet-trading-pricing/std",
@@ -209,10 +199,6 @@ runtime-benchmarks = [
 	"pallet-transaction-payment/runtime-benchmarks",
 	# Contracts pallet benchmarks
 	"pallet-contracts/runtime-benchmarks",
-	# Chat pallets benchmarks
-	"pallet-chat-permission/runtime-benchmarks",
-	"pallet-chat-core/runtime-benchmarks",
-	"pallet-chat-group/runtime-benchmarks",
 	# Trading pallets benchmarks
 	"pallet-trading-pricing/runtime-benchmarks",
 	"pallet-trading-credit/runtime-benchmarks",
@@ -243,10 +229,6 @@ try-runtime = [
 	"pallet-transaction-payment/try-runtime",
 	# Contracts pallet try-runtime
 	"pallet-contracts/try-runtime",
-	# Chat pallets try-runtime
-	"pallet-chat-permission/try-runtime",
-	"pallet-chat-core/try-runtime",
-	"pallet-chat-group/try-runtime",
 	# Trading pallets try-runtime
 	"pallet-trading-pricing/try-runtime",
 	"pallet-trading-credit/try-runtime",

@@ -1627,10 +1627,6 @@ dependencies = [
  "pallet-bot-consensus",
  "pallet-bot-group-mgmt",
  "pallet-bot-registry",
- "pallet-chat-common",
- "pallet-chat-core",
- "pallet-chat-group",
- "pallet-chat-permission",
  "pallet-collective",
  "pallet-commission-common",
  "pallet-commission-core",
@@ -6497,90 +6493,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pallet-chat-common"
-version = "0.1.0"
-dependencies = [
- "frame-support",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-io",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
-name = "pallet-chat-contacts"
-version = "0.1.0"
-dependencies = [
- "frame-benchmarking",
- "frame-support",
- "frame-system",
- "log",
- "parity-scale-codec",
- "scale-info",
- "sp-io",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
-name = "pallet-chat-core"
-version = "0.1.0"
-dependencies = [
- "frame-support",
- "frame-system",
- "log",
- "pallet-chat-common",
- "pallet-chat-permission",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-io",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
-name = "pallet-chat-group"
-version = "1.0.0"
-dependencies = [
- "frame-benchmarking",
- "frame-support",
- "frame-system",
- "media-utils",
- "pallet-balances",
- "pallet-chat-common",
- "pallet-chat-permission",
- "pallet-storage-service",
- "pallet-timestamp",
- "pallet-trading-common",
- "parity-scale-codec",
- "scale-info",
- "sp-core",
- "sp-io",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
-name = "pallet-chat-permission"
-version = "0.1.0"
-dependencies = [
- "frame-support",
- "frame-system",
- "log",
- "pallet-chat-common",
- "parity-scale-codec",
- "scale-info",
- "sp-api",
- "sp-core",
- "sp-io",
- "sp-runtime",
- "sp-std",
-]
-
-[[package]]
 name = "pallet-collective"
 version = "45.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7241,7 +7153,6 @@ dependencies = [
  "frame-support",
  "frame-system",
  "pallet-arbitration",
- "pallet-chat-permission",
  "pallet-escrow",
  "pallet-storage-lifecycle",
  "pallet-storage-service",

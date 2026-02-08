@@ -239,18 +239,8 @@ impl frame_support::traits::Randomness<Hash, BlockNumber> for CollectiveFlipRand
 }
 
 // ============================================================================
-// Chat Pallets Configuration
+// Common Utilities
 // ============================================================================
-
-// -------------------- Chat Permission (聊天权限) --------------------
-
-impl pallet_chat_permission::Config for Runtime {
-	type MaxBlockListSize = ConstU32<1000>;
-	type MaxWhitelistSize = ConstU32<1000>;
-	type MaxScenesPerPair = ConstU32<50>;
-}
-
-// -------------------- Chat Core (私聊核心) --------------------
 
 /// 时间戳提供器 - 使用 pallet_timestamp
 pub struct TimestampProvider;
@@ -260,55 +250,6 @@ impl frame_support::traits::UnixTime for TimestampProvider {
 		let millis = pallet_timestamp::Pallet::<Runtime>::get();
 		core::time::Duration::from_millis(millis)
 	}
-}
-
-impl pallet_chat_core::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = pallet_chat_core::SubstrateWeight<Runtime>;
-	type MaxCidLen = ConstU32<128>;
-	type MaxSessionsPerUser = ConstU32<1000>;
-	type MaxMessagesPerSession = ConstU32<10000>;
-	type RateLimitWindow = ConstU32<100>;
-	type MaxMessagesPerWindow = ConstU32<50>;
-	type MessageExpirationTime = ConstU32<{ 180 * DAYS }>;
-	type Randomness = CollectiveFlipRandomness;
-	type UnixTime = TimestampProvider;
-	type MaxNicknameLength = ConstU32<64>;
-	type MaxSignatureLength = ConstU32<256>;
-}
-
-// -------------------- Chat Group (群聊) --------------------
-
-parameter_types! {
-	pub const ChatGroupPalletId: frame_support::PalletId = frame_support::PalletId(*b"py/chatg");
-}
-
-parameter_types! {
-	pub const GroupDeposit: Balance = 50 * UNIT; // 创建群组保证金兜底值 50 COS
-	pub const GroupDepositUsd: u64 = 5_000_000; // 创建群组保证金 5 USDT（精度10^6）
-}
-
-impl pallet_chat_group::Config for Runtime {
-	type Randomness = CollectiveFlipRandomness;
-	type TimeProvider = TimestampProvider;
-	type Currency = Balances;
-	type MaxGroupNameLen = ConstU32<64>;
-	type MaxGroupDescriptionLen = ConstU32<256>;
-	type MaxGroupMembers = ConstU32<1000>;
-	type MaxGroupsPerUser = ConstU32<100>;
-	type MaxMessageLen = ConstU32<4096>;
-	type MaxGroupMessageHistory = ConstU32<10000>;
-	type MaxCidLen = ConstU32<128>;
-	type MaxKeyLen = ConstU32<256>;
-	type PalletId = ChatGroupPalletId;
-	type MessageRateLimit = ConstU32<60>; // 每分钟最多60条消息
-	type GroupCreationCooldown = ConstU32<{ 10 * MINUTES }>; // 创建群组冷却时间
-	type GroupDeposit = GroupDeposit;
-	type GroupDepositUsd = GroupDepositUsd;
-	type DepositCalculator = pallet_trading_common::DepositCalculatorImpl<TradingPricingProvider, Balance>;
-	type TreasuryAccount = TreasuryAccountId;
-	type GovernanceOrigin = EnsureRoot<AccountId>;
-	type WeightInfo = ();
 }
 
 // ============================================================================
@@ -559,7 +500,6 @@ impl pallet_trading_otc::Config for Runtime {
 	type MakerPallet = OtcMakerAdapter;
 	type CommitteeOrigin = frame_system::EnsureRoot<AccountId>;
 	type IdentityProvider = NullIdentityProvider;
-	type ChatPermission = pallet_chat_permission::Pallet<Runtime>;
 	type OrderTimeout = ConstU64<3600000>; // 1小时（毫秒）
 	type EvidenceWindow = ConstU64<86400000>; // 24小时（毫秒）
 	type FirstPurchaseUsdValue = ConstU128<10_000_000>; // 10 USD (精度 10^6)
@@ -776,22 +716,12 @@ impl pallet_arbitration::pallet::ArbitrationRouter<AccountId, Balance> for Unifi
 
 	/// 应用裁决（放款/退款/部分放款）
 	fn apply_decision(domain: [u8; 8], id: u64, decision: pallet_arbitration::pallet::Decision) -> sp_runtime::DispatchResult {
-		use pallet_arbitration::pallet::{Decision, domains};
+		use pallet_arbitration::pallet::domains;
 		
 		match domain {
 			d if d == domains::OTC_ORDER => {
 				// OTC 裁决执行：正确路由到支持 Partial 的函数
 				pallet_trading_otc::Pallet::<Runtime>::apply_arbitration_decision(id, decision)
-			},
-			d if d == domains::CHAT_GROUP => {
-				// 群组投诉裁决执行
-				// TODO: 群组保证金扣除功能待实现 (slash_group_bond)
-				// 当前直接返回 Ok，仲裁模块已处理押金分配
-				match decision {
-					Decision::Refund => Ok(()), // 投诉方胜诉
-					Decision::Release => Ok(()), // 群主胜诉
-					Decision::Partial(_) => Ok(()), // 部分胜诉
-				}
 			},
 			// 其他域暂时无需额外操作，仲裁模块已处理押金分配
 			_ => Ok(())
@@ -812,11 +742,6 @@ impl pallet_arbitration::pallet::ArbitrationRouter<AccountId, Balance> for Unifi
 				} else {
 					Ok(order.taker)
 				}
-			},
-			d if d == domains::CHAT_GROUP => {
-				let group = pallet_chat_group::Groups::<Runtime>::get(id)
-					.ok_or(DispatchError::Other("GroupNotFound"))?;
-				Ok(group.owner)
 			},
 			d if d == domains::MAKER => {
 				let maker_app = pallet_trading_maker::MakerApplications::<Runtime>::get(id)
@@ -840,10 +765,6 @@ impl pallet_arbitration::pallet::ArbitrationRouter<AccountId, Balance> for Unifi
 				let order = pallet_trading_otc::Orders::<Runtime>::get(id)
 					.ok_or(DispatchError::Other("OrderNotFound"))?;
 				Ok(order.amount)
-			},
-			d if d == domains::CHAT_GROUP => {
-				// 群组投诉：使用固定金额 5 UNIT
-				Ok(5 * UNIT)
 			},
 			_ => {
 				// 默认固定金额 10 UNIT

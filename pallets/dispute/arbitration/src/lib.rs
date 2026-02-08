@@ -38,18 +38,12 @@ pub mod pallet {
         pub const OTC_ORDER: [u8; 8] = *b"otc_ord_";
         /// 直播投诉域
         pub const LIVESTREAM: [u8; 8] = *b"livstrm_";
-        /// 聊天投诉域（私聊）
-        pub const CHAT: [u8; 8] = *b"chat____";
         /// 做市商投诉域
         pub const MAKER: [u8; 8] = *b"maker___";
         /// NFT 交易投诉域
         pub const NFT_TRADE: [u8; 8] = *b"nft_trd_";
-        /// 群组投诉域
-        pub const CHAT_GROUP: [u8; 8] = *b"chatgrp_";
         /// Swap 交换投诉域
         pub const SWAP: [u8; 8] = *b"swap____";
-        /// 联系人投诉域
-        pub const CONTACT: [u8; 8] = *b"contact_";
         /// 会员投诉域
         pub const MEMBER: [u8; 8] = *b"member__";
         /// 推荐分成投诉域
@@ -92,36 +86,6 @@ pub mod pallet {
         /// 直播其他违规
         LiveOther,
         
-        // ========== 聊天投诉 (域: chat____) ==========
-        /// 聊天骚扰
-        ChatHarassment,
-        /// 聊天诈骗
-        ChatFraud,
-        /// 聊天违规内容
-        ChatIllegalContent,
-        /// 私聊骚扰消息
-        ChatPrivateHarassment,
-        /// 被拉黑申诉
-        ChatBlockAppeal,
-        /// 聊天其他
-        ChatOther,
-        
-        // ========== 群组投诉 (域: chatgrp_) ==========
-        /// 群组违规内容
-        GroupIllegalContent,
-        /// 群组骚扰成员
-        GroupHarassment,
-        /// 群组诈骗
-        GroupFraud,
-        /// 群组垃圾信息
-        GroupSpam,
-        /// 群组仇恨言论
-        GroupHateSpeech,
-        /// 群主滥权
-        GroupAdminAbuse,
-        /// 群组其他
-        GroupOther,
-        
         // ========== 做市商投诉 (域: maker___) ==========
         /// 做市商信用违约
         MakerCreditDefault,
@@ -147,12 +111,6 @@ pub mod pallet {
         SwapVerificationTimeout,
         /// Swap 交换欺诈
         SwapFraud,
-        
-        // ========== 联系人投诉 (域: contact_) ==========
-        /// 好友请求骚扰
-        ContactRequestHarassment,
-        /// 被误拉黑申诉
-        ContactBlockAppeal,
         
         // ========== 会员投诉 (域: member__) ==========
         /// 会员权益未兑现
@@ -190,16 +148,6 @@ pub mod pallet {
                 Self::LiveHarassment | Self::LiveFraud | 
                 Self::LiveGiftRefund | Self::LiveOther => domains::LIVESTREAM,
                 
-                // 聊天
-                Self::ChatHarassment | Self::ChatFraud | Self::ChatIllegalContent |
-                Self::ChatPrivateHarassment | Self::ChatBlockAppeal |
-                Self::ChatOther => domains::CHAT,
-                
-                // 群组
-                Self::GroupIllegalContent | Self::GroupHarassment | Self::GroupFraud |
-                Self::GroupSpam | Self::GroupHateSpeech | Self::GroupAdminAbuse |
-                Self::GroupOther => domains::CHAT_GROUP,
-                
                 // 做市商
                 Self::MakerCreditDefault | Self::MakerMaliciousOperation |
                 Self::MakerFalseQuote => domains::MAKER,
@@ -211,9 +159,6 @@ pub mod pallet {
                 // Swap 交换
                 Self::SwapMakerNotComplete | Self::SwapVerificationTimeout |
                 Self::SwapFraud => domains::SWAP,
-                
-                // 联系人
-                Self::ContactRequestHarassment | Self::ContactBlockAppeal => domains::CONTACT,
                 
                 // 会员
                 Self::MemberBenefitNotProvided | Self::MemberServiceQuality => domains::MEMBER,
@@ -235,7 +180,7 @@ pub mod pallet {
                 // 重度违规，80%罚没
                 Self::OtcTradeFraud => 8000,
                 // 中度违规，50%罚没
-                Self::LiveIllegalContent | Self::GroupIllegalContent |
+                Self::LiveIllegalContent |
                 Self::MakerMaliciousOperation => 5000,
                 // 轻度违规，30%罚没
                 _ => 3000,
