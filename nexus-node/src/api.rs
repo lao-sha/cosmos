@@ -4,7 +4,7 @@ use axum::{
     Json,
 };
 use std::sync::Arc;
-use tracing::{info, warn, error, debug};
+use tracing::{warn, debug};
 
 use crate::types::SignedMessage;
 use crate::AppState;

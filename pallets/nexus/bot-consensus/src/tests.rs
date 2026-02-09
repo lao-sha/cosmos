@@ -1,5 +1,5 @@
-use crate::{mock::*, Error, NodeStatus, NodeId};
-use frame_support::{assert_ok, assert_noop};
+use crate::{mock::*, Error, NodeStatus, NodeId, SubscriptionTier, SubscriptionStatus};
+use frame_support::{assert_ok, assert_noop, traits::Hooks};
 
 fn make_node_id(id: u8) -> NodeId {
 	let v: sp_std::vec::Vec<u8> = sp_std::vec![id; 4];
@@ -463,5 +463,516 @@ fn multiple_nodes_register() {
 
 		let active = BotConsensus::active_node_list();
 		assert_eq!(active.len(), 3);
+	});
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 订阅管理测试
+// ═══════════════════════════════════════════════════════════════
+
+#[test]
+fn subscribe_works() {
+	new_test_ext().execute_with(|| {
+		let bh = bot_hash(1);
+		register_mock_bot(bh, 1);
+
+		assert_ok!(BotConsensus::subscribe(
+			RuntimeOrigin::signed(1),
+			bh,
+			SubscriptionTier::Basic,
+			100, // 10 Era 费用
+		));
+
+		let sub = BotConsensus::subscriptions(&bh).unwrap();
+		assert_eq!(sub.owner, 1);
+		assert_eq!(sub.tier, SubscriptionTier::Basic);
+		assert_eq!(sub.fee_per_era, 10);
+		assert_eq!(sub.status, SubscriptionStatus::Active);
+		assert_eq!(BotConsensus::subscription_escrow(&bh), 100);
+		assert_eq!(Balances::reserved_balance(1), 100);
+	});
+}
+
+#[test]
+fn subscribe_fails_bot_not_registered() {
+	new_test_ext().execute_with(|| {
+		let bh = bot_hash(99);
+		assert_noop!(
+			BotConsensus::subscribe(RuntimeOrigin::signed(1), bh, SubscriptionTier::Basic, 100),
+			Error::<Test>::BotNotRegistered
+		);
+	});
+}
+
+#[test]
+fn subscribe_fails_not_owner() {
+	new_test_ext().execute_with(|| {
+		let bh = bot_hash(1);
+		register_mock_bot(bh, 1);
+
+		assert_noop!(
+			BotConsensus::subscribe(RuntimeOrigin::signed(2), bh, SubscriptionTier::Basic, 100),
+			Error::<Test>::NotBotOwner
+		);
+	});
+}
+
+#[test]
+fn subscribe_fails_duplicate() {
+	new_test_ext().execute_with(|| {
+		let bh = bot_hash(1);
+		register_mock_bot(bh, 1);
+
+		assert_ok!(BotConsensus::subscribe(
+			RuntimeOrigin::signed(1), bh, SubscriptionTier::Basic, 100,
+		));
+		assert_noop!(
+			BotConsensus::subscribe(RuntimeOrigin::signed(1), bh, SubscriptionTier::Pro, 100),
+			Error::<Test>::SubscriptionAlreadyExists
+		);
+	});
+}
+
+#[test]
+fn subscribe_fails_insufficient_deposit() {
+	new_test_ext().execute_with(|| {
+		let bh = bot_hash(1);
+		register_mock_bot(bh, 1);
+
+		// Basic = 10/Era, deposit 5 < 10
+		assert_noop!(
+			BotConsensus::subscribe(RuntimeOrigin::signed(1), bh, SubscriptionTier::Basic, 5),
+			Error::<Test>::InsufficientDeposit
+		);
+	});
+}
+
+#[test]
+fn subscribe_pro_and_enterprise_fee() {
+	new_test_ext().execute_with(|| {
+		let bh1 = bot_hash(1);
+		let bh2 = bot_hash(2);
+		register_mock_bot(bh1, 1);
+		register_mock_bot(bh2, 2);
+
+		assert_ok!(BotConsensus::subscribe(
+			RuntimeOrigin::signed(1), bh1, SubscriptionTier::Pro, 300,
+		));
+		assert_eq!(BotConsensus::subscriptions(&bh1).unwrap().fee_per_era, 30);
+
+		assert_ok!(BotConsensus::subscribe(
+			RuntimeOrigin::signed(2), bh2, SubscriptionTier::Enterprise, 1000,
+		));
+		assert_eq!(BotConsensus::subscriptions(&bh2).unwrap().fee_per_era, 100);
+	});
+}
+
+#[test]
+fn deposit_subscription_works() {
+	new_test_ext().execute_with(|| {
+		let bh = bot_hash(1);
+		register_mock_bot(bh, 1);
+
+		assert_ok!(BotConsensus::subscribe(
+			RuntimeOrigin::signed(1), bh, SubscriptionTier::Basic, 50,
+		));
+		assert_eq!(BotConsensus::subscription_escrow(&bh), 50);
+
+		assert_ok!(BotConsensus::deposit_subscription(
+			RuntimeOrigin::signed(1), bh, 30,
+		));
+		assert_eq!(BotConsensus::subscription_escrow(&bh), 80);
+		assert_eq!(Balances::reserved_balance(1), 80);
+	});
+}
+
+#[test]
+fn deposit_subscription_fails_cancelled() {
+	new_test_ext().execute_with(|| {
+		let bh = bot_hash(1);
+		register_mock_bot(bh, 1);
+
+		assert_ok!(BotConsensus::subscribe(
+			RuntimeOrigin::signed(1), bh, SubscriptionTier::Basic, 50,
+		));
+		assert_ok!(BotConsensus::cancel_subscription(RuntimeOrigin::signed(1), bh));
+
+		assert_noop!(
+			BotConsensus::deposit_subscription(RuntimeOrigin::signed(1), bh, 30),
+			Error::<Test>::SubscriptionAlreadyCancelled
+		);
+	});
+}
+
+#[test]
+fn cancel_subscription_works() {
+	new_test_ext().execute_with(|| {
+		let bh = bot_hash(1);
+		register_mock_bot(bh, 1);
+
+		let free_before = Balances::free_balance(1);
+		assert_ok!(BotConsensus::subscribe(
+			RuntimeOrigin::signed(1), bh, SubscriptionTier::Basic, 100,
+		));
+		assert_eq!(Balances::free_balance(1), free_before - 100);
+
+		assert_ok!(BotConsensus::cancel_subscription(RuntimeOrigin::signed(1), bh));
+
+		let sub = BotConsensus::subscriptions(&bh).unwrap();
+		assert_eq!(sub.status, SubscriptionStatus::Cancelled);
+		assert_eq!(BotConsensus::subscription_escrow(&bh), 0);
+		// 退还到 free
+		assert_eq!(Balances::free_balance(1), free_before);
+	});
+}
+
+#[test]
+fn cancel_subscription_fails_double_cancel() {
+	new_test_ext().execute_with(|| {
+		let bh = bot_hash(1);
+		register_mock_bot(bh, 1);
+		assert_ok!(BotConsensus::subscribe(
+			RuntimeOrigin::signed(1), bh, SubscriptionTier::Basic, 50,
+		));
+		assert_ok!(BotConsensus::cancel_subscription(RuntimeOrigin::signed(1), bh));
+		assert_noop!(
+			BotConsensus::cancel_subscription(RuntimeOrigin::signed(1), bh),
+			Error::<Test>::SubscriptionAlreadyCancelled
+		);
+	});
+}
+
+#[test]
+fn change_tier_works() {
+	new_test_ext().execute_with(|| {
+		let bh = bot_hash(1);
+		register_mock_bot(bh, 1);
+
+		assert_ok!(BotConsensus::subscribe(
+			RuntimeOrigin::signed(1), bh, SubscriptionTier::Basic, 100,
+		));
+
+		assert_ok!(BotConsensus::change_tier(
+			RuntimeOrigin::signed(1), bh, SubscriptionTier::Pro,
+		));
+
+		let sub = BotConsensus::subscriptions(&bh).unwrap();
+		assert_eq!(sub.tier, SubscriptionTier::Pro);
+		assert_eq!(sub.fee_per_era, 30);
+	});
+}
+
+#[test]
+fn change_tier_fails_same() {
+	new_test_ext().execute_with(|| {
+		let bh = bot_hash(1);
+		register_mock_bot(bh, 1);
+		assert_ok!(BotConsensus::subscribe(
+			RuntimeOrigin::signed(1), bh, SubscriptionTier::Basic, 100,
+		));
+
+		assert_noop!(
+			BotConsensus::change_tier(RuntimeOrigin::signed(1), bh, SubscriptionTier::Basic),
+			Error::<Test>::SameTier
+		);
+	});
+}
+
+#[test]
+fn claim_rewards_works() {
+	new_test_ext().execute_with(|| {
+		let nid = make_node_id(1);
+		register_and_activate(1, &nid);
+
+		// 手动写入待领取奖励
+		crate::pallet::NodePendingRewards::<Test>::insert(&nid, 500u128);
+
+		let free_before = Balances::free_balance(1);
+		assert_ok!(BotConsensus::claim_rewards(RuntimeOrigin::signed(1), nid.clone()));
+
+		// 奖励已到账
+		assert_eq!(Balances::free_balance(1), free_before + 500);
+		assert_eq!(BotConsensus::node_pending_rewards(&nid), 0);
+	});
+}
+
+#[test]
+fn claim_rewards_fails_no_pending() {
+	new_test_ext().execute_with(|| {
+		let nid = make_node_id(1);
+		register_and_activate(1, &nid);
+
+		assert_noop!(
+			BotConsensus::claim_rewards(RuntimeOrigin::signed(1), nid),
+			Error::<Test>::NoPendingRewards
+		);
+	});
+}
+
+#[test]
+fn claim_rewards_fails_not_operator() {
+	new_test_ext().execute_with(|| {
+		let nid = make_node_id(1);
+		register_and_activate(1, &nid);
+		crate::pallet::NodePendingRewards::<Test>::insert(&nid, 500u128);
+
+		assert_noop!(
+			BotConsensus::claim_rewards(RuntimeOrigin::signed(2), nid),
+			Error::<Test>::NotNodeOperator
+		);
+	});
+}
+
+// ═══════════════════════════════════════════════════════════════
+// compute_node_weight 测试
+// ═══════════════════════════════════════════════════════════════
+
+#[test]
+fn compute_node_weight_new_node() {
+	new_test_ext().execute_with(|| {
+		let nid = make_node_id(1);
+		register_and_activate(1, &nid);
+
+		let node = BotConsensus::nodes(&nid).unwrap();
+		let stats = BotConsensus::leader_stats(&nid);
+
+		let w = BotConsensus::compute_node_weight(&node, &stats);
+		// rep=5000, uptime=5000(default), leader_bonus=10000
+		// 5000*5000*10000/10^8 = 2500
+		assert_eq!(w, 2500);
+	});
+}
+
+#[test]
+fn compute_node_weight_high_performance() {
+	new_test_ext().execute_with(|| {
+		let nid = make_node_id(1);
+		register_and_activate(1, &nid);
+
+		// 模拟高性能节点: rep=10000, 100% uptime, 100% leader success
+		crate::pallet::Nodes::<Test>::mutate(&nid, |maybe_node| {
+			if let Some(n) = maybe_node {
+				n.reputation = 10000;
+				n.messages_confirmed = 100;
+				n.messages_missed = 0;
+			}
+		});
+		crate::pallet::LeaderStatsStore::<Test>::insert(&nid, crate::LeaderStats {
+			total_leads: 10,
+			successful: 10,
+			timeout: 0,
+			failed: 0,
+			consecutive_timeouts: 0,
+		});
+
+		let node = BotConsensus::nodes(&nid).unwrap();
+		let stats = BotConsensus::leader_stats(&nid);
+		let w = BotConsensus::compute_node_weight(&node, &stats);
+		// rep=10000, uptime=10000, leader=15000
+		// 10000*10000*15000/10^8 = 15000
+		assert_eq!(w, 15000);
+	});
+}
+
+// ═══════════════════════════════════════════════════════════════
+// on_era_end 测试
+// ═══════════════════════════════════════════════════════════════
+
+#[test]
+fn era_end_inflation_only() {
+	new_test_ext().execute_with(|| {
+		// 注册并激活一个节点
+		let nid = make_node_id(1);
+		register_and_activate(1, &nid);
+
+		// 触发 Era 0 结束
+		System::set_block_number(10);
+		BotConsensus::on_initialize(10);
+
+		// Era 应该推进
+		assert_eq!(BotConsensus::current_era(), 1);
+
+		// 奖励信息应该记录
+		let info = BotConsensus::era_rewards(0).unwrap();
+		assert_eq!(info.subscription_income, 0);
+		assert_eq!(info.inflation_mint, 100);
+		assert_eq!(info.node_count, 1);
+
+		// 节点应有待领取奖励 (100 inflation → 节点池)
+		// MaxRewardShare = 30%, 所以单节点最多拿 30
+		let pending = BotConsensus::node_pending_rewards(&nid);
+		assert!(pending > 0);
+		assert_eq!(pending, 30); // capped at 30% of 100
+	});
+}
+
+#[test]
+fn era_end_subscription_deduction() {
+	new_test_ext().execute_with(|| {
+		let bh = bot_hash(1);
+		register_mock_bot(bh, 1);
+
+		let nid = make_node_id(2);
+		register_and_activate(2, &nid);
+
+		// 创建订阅
+		assert_ok!(BotConsensus::subscribe(
+			RuntimeOrigin::signed(1), bh, SubscriptionTier::Basic, 50,
+		));
+
+		// 触发 Era
+		System::set_block_number(10);
+		BotConsensus::on_initialize(10);
+
+		// 扣费 10
+		assert_eq!(BotConsensus::subscription_escrow(&bh), 40);
+
+		let info = BotConsensus::era_rewards(0).unwrap();
+		assert_eq!(info.subscription_income, 10);
+		// 节点池 = 10*80/100 + 100(inflation) = 8 + 100 = 108
+		assert!(info.total_distributed > 0);
+	});
+}
+
+#[test]
+fn era_end_past_due_then_suspend() {
+	new_test_ext().execute_with(|| {
+		let bh = bot_hash(1);
+		register_mock_bot(bh, 1);
+
+		let nid = make_node_id(2);
+		register_and_activate(2, &nid);
+
+		// 订阅刚好够 1 Era (Basic = 10/Era)
+		assert_ok!(BotConsensus::subscribe(
+			RuntimeOrigin::signed(1), bh, SubscriptionTier::Basic, 10,
+		));
+
+		// Era 0: 扣费成功, escrow = 0
+		System::set_block_number(10);
+		BotConsensus::on_initialize(10);
+		assert_eq!(BotConsensus::subscription_escrow(&bh), 0);
+		assert_eq!(BotConsensus::subscriptions(&bh).unwrap().status, SubscriptionStatus::Active);
+
+		// Era 1: 余额不足 → PastDue
+		System::set_block_number(20);
+		BotConsensus::on_initialize(20);
+		assert_eq!(BotConsensus::subscriptions(&bh).unwrap().status, SubscriptionStatus::PastDue);
+
+		// Era 2: 仍然不足 → Suspended
+		System::set_block_number(30);
+		BotConsensus::on_initialize(30);
+		assert_eq!(BotConsensus::subscriptions(&bh).unwrap().status, SubscriptionStatus::Suspended);
+	});
+}
+
+#[test]
+fn era_end_cancelled_sub_skipped() {
+	new_test_ext().execute_with(|| {
+		let bh = bot_hash(1);
+		register_mock_bot(bh, 1);
+		let nid = make_node_id(2);
+		register_and_activate(2, &nid);
+
+		assert_ok!(BotConsensus::subscribe(
+			RuntimeOrigin::signed(1), bh, SubscriptionTier::Basic, 100,
+		));
+		assert_ok!(BotConsensus::cancel_subscription(RuntimeOrigin::signed(1), bh));
+
+		System::set_block_number(10);
+		BotConsensus::on_initialize(10);
+
+		// 不应有订阅收入
+		let info = BotConsensus::era_rewards(0).unwrap();
+		assert_eq!(info.subscription_income, 0);
+	});
+}
+
+#[test]
+fn era_end_multi_node_weighted_distribution() {
+	new_test_ext().execute_with(|| {
+		// 注册 2 个节点
+		let nid1 = make_node_id(1);
+		let nid2 = make_node_id(2);
+		register_and_activate(1, &nid1);
+		register_and_activate(2, &nid2);
+
+		// 节点1: 高信誉 (10000)
+		crate::pallet::Nodes::<Test>::mutate(&nid1, |n| {
+			if let Some(n) = n { n.reputation = 10000; }
+		});
+		// 节点2: 默认信誉 (5000)
+
+		System::set_block_number(10);
+		BotConsensus::on_initialize(10);
+
+		let r1 = BotConsensus::node_pending_rewards(&nid1);
+		let r2 = BotConsensus::node_pending_rewards(&nid2);
+
+		// 两个节点都 capped at 30% = 30 each (权重不同但都被 cap)
+		// 或者低权重节点未被 cap
+		assert!(r1 > 0 && r2 > 0, "both should get rewards: r1={}, r2={}", r1, r2);
+		// 总和不超过总池
+		assert!(r1 + r2 <= 100);
+	});
+}
+
+#[test]
+fn era_end_max_reward_share_cap() {
+	new_test_ext().execute_with(|| {
+		// 注册 2 个节点，一个极高权重，一个极低
+		let nid1 = make_node_id(1);
+		let nid2 = make_node_id(2);
+		register_and_activate(1, &nid1);
+		register_and_activate(2, &nid2);
+
+		// 节点1: max perf
+		crate::pallet::Nodes::<Test>::mutate(&nid1, |n| {
+			if let Some(n) = n {
+				n.reputation = 10000;
+				n.messages_confirmed = 100;
+			}
+		});
+		crate::pallet::LeaderStatsStore::<Test>::insert(&nid1, crate::LeaderStats {
+			total_leads: 10, successful: 10, timeout: 0, failed: 0, consecutive_timeouts: 0,
+		});
+
+		// 节点2: 最低信誉仍 Active
+		crate::pallet::Nodes::<Test>::mutate(&nid2, |n| {
+			if let Some(n) = n { n.reputation = 2001; }
+		});
+
+		System::set_block_number(10);
+		BotConsensus::on_initialize(10);
+
+		let r1 = BotConsensus::node_pending_rewards(&nid1);
+		// MaxRewardShare = 30%, 总池 = 100 inflation → max = 30
+		assert!(r1 <= 30, "node1 reward {} should be capped at 30", r1);
+	});
+}
+
+#[test]
+fn deposit_reactivates_past_due_subscription() {
+	new_test_ext().execute_with(|| {
+		let bh = bot_hash(1);
+		register_mock_bot(bh, 1);
+		let nid = make_node_id(2);
+		register_and_activate(2, &nid);
+
+		// 刚好 1 Era
+		assert_ok!(BotConsensus::subscribe(
+			RuntimeOrigin::signed(1), bh, SubscriptionTier::Basic, 10,
+		));
+
+		// Era 0 → 扣完, Era 1 → PastDue
+		System::set_block_number(10);
+		BotConsensus::on_initialize(10);
+		System::set_block_number(20);
+		BotConsensus::on_initialize(20);
+		assert_eq!(BotConsensus::subscriptions(&bh).unwrap().status, SubscriptionStatus::PastDue);
+
+		// 充值后恢复
+		assert_ok!(BotConsensus::deposit_subscription(RuntimeOrigin::signed(1), bh, 100));
+		assert_eq!(BotConsensus::subscriptions(&bh).unwrap().status, SubscriptionStatus::Active);
 	});
 }

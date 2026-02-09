@@ -57,7 +57,7 @@ pub mod pallet {
         <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
     /// 商品信息
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     #[scale_info(skip_type_params(MaxCidLen))]
     pub struct Product<Balance, BlockNumber, MaxCidLen: Get<u32>> {
         /// 商品 ID
@@ -94,7 +94,7 @@ pub mod pallet {
     >;
 
     /// 商品统计
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
     pub struct ProductStatistics {
         /// 总商品数
         pub total_products: u64,
@@ -111,6 +111,8 @@ pub mod pallet {
         type Currency: Currency<Self::AccountId>;
 
         /// 实体查询接口
+        /// 注意：当前未直接调用，因为 ShopProvider::is_shop_active 已隐式检查 Entity 状态。
+        /// 保留此关联类型供未来扩展使用（如直接查询 Entity 元数据）。
         type EntityProvider: EntityProvider<Self::AccountId>;
 
         /// Shop 查询接口（Entity-Shop 分离架构）
@@ -182,7 +184,7 @@ pub mod pallet {
     >;
 
     /// 押金信息
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     pub struct ProductDepositInfo<AccountId, Balance> {
         /// 所属店铺 ID
         pub shop_id: u64,
@@ -244,6 +246,8 @@ pub mod pallet {
         PriceUnavailable,
         /// 算术溢出
         ArithmeticOverflow,
+        /// 商品价格无效（不能为 0）
+        InvalidPrice,
     }
 
     // ==================== Extrinsics ====================
@@ -252,7 +256,7 @@ pub mod pallet {
     impl<T: Config> Pallet<T> {
         /// 创建商品（从店铺派生账户扣取押金）
         #[pallet::call_index(0)]
-        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        #[pallet::weight(Weight::from_parts(250_000_000, 12_000))]
         pub fn create_product(
             origin: OriginFor<T>,
             shop_id: u64,
@@ -264,6 +268,9 @@ pub mod pallet {
             category: ProductCategory,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
+
+            // H4: 商品价格不能为零
+            ensure!(!price.is_zero(), Error::<T>::InvalidPrice);
 
             // 验证店铺
             ensure!(T::ShopProvider::shop_exists(shop_id), Error::<T>::ShopNotFound);
@@ -278,6 +285,14 @@ pub mod pallet {
                 Error::<T>::MaxProductsReached
             );
 
+            // H1: CID 校验移到转账前，避免无谓转账+回滚
+            let name_cid: BoundedVec<u8, T::MaxCidLength> =
+                name_cid.try_into().map_err(|_| Error::<T>::CidTooLong)?;
+            let images_cid: BoundedVec<u8, T::MaxCidLength> =
+                images_cid.try_into().map_err(|_| Error::<T>::CidTooLong)?;
+            let detail_cid: BoundedVec<u8, T::MaxCidLength> =
+                detail_cid.try_into().map_err(|_| Error::<T>::CidTooLong)?;
+
             // 计算押金（1 USDT 等值 NXS）
             let deposit = Self::calculate_product_deposit()?;
 
@@ -287,21 +302,14 @@ pub mod pallet {
             ensure!(shop_balance >= deposit, Error::<T>::InsufficientShopFund);
 
             // 从店铺派生账户转入 Pallet 账户
+            // L2: 使用 KeepAlive 防止 reap 店铺派生账户
             let pallet_account: T::AccountId = PRODUCT_PALLET_ID.into_account_truncating();
             T::Currency::transfer(
                 &shop_account,
                 &pallet_account,
                 deposit,
-                ExistenceRequirement::AllowDeath,
+                ExistenceRequirement::KeepAlive,
             )?;
-
-            // 转换 CID
-            let name_cid: BoundedVec<u8, T::MaxCidLength> =
-                name_cid.try_into().map_err(|_| Error::<T>::CidTooLong)?;
-            let images_cid: BoundedVec<u8, T::MaxCidLength> =
-                images_cid.try_into().map_err(|_| Error::<T>::CidTooLong)?;
-            let detail_cid: BoundedVec<u8, T::MaxCidLength> =
-                detail_cid.try_into().map_err(|_| Error::<T>::CidTooLong)?;
 
             let product_id = NextProductId::<T>::get();
             let now = <frame_system::Pallet<T>>::block_number();
@@ -347,7 +355,7 @@ pub mod pallet {
 
         /// 更新商品信息
         #[pallet::call_index(1)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(150_000_000, 8_000))]
         pub fn update_product(
             origin: OriginFor<T>,
             product_id: u64,
@@ -384,6 +392,10 @@ pub mod pallet {
                     product.stock = s;
                     if s > 0 && product.status == ProductStatus::SoldOut {
                         product.status = ProductStatus::OnSale;
+                        // M3: 补货恢复在售统计
+                        ProductStats::<T>::mutate(|stats| {
+                            stats.on_sale_products = stats.on_sale_products.saturating_add(1);
+                        });
                     }
                 }
                 if let Some(c) = category {
@@ -400,7 +412,7 @@ pub mod pallet {
 
         /// 上架商品
         #[pallet::call_index(2)]
-        #[pallet::weight(Weight::from_parts(20_000, 0))]
+        #[pallet::weight(Weight::from_parts(120_000_000, 6_000))]
         pub fn publish_product(origin: OriginFor<T>, product_id: u64) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -411,6 +423,11 @@ pub mod pallet {
                     .ok_or(Error::<T>::ShopNotFound)?;
                 ensure!(owner == who, Error::<T>::NotShopOwner);
                 ensure!(T::ShopProvider::is_shop_active(product.shop_id), Error::<T>::ShopNotActive);
+                // C3: 只能从 Draft/OffShelf 上架，防止重复计数
+                ensure!(
+                    product.status == ProductStatus::Draft || product.status == ProductStatus::OffShelf,
+                    Error::<T>::InvalidProductStatus
+                );
 
                 product.status = ProductStatus::OnSale;
                 product.updated_at = <frame_system::Pallet<T>>::block_number();
@@ -430,7 +447,7 @@ pub mod pallet {
 
         /// 下架商品
         #[pallet::call_index(3)]
-        #[pallet::weight(Weight::from_parts(20_000, 0))]
+        #[pallet::weight(Weight::from_parts(120_000_000, 6_000))]
         pub fn unpublish_product(origin: OriginFor<T>, product_id: u64) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -440,15 +457,24 @@ pub mod pallet {
                 let owner = T::ShopProvider::shop_owner(product.shop_id)
                     .ok_or(Error::<T>::ShopNotFound)?;
                 ensure!(owner == who, Error::<T>::NotShopOwner);
+                // C4: 只能从 OnSale/SoldOut 下架，防止统计错误
+                ensure!(
+                    product.status == ProductStatus::OnSale || product.status == ProductStatus::SoldOut,
+                    Error::<T>::InvalidProductStatus
+                );
 
+                let was_on_sale = product.status == ProductStatus::OnSale;
                 product.status = ProductStatus::OffShelf;
                 product.updated_at = <frame_system::Pallet<T>>::block_number();
+
+                if was_on_sale {
+                    ProductStats::<T>::mutate(|stats| {
+                        stats.on_sale_products = stats.on_sale_products.saturating_sub(1);
+                    });
+                }
+
                 Ok(())
             })?;
-
-            ProductStats::<T>::mutate(|stats| {
-                stats.on_sale_products = stats.on_sale_products.saturating_sub(1);
-            });
 
             Self::deposit_event(Event::ProductStatusChanged {
                 product_id,
@@ -459,7 +485,7 @@ pub mod pallet {
 
         /// 删除商品（退还押金到店铺派生账户）
         #[pallet::call_index(4)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(200_000_000, 10_000))]
         pub fn delete_product(origin: OriginFor<T>, product_id: u64) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -588,6 +614,10 @@ pub mod pallet {
                     product.stock = product.stock.saturating_sub(quantity);
                     if product.stock == 0 {
                         product.status = ProductStatus::SoldOut;
+                        // M4: 售罄时减少在售统计
+                        ProductStats::<T>::mutate(|stats| {
+                            stats.on_sale_products = stats.on_sale_products.saturating_sub(1);
+                        });
                     }
                 }
                 Ok(())
@@ -598,9 +628,14 @@ pub mod pallet {
             Products::<T>::try_mutate(product_id, |maybe_product| -> Result<(), sp_runtime::DispatchError> {
                 let product = maybe_product.as_mut().ok_or(Error::<T>::ProductNotFound)?;
                 if product.stock > 0 || product.status == ProductStatus::SoldOut {
+                    let was_sold_out = product.status == ProductStatus::SoldOut;
                     product.stock = product.stock.saturating_add(quantity);
-                    if product.status == ProductStatus::SoldOut {
+                    if was_sold_out {
                         product.status = ProductStatus::OnSale;
+                        // M4: 恢复库存时增加在售统计
+                        ProductStats::<T>::mutate(|stats| {
+                            stats.on_sale_products = stats.on_sale_products.saturating_add(1);
+                        });
                     }
                 }
                 Ok(())

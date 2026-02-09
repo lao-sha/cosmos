@@ -1,836 +1,436 @@
-# 店铺代币交易市场模块 (pallet-entity-market)
+# pallet-entity-market v0.8.0
+
+> 实体代币 P2P 交易市场模块 | Runtime Index: 126
 
 ## 概述
 
-本模块实现店铺代币的 P2P 交易市场，支持任意主网地址之间的店铺代币买卖交易。
+`pallet-entity-market` 实现实体代币的链上 P2P 交易市场。每个 Shop 可独立配置并运营自己的代币市场，支持 **NXS 链上即时结算** 和 **USDT 链下支付 + OCW 验证** 两种通道。
 
-## 核心功能
+### 核心能力
 
-### 1. NXS 通道 ✅
+- **双通道交易** — NXS（链上原子交换）+ USDT（TRC20 链下支付 + OCW 验证）
+- **限价单 + 市价单** — 挂单等待撮合 / 立即以最优价成交（滑点保护）
+- **三周期 TWAP 预言机** — 1h / 24h / 7d 时间加权平均价格，防操纵
+- **熔断机制** — 价格偏离 7d TWAP 超阈值自动暂停交易
+- **买家保证金** — USDT 通道锁定 NXS 保证金，防不付款风险
+- **多档金额判定** — OCW 验证实际付款金额，按比例自动处理少付
+- **OCW 验证激励** — 任何人可触发验证确认并获取奖励
 
-使用原生 NXS 代币进行店铺代币买卖，链上即时结算。
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    NXS 通道交易流程                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   卖家 (Alice)                          买家 (Bob)              │
-│       │                                     │                   │
-│       │ place_sell_order()                  │                   │
-│       │ (锁定 Token)                        │                   │
-│       ▼                                     │                   │
-│   ┌─────────┐                               │                   │
-│   │ 卖单    │                               │                   │
-│   │ 挂单中  │                               │                   │
-│   └─────────┘                               │                   │
-│       │                                     │                   │
-│       │ ◄─────────────────────── take_order()                  │
-│       │                          (支付 NXS)                     │
-│       ▼                                     │                   │
-│   ┌─────────────────────────────────────────┐                  │
-│   │           原子交换                       │                  │
-│   │  Token: Alice → Bob                     │                  │
-│   │  NXS: Bob → Alice                       │                  │
-│   │  Fee: → 店铺金库                         │                  │
-│   └─────────────────────────────────────────┘                  │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### 2. USDT 通道 ✅
-
-使用 TRC20 USDT 进行店铺代币买卖，需要 OCW 验证链下支付。
+## 架构
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    USDT 通道交易流程                             │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   流程 A: 吃 USDT 卖单（两阶段安全模式）🆕                      │
-│   ┌─────────────────────────────────────────────────────────┐  │
-│   │  1. Alice 挂 USDT 卖单 (锁定 Token, 提供 TRON 地址)      │  │
-│   │  2. Bob 调用 reserve_usdt_sell_order (预锁定)           │  │
-│   │     ├── 锁定 Bob 的 NXS 保证金                           │  │
-│   │     └── 锁定订单份额 (防止他人抢占)                      │  │
-│   │  3. Bob 链下转 USDT → Alice 的 TRON 地址                 │  │
-│   │  4. Bob 调用 confirm_usdt_payment (提交 tx_hash)        │  │
-│   │  5. OCW 验证 TRON 交易 + 金额多档判定                    │  │
-│   │  6. 结果处理:                                            │  │
-│   │     ├── 全额付款 → Token 全部转 Bob, 退还保证金          │  │
-│   │     ├── 少付 → 按比例分配 Token, 保证金全归国库          │  │
-│   │     └── 超时 → Token 退 Alice, 保证金归国库              │  │
-│   └─────────────────────────────────────────────────────────┘  │
-│                                                                 │
-│   流程 B: 接受 USDT 买单（含买家保证金 + 多档判定）🆕            │
-│   ┌─────────────────────────────────────────────────────────┐  │
-│   │  1. Bob 挂 USDT 买单                                     │  │
-│   │  2. Alice 调用 accept_usdt_buy_order                    │  │
-│   │     ├── 锁定 Bob 的 NXS 保证金                           │  │
-│   │     └── 锁定 Alice 的 Token                              │  │
-│   │  3. Bob 链下转 USDT → Alice 的 TRON 地址                 │  │
-│   │  4. Bob 调用 confirm_usdt_payment (提交 tx_hash)        │  │
-│   │  5. OCW 验证 TRON 交易 + 金额多档判定                    │  │
-│   │  6. 结果处理:                                            │  │
-│   │     ├── 全额付款 → Token 全部转 Bob, 退还保证金          │  │
-│   │     ├── 少付 → 按比例分配 Token, 保证金全归国库          │  │
-│   │     └── 超时 → Token 退 Alice, 保证金归国库              │  │
-│   └─────────────────────────────────────────────────────────┘  │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                     pallet-entity-market                         │
+│                     (pallet_index = 126)                         │
+├──────────────────┬───────────────────────────────────────────────┤
+│                  │                                               │
+│  NXS 通道        │  USDT 通道                                   │
+│  (链上即时结算)   │  (链下支付 + OCW 验证)                       │
+│                  │                                               │
+│  place_sell(0)   │  place_usdt_sell(5)   place_usdt_buy(6)      │
+│  place_buy(1)    │  reserve_usdt_sell(7)  accept_usdt_buy(8)    │
+│  take_order(2)   │  confirm_payment(9)   verify_payment(10)     │
+│  cancel(3)       │  process_timeout(11)                         │
+│  market_buy(12)  │  submit_ocw_result(18)                       │
+│  market_sell(13) │  claim_reward(19)                             │
+│                  │                                               │
+├──────────────────┴───────────────────────────────────────────────┤
+│  价格保护                                                        │
+│  configure_price_protection(15)  lift_circuit_breaker(16)        │
+│  set_initial_price(17)           configure_market(4)             │
+├──────────────────────────────────────────────────────────────────┤
+│  TWAP 预言机 (1h / 24h / 7d)                                    │
+│  异常价格过滤 (±100% 限幅) → 累积器 → 滚动快照                  │
+├──────────────────────────────────────────────────────────────────┤
+│  OCW (offchain_worker)                                           │
+│  PendingUsdtTrades → TronGrid API 验证 → submit_ocw_result      │
+└──────────────────────────────────────────────────────────────────┘
+         │                    │                    │
+         ▼                    ▼                    ▼
+   EntityProvider       ShopProvider        EntityTokenProvider
+   (实体查询)           (店铺查询)          (代币余额/锁定/转账)
 ```
 
-### 3. OCW 验证激励机制 🆕
+## NXS 通道交易流程
+
+链上原子交换，无需链下操作。
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    OCW 验证激励流程                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   1. offchain_worker 每区块执行                                 │
-│      └── 检查 PendingUsdtTrades 队列                           │
-│                     │                                           │
-│                     ▼                                           │
-│   2. 调用 TronGrid API 验证 TRC20 交易                          │
-│      ├── 多端点故障转移 + 健康评分                              │
-│      └── 🆕 获取实际付款金额 (actual_amount)                    │
-│                     │                                           │
-│                     ▼                                           │
-│   3. submit_ocw_result (无签名交易)                             │
-│      ├── ValidateUnsigned 验证                                  │
-│      ├── 🆕 计算多档判定结果 (PaymentVerificationResult)        │
-│      └── 存储 (判定结果, 实际金额) 到 OcwVerificationResults    │
-│                     │                                           │
-│                     ▼                                           │
-│   4. 任何人调用 claim_verification_reward                       │
-│      ├── 读取 OcwVerificationResults                            │
-│      ├── 🆕 根据判定结果执行不同处理逻辑                        │
-│      │     ├── Exact/Overpaid → 全额释放                        │
-│      │     └── Underpaid/SeverelyUnderpaid/Invalid → 按比例处理 │
-│      ├── 支付 VerificationReward 给调用者                       │
-│      └── 清理存储                                               │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+Alice (卖家)                                 Bob (买家)
+    │ place_sell_order(shop, 1000, 0.1 NXS)      │
+    │ → Token 锁定                                │
+    │                                              │
+    │                    take_order(order_id, None) │
+    │                    → NXS 支付                 │
+    ▼                                              ▼
+┌──────────────────────────────────────────────────┐
+│  原子交换                                        │
+│  Token: Alice → Bob                              │
+│  NXS:   Bob → Alice (扣除手续费)                 │
+│  Fee:   → Shop Owner                             │
+└──────────────────────────────────────────────────┘
 ```
 
-**安全机制**：
-- `submit_ocw_result` 通过 `ValidateUnsigned` 验证
-- 只有 `AwaitingVerification` 状态的交易可提交
-- 防止重复提交（已有结果则拒绝）
-- `claim_verification_reward` 根据链上 OCW 结果自动处理
+## USDT 通道交易流程
 
-### 4. 买家保证金机制 🆕
+两阶段安全模式：先链上锁定，后链下支付。
 
-防止 USDT 买单场景下买家不付款的风险。
+### 流程 A — 吃 USDT 卖单 (reserve_usdt_sell_order)
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    买家保证金流程                                │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   保证金计算公式:                                               │
-│   deposit = max(MinBuyerDeposit, USDT金额 × DepositRate × Rate) │
-│                                                                 │
-│   ┌──────────────────────────────────────────────────────────┐ │
-│   │  卖家接受买单 (accept_usdt_buy_order)                     │ │
-│   │       │                                                   │ │
-│   │       ├── 计算保证金金额                                  │ │
-│   │       ├── 锁定买家 NXS (T::Currency::reserve)            │ │
-│   │       └── 锁定卖家 Token                                  │ │
-│   │       │                                                   │ │
-│   │       ▼                                                   │ │
-│   │  等待买家链下打款...                                      │ │
-│   │       │                                                   │ │
-│   │       ├──────────────┬─────────────────┐                 │ │
-│   │       │              │                 │                 │ │
-│   │       ▼              ▼                 ▼                 │ │
-│   │   验证通过        验证失败          超时未付款           │ │
-│   │       │              │                 │                 │ │
-│   │       ▼              ▼                 ▼                 │ │
-│   │   退还保证金      退还保证金      没收保证金→卖家        │ │
-│   │   Token→买家      Token→卖家      Token→卖家             │ │
-│   └──────────────────────────────────────────────────────────┘ │
-│                                                                 │
-│   保证金状态: None → Locked → Released / PartiallyForfeited / Forfeited │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+① Alice 挂 USDT 卖单 (锁定 Token, 提供 TRON 地址)
+② Bob  → reserve_usdt_sell_order (锁定 NXS 保证金 + 锁定订单份额)
+③ Bob  链下转 USDT → Alice 的 TRON 地址
+④ Bob  → confirm_usdt_payment (提交 tron_tx_hash)
+⑤ OCW  → submit_ocw_result (验证 TRON 交易 + 多档判定)
+⑥ 任何人 → claim_verification_reward (执行结果处理 + 领取奖励)
 ```
 
-**设计要点**：
-- 适用于 **流程 A（吃 USDT 卖单）** 和 **流程 B（接受 USDT 买单）**
-- 保证金为 NXS，非店铺代币，价值稳定
-- 没收比例可配置（`DepositForfeitRate`），支持部分没收
-- 验证失败时保证金退还（可能是 OCW 验证错误）
-- 超时时保证金全部归国库（买家未付款或提交假 tx_hash）
-
-### 5. 付款金额多档判定 🆕
-
-防止买家少付 USDT 的诈骗行为，自动按比例处理。
+### 流程 B — 接受 USDT 买单 (accept_usdt_buy_order)
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    金额多档判定机制                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   OCW 验证后计算付款比例:                                       │
-│                                                                 │
-│   ┌──────────────────────────────────────────────────────────┐ │
-│   │  实际金额 / 期望金额                                      │ │
-│   │       │                                                   │ │
-│   │       ├── ≥ 100.5%  → Overpaid     → ✅ 全额释放          │ │
-│   │       ├── 99.5%-100.5% → Exact     → ✅ 全额释放          │ │
-│   │       ├── 50%-99.5% → Underpaid    → ⚠️ 按比例自动处理   │ │
-│   │       ├── < 50%     → SeverelyUnderpaid → ⚠️ 按比例自动处理│ │
-│   │       └── = 0       → Invalid      → ⚠️ 按比例自动处理   │ │
-│   └──────────────────────────────────────────────────────────┘ │
-│                                                                 │
-│   Underpaid 自动处理逻辑:                                       │
-│   ┌──────────────────────────────────────────────────────────┐ │
-│   │  例: 期望 100 USDT，实际 80 USDT (80%)                    │ │
-│   │       │                                                   │ │
-│   │       ├── Token: 80% 释放给买家，20% 退还卖家             │ │
-│   │       └── 保证金: 全部归国库 🆕                           │ │
-│   └──────────────────────────────────────────────────────────┘ │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+① Bob  挂 USDT 买单
+② Alice → accept_usdt_buy_order (锁定 Bob 保证金 + 锁定 Alice Token)
+③ Bob  链下转 USDT → Alice 的 TRON 地址
+④ Bob  → confirm_usdt_payment
+⑤ OCW  → submit_ocw_result
+⑥ 任何人 → claim_verification_reward
 ```
 
-**设计要点**：
-- ±0.5% 容差处理汇率波动和手续费
-- **所有少付情况 Token 按比例自动处理**，无需人工仲裁
-- 买家获得与付款比例相等的 Token
-- **少付/超时/无效时，保证金全部归国库** 🆕
-- 只有全额付款时，保证金才退还买家
+### 超时处理
+
+任何人可调用 `process_usdt_timeout`：退还卖家 Token，按 `DepositForfeitRate` 没收买家保证金归国库。
+
+## 付款金额多档判定
+
+OCW 验证后根据实际付款比例自动处理：
+
+| 比例 | 判定结果 | 处理 |
+|------|---------|------|
+| ≥ 100.5% | `Overpaid` | ✅ Token 全部释放，保证金退还 |
+| 99.5% ~ 100.5% | `Exact` | ✅ Token 全部释放，保证金退还 |
+| 50% ~ 99.5% | `Underpaid` | ⚠️ Token 按比例释放，保证金全部没收归国库 |
+| < 50% | `SeverelyUnderpaid` | ⚠️ Token 按比例释放，保证金全部没收归国库 |
+| = 0 | `Invalid` | ❌ Token 全部退还卖家，保证金全部没收归国库 |
+
+**设计要点**：±0.5% 容差处理汇率波动；少付无需人工仲裁，全自动按比例处理。
+
+## TWAP 价格预言机
+
+三周期时间加权平均价格，防止价格操纵。
+
+```
+每次成交 → update_twap_accumulator()
+  │
+  ├── 异常价格过滤: 偏离上次价格 >100% → 限幅至 ±50%
+  ├── 累积价格更新: cumulative += last_price × blocks_elapsed
+  ├── 1h 快照: 每 10 分钟滚动更新
+  ├── 24h 快照: 每 1 小时滚动更新
+  └── 7d 快照: 每 1 天滚动更新
+```
+
+**TWAP 计算**: `(current_cumulative - snapshot_cumulative) / block_diff`
+
+**价格偏离检查优先级**:
+1. 成交量 ≥ `min_trades_for_twap` → 使用 1h TWAP 作为参考
+2. 成交量不足但有 `initial_price` → 使用店主设定的初始价格
+3. 都没有 → 跳过检查
+
+**熔断**: 成交价偏离 7d TWAP 超过 `circuit_breaker_threshold` → 暂停交易 `CircuitBreakerDuration` 个区块。
 
 ## 数据结构
 
-### 订单 (TradeOrder)
+### TradeOrder
 
 ```rust
 pub struct TradeOrder<T: Config> {
-    pub order_id: u64,           // 订单 ID
-    pub shop_id: u64,            // 店铺 ID
-    pub maker: T::AccountId,     // 挂单者
-    pub side: OrderSide,         // Buy / Sell
-    pub channel: PaymentChannel, // NXS / USDT
-    pub token_amount: Balance,   // 代币数量
-    pub filled_amount: Balance,  // 已成交数量
-    pub price: Balance,          // 单价（NXS/Token）
-    pub status: OrderStatus,     // 订单状态
-    pub created_at: BlockNumber, // 创建区块
-    pub expires_at: BlockNumber, // 过期区块
+    pub order_id: u64,
+    pub shop_id: u64,
+    pub maker: T::AccountId,
+    pub side: OrderSide,              // Buy / Sell
+    pub order_type: OrderType,        // Limit / Market
+    pub channel: PaymentChannel,      // NXS / USDT
+    pub token_amount: T::TokenBalance,
+    pub filled_amount: T::TokenBalance,
+    pub price: BalanceOf<T>,          // NXS 通道: NXS/Token
+    pub usdt_price: u64,              // USDT 通道: USDT/Token (精度 10^6)
+    pub tron_address: Option<TronAddress>,  // 仅 USDT 卖单
+    pub status: OrderStatus,          // Open / PartiallyFilled / Filled / Cancelled / Expired
+    pub created_at: BlockNumber,
+    pub expires_at: BlockNumber,
 }
 ```
 
-### 订单状态
-
-| 状态 | 说明 |
-|------|------|
-| `Open` | 挂单中，等待成交 |
-| `PartiallyFilled` | 部分成交 |
-| `Filled` | 完全成交 |
-| `Cancelled` | 已取消 |
-| `Expired` | 已过期 |
-
-### 买家保证金状态 (BuyerDepositStatus) 🆕
-
-| 状态 | 说明 |
-|------|------|
-| `None` | 无保证金（流程 A 或零保证金） |
-| `Locked` | 已锁定（等待交易完成） |
-| `Released` | 已退还（交易完成或验证失败） |
-| `Forfeited` | 已没收（超时未付款） |
-| `PartiallyForfeited` | 部分没收（少付场景）🆕 |
-
-### 付款验证结果 (PaymentVerificationResult) 🆕
-
-| 状态 | 说明 |
-|------|------|
-| `Exact` | 验证通过（99.5%-100.5%） |
-| `Overpaid` | 多付（≥100.5%） |
-| `Underpaid` | 少付（50%-99.5%）→ 按比例处理 |
-| `SeverelyUnderpaid` | 严重少付（<50%）→ 按比例处理 |
-| `Invalid` | 无效（0 或交易失败）→ 按比例处理 |
-
-### USDT 交易 (UsdtTrade) 🆕扩展
+### UsdtTrade
 
 ```rust
 pub struct UsdtTrade<T: Config> {
-    // ... 原有字段 ...
-    pub buyer_deposit: BalanceOf<T>,      // 🆕 买家保证金金额（NXS）
-    pub deposit_status: BuyerDepositStatus, // 🆕 保证金状态
+    pub trade_id: u64,
+    pub order_id: u64,
+    pub shop_id: u64,
+    pub seller: T::AccountId,
+    pub buyer: T::AccountId,
+    pub token_amount: T::TokenBalance,
+    pub usdt_amount: u64,                    // 精度 10^6
+    pub seller_tron_address: TronAddress,    // Base58, 34 字节
+    pub tron_tx_hash: Option<TronTxHash>,    // Hex, 64 字节
+    pub status: UsdtTradeStatus,             // AwaitingPayment → AwaitingVerification → Completed/Refunded
+    pub created_at: BlockNumber,
+    pub timeout_at: BlockNumber,
+    pub buyer_deposit: BalanceOf<T>,         // NXS 保证金
+    pub deposit_status: BuyerDepositStatus,  // None / Locked / Released / Forfeited / PartiallyForfeited
 }
 ```
 
-### 市场配置 (MarketConfig)
+### MarketConfig
 
 ```rust
-pub struct MarketConfig {
-    pub cos_enabled: bool,      // 是否启用 NXS 交易
-    pub usdt_enabled: bool,     // 是否启用 USDT 交易
-    pub fee_rate: u16,          // 手续费率（基点）
-    pub min_order_amount: u128, // 最小订单数量
-    pub order_ttl: u32,         // 订单有效期（区块数）
+pub struct MarketConfig<Balance> {
+    pub cos_enabled: bool,        // 启用 NXS 交易
+    pub usdt_enabled: bool,       // 启用 USDT 交易
+    pub fee_rate: u16,            // 手续费率 (bps, 100 = 1%)
+    pub min_order_amount: u128,   // 最小订单 Token 数量
+    pub order_ttl: u32,           // 订单有效期 (区块数)
+    pub usdt_timeout: u32,        // USDT 交易超时 (区块数)
+    pub fee_recipient: Option<Balance>,  // 手续费接收方 (None = Shop Owner)
+}
+```
+
+### PriceProtectionConfig
+
+```rust
+pub struct PriceProtectionConfig<Balance> {
+    pub enabled: bool,                    // 默认 true
+    pub max_price_deviation: u16,         // 限价单最大偏离 (bps, 默认 2000 = 20%)
+    pub max_slippage: u16,                // 市价单最大滑点 (bps, 默认 500 = 5%)
+    pub circuit_breaker_threshold: u16,   // 熔断阈值 (bps, 默认 5000 = 50%)
+    pub min_trades_for_twap: u64,         // 启用 TWAP 的最小成交数 (默认 100)
+    pub circuit_breaker_active: bool,     // 是否处于熔断
+    pub circuit_breaker_until: u32,       // 熔断结束区块
+    pub initial_price: Option<Balance>,   // 冷启动参考价格
 }
 ```
 
 ## Extrinsics
 
-### NXS 通道
+### 用户交易
 
-#### 1. `place_sell_order`
-
-挂卖单（卖 Token 得 NXS）
-
-```rust
-fn place_sell_order(
-    origin: OriginFor<T>,
-    shop_id: u64,
-    token_amount: TokenBalance,
-    price: Balance,  // 每个 Token 的 NXS 价格
-) -> DispatchResult;
-```
-
-#### 2. `place_buy_order`
-
-挂买单（用 NXS 买 Token）
-
-```rust
-fn place_buy_order(
-    origin: OriginFor<T>,
-    shop_id: u64,
-    token_amount: TokenBalance,
-    price: Balance,
-) -> DispatchResult;
-```
-
-#### 3. `take_order`
-
-吃单（成交对手盘订单）
-
-```rust
-fn take_order(
-    origin: OriginFor<T>,
-    order_id: u64,
-    amount: Option<TokenBalance>,  // None = 全部吃掉
-) -> DispatchResult;
-```
-
-#### 4. `cancel_order`
-
-取消订单
-
-```rust
-fn cancel_order(
-    origin: OriginFor<T>,
-    order_id: u64,
-) -> DispatchResult;
-```
+| Index | 函数 | 权限 | 说明 |
+|-------|------|------|------|
+| 0 | `place_sell_order(shop_id, token_amount, price)` | signed | NXS 卖单（锁定 Token） |
+| 1 | `place_buy_order(shop_id, token_amount, price)` | signed | NXS 买单（锁定 NXS） |
+| 2 | `take_order(order_id, amount)` | signed | 吃单（原子交换，收手续费） |
+| 3 | `cancel_order(order_id)` | maker | 取消订单（退还锁定资产） |
+| 12 | `market_buy(shop_id, token_amount, max_cost)` | signed | 市价买（滑点保护） |
+| 13 | `market_sell(shop_id, token_amount, min_receive)` | signed | 市价卖（滑点保护） |
 
 ### USDT 通道
 
-#### 5. `place_usdt_sell_order`
+| Index | 函数 | 权限 | 说明 |
+|-------|------|------|------|
+| 5 | `place_usdt_sell_order(shop_id, amount, usdt_price, tron_addr)` | signed | 挂 USDT 卖单（锁定 Token） |
+| 6 | `place_usdt_buy_order(shop_id, amount, usdt_price)` | signed | 挂 USDT 买单 |
+| 7 | `reserve_usdt_sell_order(order_id, amount)` | signed (buyer) | 预锁定卖单（锁定保证金 + 份额） |
+| 8 | `accept_usdt_buy_order(order_id, amount, tron_addr)` | signed (seller) | 接受买单（锁定保证金 + Token） |
+| 9 | `confirm_usdt_payment(trade_id, tron_tx_hash)` | buyer | 提交链下支付凭证（64 字节 hex） |
+| 10 | `verify_usdt_payment(trade_id, verified, actual_amount)` | none (OCW) | OCW 验证（ValidateUnsigned） |
+| 11 | `process_usdt_timeout(trade_id)` | signed (any) | 处理超时（退 Token，没收保证金） |
 
-挂 USDT 卖单（卖 Token 收 USDT）
+### OCW 激励
 
-```rust
-fn place_usdt_sell_order(
-    origin: OriginFor<T>,
-    shop_id: u64,
-    token_amount: TokenBalance,
-    usdt_price: u64,           // 每个 Token 的 USDT 价格（精度 10^6）
-    tron_address: Vec<u8>,     // 卖家 TRON 收款地址
-) -> DispatchResult;
-```
+| Index | 函数 | 权限 | 说明 |
+|-------|------|------|------|
+| 18 | `submit_ocw_result(trade_id, actual_amount)` | none (OCW) | 提交验证结果 + 多档判定 |
+| 19 | `claim_verification_reward(trade_id)` | signed (any) | 执行验证结果 + 领取奖励 |
 
-#### 6. `place_usdt_buy_order`
+### 市场管理 (Shop Owner)
 
-挂 USDT 买单（用 USDT 买 Token）
+| Index | 函数 | 权限 | 说明 |
+|-------|------|------|------|
+| 4 | `configure_market(shop_id, ...)` | shop owner | 配置双通道/手续费/TTL/超时 |
+| 15 | `configure_price_protection(shop_id, ...)` | shop owner | 配置偏离阈值/滑点/熔断/TWAP |
+| 16 | `lift_circuit_breaker(shop_id)` | shop owner | 熔断到期后手动解除 |
+| 17 | `set_initial_price(shop_id, initial_price)` | shop owner | TWAP 冷启动参考价格 |
 
-```rust
-fn place_usdt_buy_order(
-    origin: OriginFor<T>,
-    shop_id: u64,
-    token_amount: TokenBalance,
-    usdt_price: u64,
-) -> DispatchResult;
-```
+## 存储
 
-#### 7. `reserve_usdt_sell_order` 🆕
+| 存储项 | 类型 | 说明 |
+|--------|------|------|
+| `NextOrderId` | `StorageValue<u64>` | 自增订单 ID |
+| `Orders` | `StorageMap<u64, TradeOrder>` | 订单主数据 |
+| `ShopSellOrders` | `StorageMap<u64, BoundedVec<u64, 1000>>` | 店铺卖单索引 |
+| `ShopBuyOrders` | `StorageMap<u64, BoundedVec<u64, 1000>>` | 店铺买单索引 |
+| `UserOrders` | `StorageMap<AccountId, BoundedVec<u64, 100>>` | 用户订单索引 |
+| `MarketConfigs` | `StorageMap<u64, MarketConfig>` | 店铺市场配置 |
+| `MarketStatsStorage` | `StorageMap<u64, MarketStats>` | 市场统计 (订单数/成交量/手续费) |
+| `NextUsdtTradeId` | `StorageValue<u64>` | 自增 USDT 交易 ID |
+| `UsdtTrades` | `StorageMap<u64, UsdtTrade>` | USDT 交易记录 |
+| `PendingUsdtTrades` | `StorageValue<BoundedVec<u64, 100>>` | OCW 待验证队列 |
+| `OcwVerificationResults` | `StorageMap<u64, (PaymentVerificationResult, u64)>` | OCW 验证结果 |
+| `BestAsk` | `StorageMap<u64, Balance>` | 店铺最优卖价 |
+| `BestBid` | `StorageMap<u64, Balance>` | 店铺最优买价 |
+| `LastTradePrice` | `StorageMap<u64, Balance>` | 最新成交价 |
+| `MarketSummaryStorage` | `StorageMap<u64, MarketSummary>` | 市场摘要 |
+| `TwapAccumulators` | `StorageMap<u64, TwapAccumulator>` | TWAP 累积器 (三周期快照) |
+| `PriceProtection` | `StorageMap<u64, PriceProtectionConfig>` | 价格保护配置 |
 
-预锁定 USDT 卖单（买家发起，两阶段安全模式）
+## Events
 
-```rust
-fn reserve_usdt_sell_order(
-    origin: OriginFor<T>,
-    order_id: u64,
-    amount: Option<TokenBalance>,
-) -> DispatchResult;
-```
+| 事件 | 字段 | 说明 |
+|------|------|------|
+| `OrderCreated` | order_id, shop_id, maker, side, token_amount, price | 订单已创建 |
+| `OrderFilled` | order_id, taker, filled_amount, total_nxst, fee | 订单已成交 |
+| `OrderCancelled` | order_id | 订单已取消 |
+| `MarketConfigured` | shop_id | 市场配置已更新 |
+| `UsdtSellOrderCreated` | order_id, shop_id, maker, token_amount, usdt_price, tron_address | USDT 卖单 |
+| `UsdtBuyOrderCreated` | order_id, shop_id, maker, token_amount, usdt_price | USDT 买单 |
+| `UsdtTradeCreated` | trade_id, order_id, seller, buyer, token_amount, usdt_amount | USDT 交易已创建 |
+| `UsdtPaymentSubmitted` | trade_id, tron_tx_hash | 支付凭证已提交 |
+| `UsdtTradeCompleted` | trade_id, order_id | USDT 交易已完成 |
+| `UsdtTradeVerificationFailed` | trade_id, reason | 验证失败 |
+| `UsdtTradeRefunded` | trade_id | 超时退款 |
+| `MarketOrderExecuted` | shop_id, trader, side, filled_amount, total_nxst, total_fee | 市价单已执行 |
+| `TwapUpdated` | shop_id, new_price, twap_1h, twap_24h, twap_7d | TWAP 已更新 |
+| `CircuitBreakerTriggered` | shop_id, current_price, twap_7d, deviation_bps, until_block | 熔断已触发 |
+| `CircuitBreakerLifted` | shop_id | 熔断已解除 |
+| `PriceProtectionConfigured` | shop_id, enabled, max_deviation, max_slippage | 价格保护已配置 |
+| `InitialPriceSet` | shop_id, initial_price | 初始价格已设置 |
+| `OcwResultSubmitted` | trade_id, verification_result, actual_amount | OCW 结果已提交 |
+| `VerificationRewardClaimed` | trade_id, claimer, reward | 验证奖励已领取 |
+| `BuyerDepositLocked` | trade_id, buyer, deposit | 保证金已锁定 |
+| `BuyerDepositReleased` | trade_id, buyer, deposit | 保证金已退还 |
+| `BuyerDepositForfeited` | trade_id, buyer, forfeited, to_treasury | 保证金已没收 |
+| `UnderpaidAutoProcessed` | trade_id, expected, actual, ratio, token_released, deposit_forfeited | 少付自动处理 |
 
-> **注意**: 买家先调用此函数锁定订单份额和保证金，然后链下支付 USDT，最后调用 `confirm_usdt_payment` 提交 tx_hash。
-
-#### 8. `accept_usdt_buy_order`
-
-接受 USDT 买单（卖家发起）
-
-```rust
-fn accept_usdt_buy_order(
-    origin: OriginFor<T>,
-    order_id: u64,
-    amount: Option<TokenBalance>,
-    tron_address: Vec<u8>,     // 卖家 TRON 收款地址
-) -> DispatchResult;
-```
-
-#### 9. `confirm_usdt_payment`
-
-买家确认 USDT 支付（提交交易哈希）
-
-```rust
-fn confirm_usdt_payment(
-    origin: OriginFor<T>,
-    trade_id: u64,
-    tron_tx_hash: Vec<u8>,
-) -> DispatchResult;
-```
-
-#### 10. `verify_usdt_payment`
-
-OCW 验证 USDT 支付结果（已废弃，使用 `claim_verification_reward` 替代）
-
-```rust
-fn verify_usdt_payment(
-    origin: OriginFor<T>,
-    trade_id: u64,
-    verified: bool,
-    actual_amount: u64,
-) -> DispatchResult;
-```
-
-#### 11. `process_usdt_timeout`
-
-处理超时的 USDT 交易（任何人可调用）
-
-```rust
-fn process_usdt_timeout(
-    origin: OriginFor<T>,
-    trade_id: u64,
-) -> DispatchResult;
-```
-
-### OCW 激励机制 🆕
-
-#### 18. `submit_ocw_result`
-
-OCW 提交验证结果（无签名交易）
-
-```rust
-fn submit_ocw_result(
-    origin: OriginFor<T>,
-    trade_id: u64,
-    verified: bool,
-    actual_amount: u64,
-) -> DispatchResult;
-```
-
-#### 19. `claim_verification_reward`
-
-领取验证奖励（任何人可调用）
-
-```rust
-fn claim_verification_reward(
-    origin: OriginFor<T>,
-    trade_id: u64,
-) -> DispatchResult;
-```
-
-**激励机制说明**：
-- OCW 验证完成后，通过 `submit_ocw_result` 提交结果到链上
-- 任何人可调用 `claim_verification_reward` 确认验证并获取奖励
-- 奖励金额由 `VerificationReward` 配置，从 `RewardSource` 账户支付
-
-### 市价单
-
-#### 12. `market_buy`
-
-市价买单（立即以最优卖价成交）
-
-```rust
-fn market_buy(
-    origin: OriginFor<T>,
-    shop_id: u64,
-    token_amount: TokenBalance,
-    max_cost: Balance,             // 滑点保护
-) -> DispatchResult;
-```
-
-#### 13. `market_sell`
-
-市价卖单（立即以最优买价成交）
-
-```rust
-fn market_sell(
-    origin: OriginFor<T>,
-    shop_id: u64,
-    token_amount: TokenBalance,
-    min_receive: Balance,          // 滑点保护
-) -> DispatchResult;
-```
-
-### 管理
-
-#### 14. `configure_market`
-
-配置店铺市场（店主调用）
-
-```rust
-fn configure_market(
-    origin: OriginFor<T>,
-    shop_id: u64,
-    cos_enabled: bool,
-    usdt_enabled: bool,
-    fee_rate: u16,
-    min_order_amount: u128,
-    order_ttl: u32,
-    usdt_timeout: u32,
-) -> DispatchResult;
-```
-
-## 事件
-
-| 事件 | 说明 |
-|------|------|
-| `OrderCreated` | NXS 订单已创建 |
-| `OrderFilled` | NXS 订单已成交（部分或全部） |
-| `OrderCancelled` | 订单已取消 |
-| `MarketConfigured` | 市场配置已更新 |
-| `UsdtSellOrderCreated` | USDT 卖单已创建 |
-| `UsdtBuyOrderCreated` | USDT 买单已创建 |
-| `UsdtTradeCreated` | USDT 交易已创建（等待支付） |
-| `UsdtPaymentSubmitted` | USDT 支付已提交（等待验证） |
-| `UsdtTradeCompleted` | USDT 交易已完成 |
-| `UsdtTradeVerificationFailed` | USDT 交易验证失败 |
-| `UsdtTradeRefunded` | USDT 交易已超时退款 |
-| `VerificationRewardClaimed` | 验证奖励已领取 |
-| `OcwResultSubmitted` | OCW 验证结果已提交 |
-| `BuyerDepositLocked` | 买家保证金已锁定 🆕 |
-| `BuyerDepositReleased` | 买家保证金已退还 🆕 |
-| `BuyerDepositForfeited` | 买家保证金已没收 🆕 |
-| `UnderpaidAutoProcessed` | 少付自动处理（按比例释放）🆕 |
-| `MarketOrderExecuted` | 市价单已执行 |
-| `BestPricesUpdated` | 最优价格已更新 |
-| `TwapUpdated` | TWAP 价格已更新 |
-| `CircuitBreakerTriggered` | 熔断已触发 |
-| `CircuitBreakerLifted` | 熔断已解除 |
-| `PriceProtectionConfigured` | 价格保护配置已更新 |
-| `InitialPriceSet` | 初始价格已设置 |
-
-## 错误
+## Errors
 
 | 错误 | 说明 |
 |------|------|
 | `ShopNotFound` | 店铺不存在 |
+| `NotShopOwner` | 不是店主 |
 | `TokenNotEnabled` | 店铺代币未启用 |
 | `MarketNotEnabled` | NXS 市场未启用 |
-| `UsdtMarketNotEnabled` | USDT 市场未启用 |
+| `UsdtMarketNotEnabled` | USDT 市场未启用（需 `configure_market` 开启） |
 | `OrderNotFound` | 订单不存在 |
 | `NotOrderOwner` | 不是订单所有者 |
-| `OrderClosed` | 订单已关闭 |
+| `OrderClosed` | 订单已关闭（Filled/Cancelled/Expired） |
 | `InsufficientBalance` | NXS 余额不足 |
 | `InsufficientTokenBalance` | Token 余额不足 |
+| `InsufficientDepositBalance` | 买家保证金余额不足 |
+| `AmountTooSmall` | 数量为零或过小 |
+| `AmountExceedsAvailable` | 数量超过可用 |
+| `ZeroPrice` | 价格为零 |
+| `OrderBookFull` | 订单簿已满（1000/边） |
+| `UserOrdersFull` | 用户订单数已满（100） |
 | `CannotTakeOwnOrder` | 不能吃自己的单 |
-| `InvalidTronAddress` | 无效的 TRON 地址 |
+| `ArithmeticOverflow` | 算术溢出 |
+| `OrderSideMismatch` | 订单方向不匹配 |
+| `ChannelMismatch` | 支付通道不匹配 |
+| `InvalidTronAddress` | TRON 地址无效（需 34 字节 Base58, T 开头） |
+| `InvalidTxHash` | 交易哈希无效（需 64 字节 hex） |
 | `UsdtTradeNotFound` | USDT 交易不存在 |
 | `NotTradeParticipant` | 不是交易参与者 |
 | `InvalidTradeStatus` | 交易状态无效 |
 | `TradeTimeout` | 交易已超时 |
-| `InvalidTxHash` | 无效的交易哈希 |
-| `ChannelMismatch` | 通道不匹配 |
-| `NoOrdersAvailable` | 没有可用订单 |
+| `PendingQueueFull` | 待验证队列已满（100） |
+| `NoOrdersAvailable` | 没有可用订单（市价单） |
 | `SlippageExceeded` | 滑点超限 |
-| `PriceDeviationTooHigh` | 价格偏离 TWAP 过大 |
+| `PriceDeviationTooHigh` | 价格偏离参考价过大 |
 | `MarketCircuitBreakerActive` | 市场处于熔断状态 |
 | `OcwResultNotFound` | OCW 验证结果不存在 |
 | `InsufficientTwapData` | TWAP 数据不足 |
-| `InsufficientDepositBalance` | 买家保证金余额不足 🆕 |
 
-## 存储项
-
-| 存储项 | 说明 |
-|--------|------|
-| `NextOrderId` | 下一个订单 ID |
-| `Orders` | 订单存储 |
-| `ShopSellOrders` | 店铺卖单列表 |
-| `ShopBuyOrders` | 店铺买单列表 |
-| `UserOrders` | 用户订单列表 |
-| `MarketConfigs` | 店铺市场配置 |
-| `MarketStatsStorage` | 市场统计数据 |
-| `NextUsdtTradeId` | 下一个 USDT 交易 ID |
-| `UsdtTrades` | USDT 交易记录存储 |
-| `PendingUsdtTrades` | 待验证的 USDT 交易列表 |
-| `OcwVerificationResults` | OCW 验证结果存储 🆕 |
-| `BestAsk` | 店铺最优卖价 |
-| `BestBid` | 店铺最优买价 |
-| `LastTradePrice` | 店铺最新成交价 |
-| `MarketSummaryStorage` | 店铺市场摘要 |
-| `TwapAccumulators` | TWAP 累积器（每店铺） |
-| `PriceProtection` | 价格保护配置（每店铺） |
-
-## 配置参数
-
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `DefaultOrderTTL` | 默认订单有效期 | 14400 区块（约24小时） |
-| `MaxActiveOrdersPerUser` | 每用户最大活跃订单数 | 100 |
-| `DefaultFeeRate` | 默认手续费率 | 100 基点（1%） |
-| `DefaultUsdtTimeout` | USDT 交易默认超时 | 7200 区块（约12小时） |
-| `BlocksPerHour` | 1小时对应区块数 | 600 区块 |
-| `BlocksPerDay` | 24小时对应区块数 | 14400 区块 |
-| `BlocksPerWeek` | 7天对应区块数 | 100800 区块 |
-| `CircuitBreakerDuration` | 熔断持续时间 | 600 区块（约1小时） |
-| `VerificationReward` | 验证奖励金额 | 0.1 NXS |
-| `RewardSource` | 奖励来源账户 | 财库账户 |
-| `BuyerDepositRate` | 买家保证金比例（bps） | 1000（10%）🆕 |
-| `MinBuyerDeposit` | 最低买家保证金 | 10 NXS 🆕 |
-| `DepositForfeitRate` | 保证金没收比例（bps） | 10000（100%）🆕 |
-| `UsdtToNxsRate` | USDT→NXS 汇率（精度 10^9） | 10_000_000_000 🆕 |
-| `TreasuryAccount` | 国库账户（没收保证金归入）| 系统财库 🆕 |
-
-## 使用示例
-
-### 1. 店主配置市场
+## Runtime 配置
 
 ```rust
-// 启用 NXS 和 USDT 交易
-EntityMarket::configure_market(
-    Origin::signed(shop_owner),
-    shop_id,
-    true,   // cos_enabled
-    true,   // usdt_enabled
-    50,     // fee_rate (0.5%)
-    100,    // min_order_amount
-    14400,  // order_ttl (24h)
-    7200,   // usdt_timeout (12h)
-)?;
+impl pallet_entity_market::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+    type Currency = Balances;
+    type Balance = u128;
+    type TokenBalance = u128;
+    type EntityProvider = EntityRegistry;
+    type ShopProvider = EntityShop;
+    type TokenProvider = EntityToken;
+    type DefaultOrderTTL = ConstU32<14400>;          // 24h
+    type MaxActiveOrdersPerUser = ConstU32<100>;
+    type DefaultFeeRate = ConstU16<100>;              // 1%
+    type DefaultUsdtTimeout = ConstU32<7200>;         // 12h
+    type BlocksPerHour = ConstU32<600>;
+    type BlocksPerDay = ConstU32<14400>;
+    type BlocksPerWeek = ConstU32<100800>;
+    type CircuitBreakerDuration = ConstU32<600>;      // 1h
+    type VerificationReward = ConstU128<100_000_000_000>;  // 0.1 NXS
+    type RewardSource = TreasuryAccountId;
+    type BuyerDepositRate = ConstU16<1000>;           // 10%
+    type MinBuyerDeposit = ConstU128<{ 10 * UNIT }>;  // 10 NXS
+    type DepositForfeitRate = ConstU16<10000>;        // 100%
+    type UsdtToNxsRate = ConstU64<10_000_000_000>;
+    type TreasuryAccount = TreasuryAccountId;
+}
 ```
 
-### 2. NXS 通道 - 挂卖单
+## 查询接口
 
 ```rust
-// 以 0.1 NXS/Token 的价格出售 1000 Token
-EntityMarket::place_sell_order(
-    Origin::signed(alice),
-    shop_id,
-    1000,           // token_amount
-    100_000_000,    // price (0.1 NXS, 精度 10^9)
-)?;
+impl<T: Config> Pallet<T> {
+    /// 获取订单簿深度（每边 N 档，聚合同价位）
+    pub fn get_order_book_depth(shop_id: u64, depth: u32) -> OrderBookDepth;
+    /// 获取市场摘要 (best_ask, best_bid, last_price, volumes)
+    pub fn get_market_summary(shop_id: u64) -> MarketSummary;
+    /// 获取最优买卖价
+    pub fn get_best_prices(shop_id: u64) -> (Option<Balance>, Option<Balance>);
+    /// 获取买卖价差
+    pub fn get_spread(shop_id: u64) -> Option<Balance>;
+    /// 计算指定周期的 TWAP
+    pub fn calculate_twap(shop_id: u64, period: TwapPeriod) -> Option<Balance>;
+    /// 获取订单簿快照（简化版，20 档）
+    pub fn get_order_book_snapshot(shop_id: u64) -> (Vec<(Balance, TokenBalance)>, Vec<(Balance, TokenBalance)>);
+    /// 获取店铺卖单/买单列表
+    pub fn get_sell_orders(shop_id: u64) -> Vec<TradeOrder>;
+    pub fn get_buy_orders(shop_id: u64) -> Vec<TradeOrder>;
+    /// 获取用户订单列表
+    pub fn get_user_orders(user: &AccountId) -> Vec<TradeOrder>;
+}
 ```
 
-### 3. NXS 通道 - 吃单
+## 安全机制
 
-```rust
-// 吃掉订单 #1 的全部
-EntityMarket::take_order(
-    Origin::signed(bob),
-    1,      // order_id
-    None,   // amount (全部)
-)?;
-```
+- **原子交换** — NXS 通道在单笔交易内完成 Token 和 NXS 的双向转移
+- **两阶段锁定** — USDT 通道先链上锁定份额/保证金，后链下支付
+- **NXS 保证金** — 防止 USDT 买家不付款（`MinBuyerDeposit` + `DepositForfeitRate`）
+- **ValidateUnsigned** — OCW 提交限制：交易存在 + AwaitingVerification 状态 + 无重复结果
+- **价格偏离检查** — 限价单价格不得偏离 TWAP/初始价格超过 `max_price_deviation`
+- **异常价格过滤** — TWAP 累积时偏离上次价格 >100% 的成交价被限幅至 ±50%
+- **熔断机制** — 价格偏离 7d TWAP 超阈值自动暂停交易
+- **滑点保护** — 市价单 `max_cost` / `min_receive` 防止不利成交
+- **自吃单防护** — `CannotTakeOwnOrder` 禁止自己吃自己的单
 
-### 4. USDT 通道 - 挂卖单
+## 已知技术债
 
-```rust
-// 以 0.01 USDT/Token 的价格出售 1000 Token
-EntityMarket::place_usdt_sell_order(
-    Origin::signed(alice),
-    shop_id,
-    1000,                           // token_amount
-    10_000,                         // usdt_price (0.01 USDT, 精度 10^6)
-    b"TXyz...".to_vec(),           // tron_address
-)?;
-```
-
-### 5. USDT 通道 - 吃卖单（两阶段安全模式）🆕
-
-```rust
-// 步骤 1: Bob 预锁定订单（锁定保证金 + 订单份额）
-EntityMarket::reserve_usdt_sell_order(
-    Origin::signed(bob),
-    order_id,
-    None,                                           // amount (全部)
-)?;
-
-// 步骤 2: Bob 链下转 USDT 到 Alice 的 TRON 地址
-// (链下操作，获得 tron_tx_hash)
-
-// 步骤 3: Bob 提交交易哈希
-EntityMarket::confirm_usdt_payment(
-    Origin::signed(bob),
-    trade_id,
-    b"abc123...".to_vec(),                         // tron_tx_hash (64 字符)
-)?;
-
-// 步骤 4: 等待 OCW 验证 + 任何人调用 claim_verification_reward
-```
-
-### 6. USDT 通道 - 接受买单
-
-```rust
-// Alice 接受 Bob 的 USDT 买单
-EntityMarket::accept_usdt_buy_order(
-    Origin::signed(alice),
-    order_id,
-    None,                           // amount (全部)
-    b"TXyz...".to_vec(),           // tron_address
-)?;
-
-// Bob 链下转 USDT 后确认支付
-EntityMarket::confirm_usdt_payment(
-    Origin::signed(bob),
-    trade_id,
-    b"abc123...".to_vec(),         // tron_tx_hash
-)?;
-// 等待 OCW 验证...
-```
-
-### 7. 市价买单
-
-```rust
-// 以最优价格立即购买 1000 Token，最多支付 200 NXS
-EntityMarket::market_buy(
-    Origin::signed(bob),
-    shop_id,
-    1000,                           // token_amount
-    200_000_000_000,               // max_cost (200 NXS, 滑点保护)
-)?;
-```
-
-### 8. 市价卖单
-
-```rust
-// 以最优价格立即出售 1000 Token，最少收到 80 NXS
-EntityMarket::market_sell(
-    Origin::signed(alice),
-    shop_id,
-    1000,                           // token_amount
-    80_000_000_000,                // min_receive (80 NXS, 滑点保护)
-)?;
-```
-
-### 9. 查询订单簿深度
-
-```rust
-// 获取订单簿深度（每边 10 档）
-let depth = EntityMarket::get_order_book_depth(shop_id, 10);
-// depth.asks: 卖盘（按价格升序）
-// depth.bids: 买盘（按价格降序）
-// depth.best_ask: 最优卖价
-// depth.best_bid: 最优买价
-// depth.spread: 买卖价差
-```
-
-### 10. 查询市场摘要
-
-```rust
-// 获取市场摘要
-let summary = EntityMarket::get_market_summary(shop_id);
-// summary.best_ask: 最优卖价
-// summary.best_bid: 最优买价
-// summary.last_price: 最新成交价
-// summary.total_ask_amount: 卖单总量
-// summary.total_bid_amount: 买单总量
-```
-
-### 11. 查询最优价格
-
-```rust
-// 获取最优买卖价
-let (best_ask, best_bid) = EntityMarket::get_best_prices(shop_id);
-
-// 获取买卖价差
-let spread = EntityMarket::get_spread(shop_id);
-```
-
-### 12. 配置价格保护
-
-```rust
-// 店主配置价格保护参数
-EntityMarket::configure_price_protection(
-    Origin::signed(shop_owner),
-    shop_id,
-    true,   // enabled: 启用价格保护
-    2000,   // max_price_deviation: 20% (基点)
-    500,    // max_slippage: 5% (基点)
-    5000,   // circuit_breaker_threshold: 50% (基点)
-    100,    // min_trades_for_twap: 最少100笔交易后启用TWAP
-)?;
-```
-
-### 13. 查询 TWAP 价格
-
-```rust
-// 获取 1小时 TWAP
-let twap_1h = EntityMarket::calculate_twap(shop_id, TwapPeriod::OneHour);
-
-// 获取 24小时 TWAP
-let twap_24h = EntityMarket::calculate_twap(shop_id, TwapPeriod::OneDay);
-
-// 获取 7天 TWAP
-let twap_7d = EntityMarket::calculate_twap(shop_id, TwapPeriod::OneWeek);
-```
-
-### 14. 解除熔断
-
-```rust
-// 店主在熔断时间到期后手动解除
-EntityMarket::lift_circuit_breaker(
-    Origin::signed(shop_owner),
-    shop_id,
-)?;
-```
-
-### 15. 设置店铺代币初始价格
-
-```rust
-// 店主设置初始参考价格（用于 TWAP 冷启动）
-// 在市场成交量不足时，将使用此价格作为价格偏离检查的参考
-EntityMarket::set_initial_price(
-    Origin::signed(shop_owner),
-    shop_id,
-    100_000_000_000,  // 初始价格: 100 NXS / Token
-)?;
-```
-
-**初始价格使用逻辑：**
-1. 如果成交量 >= `min_trades_for_twap`，使用 1小时 TWAP
-2. 如果成交量不足但有初始价格，使用店主设定的初始价格
-3. 如果都没有，跳过价格偏离检查
-
-## 依赖模块
-
-- `pallet-entity-common`: 公共类型和 Trait
-- `pallet-entity-shop`: 店铺信息查询
-- `pallet-entity-token`: 店铺代币操作
+| 项目 | 状态 | 说明 |
+|------|------|------|
+| Weight benchmarking | 🟡 占位 | 所有 extrinsic 使用硬编码占位值（20k~150k ref_time, proof_size=0） |
+| Token 实际锁定 | 🟡 简化 | NXS 卖单的 Token 锁定通过注释标记，需接入 TokenProvider::reserve |
+| 24h 高低价/成交量 | 🟡 TODO | `MarketSummary` 中的 high_24h / low_24h / volume_24h 返回 0 |
+| 订单过期清理 | 🟡 未实现 | 过期订单未自动清理，需 on_idle 或外部触发 |
+| mock.rs + tests.rs | 🔴 无 | 无单元测试覆盖 |
 
 ## 版本历史
 
-- **v0.1.0** (2026-02-01): Phase 1，实现 NXS 通道限价单
-- **v0.2.0** (2026-02-01): Phase 2，实现 USDT 通道 + OCW 验证
-- **v0.3.0** (2026-02-01): Phase 3，实现市价单支持
-- **v0.4.0** (2026-02-01): Phase 4，实现订单簿深度优化
-- **v0.5.0** (2026-02-01): Phase 5，实现三周期 TWAP 价格预言机
-- **v0.6.0** (2026-02-04): Phase 6，实现 OCW 验证激励机制 + ValidateUnsigned
-- **v0.7.0** (2026-02-04): Phase 7，实现买家保证金机制（固定比例 NXS 保证金）
-- **v0.8.0** (2026-02-04): Phase 8，实现付款金额多档判定 + 自动按比例处理
+| 版本 | 日期 | 变更 |
+|------|------|------|
+| v0.1.0 | 2026-02-01 | NXS 通道限价单（place_sell/buy, take, cancel） |
+| v0.2.0 | 2026-02-01 | USDT 通道 + OCW 验证（TRC20 交易验证） |
+| v0.3.0 | 2026-02-01 | 市价单支持（market_buy, market_sell + 滑点保护） |
+| v0.4.0 | 2026-02-01 | 订单簿深度优化（价格聚合, BestAsk/BestBid 缓存） |
+| v0.5.0 | 2026-02-01 | 三周期 TWAP 预言机（1h/24h/7d + 异常过滤 + 熔断） |
+| v0.6.0 | 2026-02-04 | OCW 验证激励（submit_ocw_result + claim_verification_reward + ValidateUnsigned） |
+| v0.7.0 | 2026-02-04 | 买家保证金机制（NXS reserve + forfeit + release） |
+| v0.8.0 | 2026-02-04 | 付款金额多档判定（5 级结果 + 自动按比例处理） |
 
-## 后续计划
+## 相关模块
 
-- [x] Phase 1: NXS 通道限价单 ✅
-- [x] Phase 2: USDT 通道 + OCW 验证 ✅
-- [x] Phase 3: 市价单支持 ✅
-- [x] Phase 4: 订单簿深度优化 ✅
-- [x] Phase 5: 价格预言机集成 ✅
-- [x] Phase 6: OCW 验证激励机制 ✅
-- [x] Phase 7: 买家保证金机制 ✅
-- [x] Phase 8: 付款金额多档判定 ✅
+- [pallet-entity-common](../common/) — 共享类型 + Trait 接口（EntityProvider, ShopProvider, EntityTokenProvider）
+- [pallet-entity-registry](../registry/) — 实体管理（EntityProvider 实现方）
+- [pallet-entity-shop](../shop/) — 店铺管理（ShopProvider 实现方）
+- [pallet-entity-token](../token/) — 实体代币（EntityTokenProvider 实现方, reserve/unreserve/repatriate）

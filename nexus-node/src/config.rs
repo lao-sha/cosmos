@@ -1,5 +1,5 @@
 /// 节点全局配置
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct NodeConfig {
     /// 节点 ID (hex)
     pub node_id: String,
@@ -18,6 +18,19 @@ pub struct NodeConfig {
 
     /// 数据目录
     pub data_dir: String,
+}
+
+impl std::fmt::Debug for NodeConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NodeConfig")
+            .field("node_id", &self.node_id)
+            .field("listen_port", &self.listen_port)
+            .field("gossip_port", &self.gossip_port)
+            .field("chain_rpc", &"***")
+            .field("signing_key_path", &"***")
+            .field("data_dir", &self.data_dir)
+            .finish()
+    }
 }
 
 impl NodeConfig {

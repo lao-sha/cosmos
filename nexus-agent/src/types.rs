@@ -128,6 +128,7 @@ pub struct NodeInfo {
 
 /// 多播结果
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct MulticastResult {
     /// 成功发送的节点数
     pub success_count: usize,
@@ -141,6 +142,7 @@ pub struct MulticastResult {
 
 /// 单节点发送结果
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct NodeSendResult {
     pub node_id: String,
     pub success: bool,

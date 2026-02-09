@@ -1,6 +1,6 @@
 [package]
 name = "pallet-entity-governance"
-version = "0.1.0"
+version = "0.2.0"
 description = "Entity token governance pallet"
 authors.workspace = true
 edition.workspace = true
@@ -40,6 +40,9 @@ std = [
 	"pallet-entity-registry/std",
 	"pallet-entity-token/std",
 	"pallet-entity-commission/std",
+	"sp-core/std",
+	"sp-io/std",
+	"pallet-balances/std",
 ]
 runtime-benchmarks = [
 	"frame-support/runtime-benchmarks",

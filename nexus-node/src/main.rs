@@ -6,7 +6,9 @@ mod config;
 // pub mod crypto; // TODO: Sprint 后续实现
 mod gossip;
 mod leader;
+#[allow(dead_code)]
 mod rule_engine;
+#[allow(dead_code)]
 mod types;
 mod verifier;
 
@@ -60,7 +62,7 @@ async fn main() -> anyhow::Result<()> {
     chain_cache.load_from_env();
 
     // 尝试 subxt 连接链（可选 — 连接失败不阻止启动）
-    let chain_client = match chain_client::ChainClient::connect(
+    let _chain_client = match chain_client::ChainClient::connect(
         &config.chain_rpc,
         load_or_generate_signer(&config.data_dir),
     ).await {
@@ -207,8 +209,19 @@ fn load_or_generate_signer(data_dir: &str) -> subxt_signer::sr25519::Keypair {
         }
     }
 
-    // 生成新密钥
-    let kp = subxt_signer::sr25519::dev::alice();
-    info!("使用 Alice dev 密钥（生产环境请配置 node_signer.key）");
+    // 生成随机密钥并持久化
+    let mut seed = [0u8; 32];
+    use rand::RngCore;
+    rand::rngs::OsRng.fill_bytes(&mut seed);
+    let kp = subxt_signer::sr25519::Keypair::from_secret_key(seed)
+        .expect("有效的随机种子");
+
+    // 持久化到文件
+    std::fs::create_dir_all(data_dir).ok();
+    if let Err(e) = std::fs::write(&key_path, &seed) {
+        warn!(error = %e, "节点签名密钥持久化失败");
+    } else {
+        info!("已生成并保存新的节点签名密钥");
+    }
     kp
 }

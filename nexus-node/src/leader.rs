@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, debug, error};
 
 use crate::types::*;
 use crate::types::{ActionType, MessageAction, AdminAction};
@@ -416,7 +416,7 @@ impl FailoverManager {
         let my_rank = backups.iter().position(|id| id == my_node_id)?;
 
         // 每个 Backup 等待额外 rank * 2s
-        let total_wait = self.timeout_ms + (my_rank as u64 * 2000);
+        let _total_wait = self.timeout_ms + (my_rank as u64 * 2000);
 
         // TODO: 检查时间差（需要记录共识达成时间）
         // 当前简化: 由外部定时器调用

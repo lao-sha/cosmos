@@ -224,7 +224,7 @@ pub struct Entity<AccountId, Balance, BlockNumber, MaxNameLen, MaxCidLen, MaxAdm
 | Index | 函数 | 权限 | 说明 |
 |-------|------|------|------|
 | 0 | `create_entity(name, logo_cid, description_cid)` | signed | 创建 Entity + 自动创建 Primary Shop，付费即激活 |
-| 1 | `update_entity(entity_id, name, logo_cid, description_cid, _)` | owner | 更新名称/Logo/描述（`customer_service` 参数已废弃，被忽略） |
+| 1 | `update_entity(entity_id, name, logo_cid, description_cid, metadata_uri)` | owner | 更新名称/Logo/描述/元数据 URI |
 | 2 | `request_close_entity(entity_id)` | owner | 申请关闭（Active/Suspended → PendingClose） |
 | 3 | `top_up_fund(entity_id, amount)` | owner | 充值金库，仅资金不足暂停可自动恢复（治理暂停不可） |
 | 9 | `add_admin(entity_id, new_admin)` | owner | 添加管理员 |
@@ -302,6 +302,9 @@ pub struct Entity<AccountId, Balance, BlockNumber, MaxNameLen, MaxCidLen, MaxAdm
 | `DAORequiresGovernance` | DAO 类型需要治理模式 |
 | `InvalidEntityTypeUpgrade` | 无效的类型升级 |
 | `EntityAlreadyHasShop` | Entity 已有 Shop（1:1 限制） |
+| `ZeroAmount` | 充值金额为零 |
+| `ShopIdMismatch` | 注销 Shop 时 ID 不匹配 |
+| `AlreadyVerified` | 实体已验证（幂等拦截） |
 
 ## EntityProvider Trait
 
@@ -405,8 +408,7 @@ Active ◄───────────────────────�
 
 | 项目 | 状态 | 说明 |
 |------|------|------|
-| Weight benchmarking | 🔴 待做 | 所有 extrinsic 使用硬编码占位值（20k~50k, proof_size=0），生产前需基于 `frame_benchmarking` 重新计算 |
-| `update_entity` customer_service 参数 | 🟡 已废弃 | 已移至 Shop 层，参数被忽略。下一个 breaking change 版本移除 |
+| Weight benchmarking | � 占位 | 所有 extrinsic 使用硬编码占位值（60M~200M ref_time, 4k~10k proof_size），生产前需基于 `frame_benchmarking` 重新计算 |
 
 ## 版本历史
 
@@ -420,6 +422,7 @@ Active ◄───────────────────────�
 | v0.6.0 | 2026-02-08 | 双层状态模型，EffectiveShopStatus 实时计算 |
 | v0.6.1 | 2026-02-08 | 移除 treasury_fund 字段，治理可任意升级类型，reopen 防御性去重 |
 | v0.6.2 | 2026-02-08 | 安全审计修复：ban 状态限制、GovernanceSuspended 防绕过、Banned/Closed 拒绝修改、NameEmpty 错误、清理未用代码 |
+| v0.7.0 | 2026-02-09 | 深度审计: DecodeWithMemTracking、Weight 修正、ban 没收事件修复、admin/transfer 状态检查、top_up_fund 零值拦截、update_entity 签名变更(metadata_uri 替换 customer_service)、unregister_shop 验证、verify_entity 幂等、新增 mock.rs+tests.rs (74 tests) |
 
 ## 相关模块
 

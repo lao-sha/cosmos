@@ -334,6 +334,9 @@ fn parse_tron_response(
 }
 
 /// 从响应中提取金额
+///
+/// ⚠ L3: 使用字符串模式匹配解析 JSON，可能在复杂响应中匹配到错误字段。
+/// 后续应替换为正式 JSON 解析器（如 serde_json_core）。
 fn extract_amount(response: &str) -> Option<u64> {
     let patterns = ["\"amount\":", "\"amount\": "];
     

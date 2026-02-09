@@ -38,7 +38,7 @@ members = [
     "pallets/entity/review",
     "pallets/entity/disclosure",
     "pallets/entity/kyc",
-    "pallets/entity/sale",  # crate renamed to pallet-entity-tokensale
+    "pallets/entity/tokensale",
     "media-utils",
     "runtime",
 # Nexus Bot pallets
@@ -88,7 +88,7 @@ pallet-entity-market = { path = "./pallets/entity/market", default-features = fa
 pallet-entity-review = { path = "./pallets/entity/review", default-features = false }
 pallet-entity-disclosure = { path = "./pallets/entity/disclosure", default-features = false }
 pallet-entity-kyc = { path = "./pallets/entity/kyc", default-features = false }
-pallet-entity-tokensale = { path = "./pallets/entity/sale", default-features = false }
+pallet-entity-tokensale = { path = "./pallets/entity/tokensale", default-features = false }
 # Nexus Bot pallets
 pallet-bot-consensus = { path = "./pallets/nexus/bot-consensus", default-features = false }
 pallet-bot-registry = { path = "./pallets/nexus/bot-registry", default-features = false }

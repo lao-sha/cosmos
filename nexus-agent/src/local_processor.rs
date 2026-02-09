@@ -1,11 +1,10 @@
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn, debug};
+use tracing::debug;
 
 use crate::group_config::{
     GroupConfig, FloodAction, BlacklistMode, BlacklistAction, LockType,
 };
 use crate::local_store::LocalStore;
-use crate::group_config::ConfigStore;
 
 /// 本地快速路径动作
 ///
@@ -244,9 +243,15 @@ impl LocalProcessor {
             }
             BlacklistMode::Regex => {
                 config.blacklist_words.iter().any(|pattern| {
-                    regex::Regex::new(pattern)
-                        .map(|re| re.is_match(&text_lower))
-                        .unwrap_or(false)
+                    // TODO: 在 ConfigStore::set 时预编译 regex 并缓存到 GroupConfig
+                    // 当前: 编译失败时记录 warn 并跳过（不再静默忽略）
+                    match regex::Regex::new(pattern) {
+                        Ok(re) => re.is_match(&text_lower),
+                        Err(e) => {
+                            debug!(pattern, error = %e, "黑名单 regex 编译失败，跳过");
+                            false
+                        }
+                    }
                 })
             }
         };
@@ -383,6 +388,26 @@ impl LocalProcessor {
             return None;
         }
 
+        let chat_name = update.pointer("/message/chat/title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Group");
+
+        // 为所有新成员生成欢迎名单（合并为一条消息）
+        let names: Vec<String> = members.iter().map(|member| {
+            let first_name = member.get("first_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("User");
+            let last_name = member.get("last_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if last_name.is_empty() {
+                first_name.to_string()
+            } else {
+                format!("{} {}", first_name, last_name)
+            }
+        }).collect();
+
+        // 使用第一位成员做模板变量替换（保持向后兼容）
         let member = &members[0];
         let first_name = member.get("first_name")
             .and_then(|v| v.as_str())
@@ -396,15 +421,7 @@ impl LocalProcessor {
         let username = member.get("username")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let chat_name = update.pointer("/message/chat/title")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Group");
-
-        let fullname = if last_name.is_empty() {
-            first_name.to_string()
-        } else {
-            format!("{} {}", first_name, last_name)
-        };
+        let fullname = names.join(", ");
 
         let text = config.welcome_message
             .replace("{first}", first_name)
@@ -426,7 +443,7 @@ impl LocalProcessor {
     ///
     /// 参考: tg-spam/lib/tgspam/duplicate.go — Window + Threshold
     fn check_duplicate(
-        config: &GroupConfig,
+        _config: &GroupConfig,
         local_store: &LocalStore,
         chat_id: i64,
         sender_id: i64,
@@ -728,5 +745,296 @@ mod tests {
         let actions = LocalProcessor::process(&update, Some(&config), &store);
         // Commands are skipped by LocalProcessor
         assert!(actions.is_empty());
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // B4.1 E2E 场景测试
+    // ═══════════════════════════════════════════════════════════
+
+    fn full_config() -> GroupConfig {
+        GroupConfig {
+            version: 1,
+            bot_id_hash: "e2e_test".into(),
+            join_policy: crate::group_config::JoinApprovalPolicy::AutoApprove,
+            filter_links: true,
+            restrict_mentions: false,
+            rate_limit_per_minute: 0,
+            auto_mute_duration: 300,
+            new_member_restrict_duration: 0,
+            welcome_message: "Welcome {first} to {chatname}!".into(),
+            whitelist: vec![],
+            admins: vec!["999".to_string()],
+            quiet_hours_start: None,
+            quiet_hours_end: None,
+            updated_at: 1000,
+            antiflood_limit: 3,
+            antiflood_window: 10,
+            antiflood_action: FloodAction::Mute,
+            warn_limit: 3,
+            warn_action: crate::group_config::WarnAction::Ban,
+            blacklist_words: vec!["scam".into(), "ponzi".into()],
+            blacklist_mode: BlacklistMode::Contains,
+            blacklist_action: BlacklistAction::Delete,
+            lock_types: vec![LockType::Photo, LockType::Sticker],
+            spam_detection_enabled: true,
+            spam_max_emoji: 3,
+            spam_first_messages_only: 0,
+        }
+    }
+
+    fn make_sender_update(sender_id: i64, text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "update_id": 1,
+            "message": {
+                "message_id": 100,
+                "chat": { "id": -100, "type": "supergroup", "title": "TestGroup" },
+                "from": { "id": sender_id, "is_bot": false, "first_name": "Alice" },
+                "text": text
+            }
+        })
+    }
+
+    fn make_photo_update_with_sender(sender_id: i64) -> serde_json::Value {
+        serde_json::json!({
+            "update_id": 1,
+            "message": {
+                "message_id": 101,
+                "chat": { "id": -100, "type": "supergroup", "title": "TestGroup" },
+                "from": { "id": sender_id, "is_bot": false, "first_name": "Alice" },
+                "photo": [{"file_id": "abc", "width": 100, "height": 100}]
+            }
+        })
+    }
+
+    fn make_join_update() -> serde_json::Value {
+        serde_json::json!({
+            "update_id": 1,
+            "message": {
+                "message_id": 102,
+                "chat": { "id": -100, "type": "supergroup", "title": "TestGroup" },
+                "from": { "id": 1, "is_bot": false },
+                "new_chat_members": [{
+                    "id": 555,
+                    "first_name": "NewUser",
+                    "last_name": "Smith",
+                    "username": "newuser"
+                }]
+            }
+        })
+    }
+
+    #[test]
+    fn e2e_normal_message_passthrough() {
+        let store = LocalStore::new();
+        let config = full_config();
+        let update = make_sender_update(42, "hello world");
+        let actions = LocalProcessor::process(&update, Some(&config), &store);
+        assert!(actions.is_empty(), "普通消息不应触发任何动作");
+    }
+
+    #[test]
+    fn e2e_antiflood_triggers_mute() {
+        let store = LocalStore::new();
+        let config = full_config(); // antiflood_limit = 3
+        // Use different texts to avoid duplicate detection
+        for i in 0..3 {
+            let update = make_sender_update(42, &format!("msg number {}", i));
+            assert!(LocalProcessor::process(&update, Some(&config), &store).is_empty());
+        }
+        // 4th message triggers antiflood (count=4 > limit=3)
+        let update = make_sender_update(42, "trigger flood now");
+        let actions = LocalProcessor::process(&update, Some(&config), &store);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].reason, "antiflood_mute");
+    }
+
+    #[test]
+    fn e2e_blacklist_deletes_message() {
+        let store = LocalStore::new();
+        let config = full_config();
+        let update = make_sender_update(42, "This is a scam project");
+        let actions = LocalProcessor::process(&update, Some(&config), &store);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].reason, "blacklist_hit");
+    }
+
+    #[test]
+    fn e2e_lock_photo_deleted() {
+        let store = LocalStore::new();
+        let config = full_config();
+        let update = make_photo_update_with_sender(42);
+        let actions = LocalProcessor::process(&update, Some(&config), &store);
+        assert_eq!(actions.len(), 1);
+        assert!(actions[0].reason.contains("Photo"));
+    }
+
+    #[test]
+    fn e2e_welcome_new_member() {
+        let store = LocalStore::new();
+        let config = full_config();
+        let update = make_join_update();
+        let actions = LocalProcessor::process(&update, Some(&config), &store);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].reason, "welcome_message");
+        let text = actions[0].params.get("text").unwrap().as_str().unwrap();
+        assert_eq!(text, "Welcome NewUser to TestGroup!");
+    }
+
+    #[test]
+    fn e2e_emoji_spam_detected() {
+        let store = LocalStore::new();
+        let config = full_config();
+        let update = make_sender_update(42, "Check 😀😀😀😀😀 this");
+        let actions = LocalProcessor::process(&update, Some(&config), &store);
+        assert_eq!(actions.len(), 1);
+        assert!(actions[0].reason.starts_with("spam_emoji_"));
+    }
+
+    #[test]
+    fn e2e_admin_exempt_from_all_checks() {
+        let store = LocalStore::new();
+        let config = full_config();
+        let update = make_sender_update(999, "This is a scam");
+        let actions = LocalProcessor::process(&update, Some(&config), &store);
+        assert!(actions.is_empty(), "管理员应豁免所有检测");
+    }
+
+    #[test]
+    fn e2e_antiflood_priority_over_blacklist() {
+        let store = LocalStore::new();
+        let config = full_config();
+        for _ in 0..3 {
+            let update = make_sender_update(42, "normal");
+            LocalProcessor::process(&update, Some(&config), &store);
+        }
+        let update = make_sender_update(42, "this is a scam");
+        let actions = LocalProcessor::process(&update, Some(&config), &store);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].reason, "antiflood_mute", "刷屏规则应优先于黑名单");
+    }
+
+    #[test]
+    fn e2e_no_config_passthrough() {
+        let store = LocalStore::new();
+        let update = make_sender_update(42, "scam ponzi 😀😀😀😀😀");
+        let actions = LocalProcessor::process(&update, None, &store);
+        assert!(actions.is_empty(), "无配置时应全部放行");
+    }
+
+    #[test]
+    fn e2e_admin_flood_exempt() {
+        let store = LocalStore::new();
+        let config = full_config();
+        for _ in 0..10 {
+            let update = make_sender_update(999, "admin msg");
+            let actions = LocalProcessor::process(&update, Some(&config), &store);
+            assert!(actions.is_empty(), "管理员不应触发防刷屏");
+        }
+    }
+
+    #[test]
+    fn e2e_duplicate_message_detection() {
+        let store = LocalStore::new();
+        let mut config = full_config();
+        config.antiflood_limit = 0; // 关闭防刷屏
+        let text = "Buy now great deal free money";
+        for _ in 0..2 {
+            let update = make_sender_update(42, text);
+            let actions = LocalProcessor::process(&update, Some(&config), &store);
+            let dup: Vec<_> = actions.iter().filter(|a| a.reason.starts_with("duplicate_")).collect();
+            assert!(dup.is_empty());
+        }
+        let update = make_sender_update(42, text);
+        let actions = LocalProcessor::process(&update, Some(&config), &store);
+        let dup: Vec<_> = actions.iter().filter(|a| a.reason.starts_with("duplicate_")).collect();
+        assert_eq!(dup.len(), 1);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // B4.2 性能基准测试
+    // ═══════════════════════════════════════════════════════════
+
+    #[test]
+    fn bench_1000_normal_messages() {
+        let store = LocalStore::new();
+        let config = full_config();
+        let messages = ["hello", "how are you", "great weather", "anyone online",
+            "check this", "interesting", "I agree", "let me think", "thanks", "morning"];
+
+        let start = std::time::Instant::now();
+        let mut total = 0;
+        for i in 0..1000 {
+            let sender_id = 42 + (i % 50);
+            let update = make_sender_update(sender_id, messages[i as usize % messages.len()]);
+            total += LocalProcessor::process(&update, Some(&config), &store).len();
+        }
+        let elapsed = start.elapsed();
+        eprintln!("bench_1000_normal: {:.2}ms, {:.1}µs/msg, {} actions",
+            elapsed.as_secs_f64() * 1000.0,
+            elapsed.as_micros() as f64 / 1000.0,
+            total);
+        assert!(elapsed.as_millis() < 500, "1000 msgs took {}ms > 500ms", elapsed.as_millis());
+    }
+
+    #[test]
+    fn bench_1000_mixed_messages() {
+        let store = LocalStore::new();
+        let config = full_config();
+        let scenarios: Vec<(&str, i64)> = vec![
+            ("hello world", 42),
+            ("this is a scam project", 43),
+            ("BUY NOW AMAZING DEAL", 44),
+            ("Check 😀😀😀😀😀😀 out", 45),
+            ("/help", 46),
+            ("normal message", 47),
+            ("another normal one", 48),
+            ("yet another msg", 49),
+            ("hello from admin", 999),
+            ("regular chat", 50),
+        ];
+
+        let start = std::time::Instant::now();
+        let mut total = 0;
+        for i in 0..1000 {
+            let (text, sender_id) = scenarios[i % scenarios.len()];
+            let update = make_sender_update(sender_id, text);
+            total += LocalProcessor::process(&update, Some(&config), &store).len();
+        }
+        let elapsed = start.elapsed();
+        eprintln!("bench_1000_mixed: {:.2}ms, {:.1}µs/msg, {} actions",
+            elapsed.as_secs_f64() * 1000.0,
+            elapsed.as_micros() as f64 / 1000.0,
+            total);
+        assert!(elapsed.as_millis() < 500, "1000 mixed msgs took {}ms > 500ms", elapsed.as_millis());
+        assert!(total > 0, "应至少触发部分动作");
+    }
+
+    #[test]
+    fn bench_local_store_10000_ops() {
+        let store = LocalStore::new();
+        let start = std::time::Instant::now();
+        for i in 0..10000i64 {
+            store.check_flood(-100 - (i % 10), 1 + (i % 100), 10, 10);
+            store.record_message(-100 - (i % 10), 1 + (i % 100), &format!("msg_{}", i % 20), 60);
+        }
+        let elapsed = start.elapsed();
+        eprintln!("bench_store_10000: {:.2}ms, {:.1}µs/op",
+            elapsed.as_secs_f64() * 1000.0,
+            elapsed.as_micros() as f64 / 10000.0);
+        assert!(elapsed.as_millis() < 500, "10000 ops took {}ms > 500ms", elapsed.as_millis());
+    }
+
+    #[test]
+    fn bench_cleanup_performance() {
+        let store = LocalStore::new();
+        for i in 0..1000i64 {
+            store.check_flood(-100 - (i % 50), 1 + (i % 200), 100, 10);
+            store.record_message(-100 - (i % 50), 1 + (i % 200), &format!("msg_{}", i), 60);
+        }
+        let start = std::time::Instant::now();
+        store.cleanup_expired();
+        let elapsed = start.elapsed();
+        eprintln!("bench_cleanup: {:.2}ms", elapsed.as_secs_f64() * 1000.0);
+        assert!(elapsed.as_millis() < 50, "cleanup took {}ms > 50ms", elapsed.as_millis());
     }
 }

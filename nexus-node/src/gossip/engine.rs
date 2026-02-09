@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tracing::{info, warn, debug, error};
+use tracing::{info, warn, debug};
 
 use crate::types::*;
 use crate::gossip::state::GossipState;
@@ -81,12 +81,9 @@ impl GossipEngine {
         let k = select_k(active_nodes.len());
         let targets = deterministic_select_ids(&active_nodes, &message.message_hash, message.sequence, k);
 
-        let leader = targets.first().cloned();
-        let backups = if targets.len() > 1 {
-            targets[1..].to_vec()
-        } else {
-            vec![]
-        };
+        let election = crate::leader::LeaderExecutor::elect_leader(&targets, message.sequence);
+        let leader = if election.leader.is_empty() { None } else { Some(election.leader) };
+        let backups = election.backups;
 
         let msg_hash = message.message_hash.clone();
         let message_bot_id_hash = message.bot_id_hash.clone();
@@ -188,7 +185,7 @@ impl GossipEngine {
 
     /// 处理 MessageSeen
     fn handle_seen(&self, seen: &SeenPayload) {
-        let (status, needs_pull) = self.state.on_seen(
+        let (_status, needs_pull) = self.state.on_seen(
             &seen.msg_id,
             &seen.node_id,
             &seen.msg_hash,
@@ -264,8 +261,9 @@ impl GossipEngine {
         let k = select_k(active_nodes.len());
         let targets = deterministic_select_ids(&active_nodes, &msg.message_hash, msg.sequence, k);
 
-        let leader = targets.first().cloned();
-        let backups = if targets.len() > 1 { targets[1..].to_vec() } else { vec![] };
+        let election = crate::leader::LeaderExecutor::elect_leader(&targets, msg.sequence);
+        let leader = if election.leader.is_empty() { None } else { Some(election.leader) };
+        let backups = election.backups;
 
         self.state.on_agent_message(
             &resp.msg_id,
@@ -404,16 +402,6 @@ impl GossipEngine {
         };
         let _ = self.outbound_tx.send(pull);
         debug!(bot = bot_id_hash, current_version, "已发送 ConfigPull 请求");
-    }
-
-    /// 检查 SeenPayload 中的 config_version，如果对方版本更新则发送 ConfigPull
-    fn check_config_version_from_seen(&self, seen: &SeenPayload) {
-        // 从 msg_id 中提取 bot_id_hash (格式: bot_id_hash_sequence)
-        if let Some(bot_id_hash) = seen.msg_id.rsplit('_').nth(1).map(String::from) {
-            // bot_id_hash 可能包含多个 _ 分隔符，需要正确提取
-        }
-        // 简化处理: 如果对方 config_version > 0 且大于我们的，发 ConfigPull
-        // 实际 bot_id_hash 需从消息状态中获取
     }
 
     /// 尝试达成 M/K 共识

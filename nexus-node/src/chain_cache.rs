@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::RwLock;
-use tracing::{info, warn, debug, error};
+use tracing::{info, warn, debug};
 
-use crate::types::{BotInfoCache, NodeInfoCache, SignedGroupConfig, GroupConfig};
+use crate::types::{BotInfoCache, NodeInfoCache, SignedGroupConfig};
 
 /// 链上数据缓存（从链上读取，本地缓存）
 ///
@@ -53,7 +53,7 @@ impl ChainCache {
     pub fn load_from_env(&self) {
         // 加载 Bot 注册
         if let Ok(bots_str) = std::env::var("BOT_REGISTRATIONS") {
-            let mut bots = self.bots.write().unwrap();
+            let mut bots = self.bots.write().unwrap_or_else(|e| e.into_inner());
             for entry in bots_str.split(',') {
                 let parts: Vec<&str> = entry.split(':').collect();
                 if parts.len() >= 2 {
@@ -81,7 +81,7 @@ impl ChainCache {
 
         // 加载节点列表
         if let Ok(nodes_str) = std::env::var("NODE_LIST") {
-            let mut nodes = self.nodes.write().unwrap();
+            let mut nodes = self.nodes.write().unwrap_or_else(|e| e.into_inner());
             for entry in nodes_str.split(',') {
                 let parts: Vec<&str> = entry.split('@').collect();
                 if parts.len() >= 2 {
@@ -103,12 +103,12 @@ impl ChainCache {
 
     /// 获取 Bot 信息
     pub fn get_bot(&self, bot_id_hash: &str) -> Option<BotInfoCache> {
-        self.bots.read().unwrap().get(bot_id_hash).cloned()
+        self.bots.read().unwrap_or_else(|e| e.into_inner()).get(bot_id_hash).cloned()
     }
 
     /// 获取活跃节点 ID 列表（排序后）
     pub fn get_active_node_ids(&self) -> Vec<String> {
-        let nodes = self.nodes.read().unwrap();
+        let nodes = self.nodes.read().unwrap_or_else(|e| e.into_inner());
         let mut ids: Vec<String> = nodes.keys().cloned().collect();
         ids.sort();
         ids
@@ -116,27 +116,27 @@ impl ChainCache {
 
     /// 获取节点信息
     pub fn get_node(&self, node_id: &str) -> Option<NodeInfoCache> {
-        self.nodes.read().unwrap().get(node_id).cloned()
+        self.nodes.read().unwrap_or_else(|e| e.into_inner()).get(node_id).cloned()
     }
 
     /// 获取所有节点信息
     pub fn get_all_nodes(&self) -> Vec<NodeInfoCache> {
-        self.nodes.read().unwrap().values().cloned().collect()
+        self.nodes.read().unwrap_or_else(|e| e.into_inner()).values().cloned().collect()
     }
 
     /// 注册 Bot（手动添加，开发调试用）
     pub fn register_bot(&self, info: BotInfoCache) {
-        self.bots.write().unwrap().insert(info.bot_id_hash.clone(), info);
+        self.bots.write().unwrap_or_else(|e| e.into_inner()).insert(info.bot_id_hash.clone(), info);
     }
 
     /// 添加节点
     pub fn add_node(&self, info: NodeInfoCache) {
-        self.nodes.write().unwrap().insert(info.node_id.clone(), info);
+        self.nodes.write().unwrap_or_else(|e| e.into_inner()).insert(info.node_id.clone(), info);
     }
 
     /// 移除节点
     pub fn remove_node(&self, node_id: &str) {
-        self.nodes.write().unwrap().remove(node_id);
+        self.nodes.write().unwrap_or_else(|e| e.into_inner()).remove(node_id);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -171,7 +171,7 @@ impl ChainCache {
 
         // 4. 版本号单调递增
         {
-            let configs = self.group_configs.read().unwrap();
+            let configs = self.group_configs.read().unwrap_or_else(|e| e.into_inner());
             if let Some(existing) = configs.get(bot_id_hash) {
                 if signed_config.config.version <= existing.config.version {
                     return Err(format!(
@@ -188,7 +188,7 @@ impl ChainCache {
             version = signed_config.config.version,
             "群配置已更新"
         );
-        self.group_configs.write().unwrap()
+        self.group_configs.write().unwrap_or_else(|e| e.into_inner())
             .insert(bot_id_hash.to_string(), signed_config.clone());
 
         // 6. 持久化到本地 JSON
@@ -201,12 +201,12 @@ impl ChainCache {
 
     /// 获取群配置
     pub fn get_group_config(&self, bot_id_hash: &str) -> Option<SignedGroupConfig> {
-        self.group_configs.read().unwrap().get(bot_id_hash).cloned()
+        self.group_configs.read().unwrap_or_else(|e| e.into_inner()).get(bot_id_hash).cloned()
     }
 
     /// 获取群配置版本号
     pub fn get_config_version(&self, bot_id_hash: &str) -> u64 {
-        self.group_configs.read().unwrap()
+        self.group_configs.read().unwrap_or_else(|e| e.into_inner())
             .get(bot_id_hash)
             .map(|c| c.config.version)
             .unwrap_or(0)
@@ -214,7 +214,7 @@ impl ChainCache {
 
     /// 获取所有群配置的 bot_id_hash 列表
     pub fn get_config_bot_ids(&self) -> Vec<String> {
-        self.group_configs.read().unwrap().keys().cloned().collect()
+        self.group_configs.read().unwrap_or_else(|e| e.into_inner()).keys().cloned().collect()
     }
 
     /// 验证 Ed25519 签名
@@ -250,10 +250,13 @@ impl ChainCache {
             .map_err(|e| format!("Create config dir failed: {}", e))?;
 
         let path = config_dir.join(format!("{}.json", bot_id_hash));
+        let tmp_path = config_dir.join(format!("{}.json.tmp", bot_id_hash));
         let json = serde_json::to_string_pretty(signed_config)
             .map_err(|e| format!("Serialize config failed: {}", e))?;
-        std::fs::write(&path, json)
-            .map_err(|e| format!("Write config file failed: {}", e))?;
+        std::fs::write(&tmp_path, &json)
+            .map_err(|e| format!("Write temp config file failed: {}", e))?;
+        std::fs::rename(&tmp_path, &path)
+            .map_err(|e| format!("Rename config file failed: {}", e))?;
 
         debug!(bot = bot_id_hash, path = %path.display(), "群配置已持久化");
         Ok(())
@@ -286,7 +289,7 @@ impl ChainCache {
                 Ok(json) => match serde_json::from_str::<SignedGroupConfig>(&json) {
                     Ok(config) => {
                         let bot_id = config.config.bot_id_hash.clone();
-                        self.group_configs.write().unwrap()
+                        self.group_configs.write().unwrap_or_else(|e| e.into_inner())
                             .insert(bot_id.clone(), config);
                         count += 1;
                         debug!(bot = bot_id, "从本地恢复群配置");

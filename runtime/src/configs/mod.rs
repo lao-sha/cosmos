@@ -46,7 +46,7 @@ use super::{
 	System, Timestamp, EXISTENTIAL_DEPOSIT, SLOT_DURATION, VERSION, UNIT, MINUTES, HOURS, DAYS,
 	TechnicalCommittee, ArbitrationCommittee, TreasuryCouncil, ContentCommittee,
 	// Entity types (原 ShareMall)
-	Assets, Escrow, EntityRegistry, EntityShop, EntityService, EntityTransaction, EntityToken,
+	Assets, Escrow, EntityRegistry, EntityShop, EntityService, EntityTransaction, EntityToken, EntityKyc,
 };
 
 const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(75);
@@ -1114,7 +1114,6 @@ impl pallet_entity_transaction::Config for Runtime {
 }
 
 impl pallet_entity_review::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
 	type OrderProvider = EntityTransaction;
 	type ShopProvider = EntityShop;
 	type MaxCidLength = ConstU32<64>;
@@ -1135,6 +1134,7 @@ impl pallet_entity_token::Config for Runtime {
 	type MaxTokenNameLength = ConstU32<64>;
 	type MaxTokenSymbolLength = ConstU32<8>;
 	type MaxTransferListSize = ConstU32<1000>;
+	type MaxDividendRecipients = ConstU32<500>;
 	type KycProvider = TokenKycProvider;
 	type MemberProvider = TokenMemberProvider;
 }
@@ -1200,14 +1200,15 @@ impl pallet_entity_commission::MemberProvider<AccountId> for MemberProviderBridg
 
 	fn add_custom_level(
 		shop_id: u64,
-		level_id: u8,
+		_level_id: u8,
 		name: &[u8],
 		threshold: u128,
 		discount_rate: u16,
 		commission_bonus: u16,
 	) -> sp_runtime::DispatchResult {
+		// level_id 由 pallet 自动分配，忽略传入值
 		pallet_entity_member::Pallet::<Runtime>::governance_add_custom_level(
-			shop_id, level_id, name, threshold, discount_rate, commission_bonus,
+			shop_id, name, threshold, discount_rate, commission_bonus,
 		)
 	}
 
@@ -1261,7 +1262,6 @@ pub type EntityCommissionProvider = pallet_commission_core::Pallet<Runtime>;
 pub type EntityMemberProvider = MemberProviderBridge;
 
 impl pallet_entity_governance::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
 	type Balance = Balance;
 	type EntityProvider = EntityRegistry;
 	type ShopProvider = EntityShop;
@@ -1409,10 +1409,28 @@ impl pallet_entity_kyc::Config for Runtime {
 	type AdminOrigin = EnsureRoot<AccountId>;
 }
 
+/// TokenSale KYC 适配器（桥接 pallet-entity-kyc → KycChecker trait）
+pub struct TokenSaleKycBridge;
+impl pallet_entity_tokensale::KycChecker<AccountId> for TokenSaleKycBridge {
+	fn kyc_level(account: &AccountId) -> u8 {
+		use pallet_entity_kyc::pallet::KycLevel;
+		match EntityKyc::get_kyc_level(account) {
+			KycLevel::None => 0,
+			KycLevel::Basic => 1,
+			KycLevel::Standard => 2,
+			KycLevel::Enhanced => 3,
+			KycLevel::Institutional => 4,
+		}
+	}
+}
+
 impl pallet_entity_tokensale::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	type Balance = Balance;
+	type Currency = Balances;
 	type AssetId = u64;
+	type EntityProvider = EntityRegistry;
+	type TokenProvider = EntityToken;
+	type KycChecker = TokenSaleKycBridge;
 	type MaxPaymentOptions = ConstU32<5>;
 	type MaxWhitelistSize = ConstU32<1000>;
 	type MaxRoundsHistory = ConstU32<50>;
@@ -1428,6 +1446,35 @@ parameter_types! {
 	pub const BotConsensusMinStake: Balance = 100 * UNIT;
 	/// 节点退出冷却期: ~1 天 (14400 blocks @ 6s/block)
 	pub const BotConsensusExitCooldown: BlockNumber = DAYS;
+	/// Era 长度: 1 天
+	pub const BotEraLength: BlockNumber = DAYS;
+	/// 每 Era 通胀铸币: 100 NXS (Phase 0)
+	pub const BotInflationPerEra: Balance = 100 * UNIT;
+	/// 最低在线率: 80%
+	pub const BotMinUptimeForReward: Perbill = Perbill::from_percent(80);
+	/// 单节点奖励上限: 30%
+	pub const BotMaxRewardShare: Perbill = Perbill::from_percent(30);
+	/// Basic 层级每 Era 费用: ~0.33 NXS/天 (10 NXS/月 ÷ 30)
+	pub const BotBasicFeePerEra: Balance = 10 * UNIT / 30;
+	/// Pro 层级每 Era 费用: 1 NXS/天
+	pub const BotProFeePerEra: Balance = 30 * UNIT / 30;
+	/// Enterprise 层级每 Era 费用: ~3.33 NXS/天
+	pub const BotEnterpriseFeePerEra: Balance = 100 * UNIT / 30;
+}
+
+/// BotRegistry Bridge: 将 pallet-bot-registry 桥接到 BotRegistryProvider trait
+pub struct BotRegistryBridge;
+
+impl pallet_bot_consensus::BotRegistryProvider<AccountId> for BotRegistryBridge {
+	fn bot_exists(bot_id_hash: &[u8; 32]) -> bool {
+		pallet_bot_registry::Pallet::<Runtime>::get_bot_public_key(bot_id_hash).is_some()
+	}
+
+	fn is_bot_owner(bot_id_hash: &[u8; 32], who: &AccountId) -> bool {
+		pallet_bot_registry::Pallet::<Runtime>::get_bot_owner(bot_id_hash)
+			.map(|owner| &owner == who)
+			.unwrap_or(false)
+	}
 }
 
 impl pallet_bot_consensus::Config for Runtime {
@@ -1439,6 +1486,14 @@ impl pallet_bot_consensus::Config for Runtime {
 	type ReporterRewardPercentage = ConstU32<50>;
 	type SuspendThreshold = ConstU16<2000>;
 	type ForceExitThreshold = ConstU16<1000>;
+	type EraLength = BotEraLength;
+	type InflationPerEra = BotInflationPerEra;
+	type MinUptimeForReward = BotMinUptimeForReward;
+	type MaxRewardShare = BotMaxRewardShare;
+	type BasicFeePerEra = BotBasicFeePerEra;
+	type ProFeePerEra = BotProFeePerEra;
+	type EnterpriseFeePerEra = BotEnterpriseFeePerEra;
+	type BotRegistry = BotRegistryBridge;
 }
 
 impl pallet_bot_registry::Config for Runtime {

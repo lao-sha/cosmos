@@ -35,7 +35,7 @@ pub mod pallet {
     use pallet_entity_common::{OrderProvider, ShopProvider};
 
     /// 订单评价
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     #[scale_info(skip_type_params(MaxCidLen))]
     pub struct MallReview<AccountId, BlockNumber, MaxCidLen: Get<u32>> {
         /// 订单 ID
@@ -58,10 +58,7 @@ pub mod pallet {
     >;
 
     #[pallet::config]
-    pub trait Config: frame_system::Config {
-        /// 运行时事件类型
-        type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
-
+    pub trait Config: frame_system::Config<RuntimeEvent: From<Event<Self>>> {
         /// 订单查询接口
         type OrderProvider: OrderProvider<Self::AccountId, u128>;
 
@@ -97,6 +94,7 @@ pub mod pallet {
         ReviewSubmitted {
             order_id: u64,
             reviewer: T::AccountId,
+            shop_id: Option<u64>,
             rating: u8,
         },
     }
@@ -125,7 +123,7 @@ pub mod pallet {
     impl<T: Config> Pallet<T> {
         /// 提交评价
         #[pallet::call_index(0)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(35_000_000, 5_000))]
         pub fn submit_review(
             origin: OriginFor<T>,
             order_id: u64,
@@ -138,7 +136,6 @@ pub mod pallet {
             ensure!(rating >= 1 && rating <= 5, Error::<T>::InvalidRating);
 
             // 验证订单
-            ensure!(T::OrderProvider::order_exists(order_id), Error::<T>::OrderNotFound);
             let buyer = T::OrderProvider::order_buyer(order_id).ok_or(Error::<T>::OrderNotFound)?;
             ensure!(buyer == who, Error::<T>::NotOrderBuyer);
             ensure!(T::OrderProvider::is_order_completed(order_id), Error::<T>::OrderNotCompleted);
@@ -163,13 +160,15 @@ pub mod pallet {
             ReviewCount::<T>::mutate(|c| *c = c.saturating_add(1));
 
             // 更新店铺评分
-            if let Some(shop_id) = T::OrderProvider::order_shop_id(order_id) {
-                let _ = T::ShopProvider::update_shop_rating(shop_id, rating);
+            let shop_id = T::OrderProvider::order_shop_id(order_id);
+            if let Some(sid) = shop_id {
+                T::ShopProvider::update_shop_rating(sid, rating)?;
             }
 
             Self::deposit_event(Event::ReviewSubmitted {
                 order_id,
                 reviewer: who,
+                shop_id,
                 rating,
             });
 

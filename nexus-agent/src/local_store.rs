@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use std::sync::RwLock;
 use std::time::Instant;
-use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher, BuildHasher, RandomState};
 
 /// Agent 本地状态存储
 ///
@@ -25,6 +24,9 @@ pub struct LocalStore {
     /// 最近消息指纹: chat_id → Vec<MessageFingerprint>
     /// 用于重复消息检测
     recent_messages: RwLock<HashMap<i64, Vec<MessageFingerprint>>>,
+
+    /// 随机哈希种子（进程生命周期内固定，防外部碰撞攻击）
+    hash_state: RandomState,
 }
 
 /// 防刷屏计数器
@@ -54,6 +56,7 @@ impl LocalStore {
             warn_counts: RwLock::new(HashMap::new()),
             admin_cache: RwLock::new(HashMap::new()),
             recent_messages: RwLock::new(HashMap::new()),
+            hash_state: RandomState::new(),
         }
     }
 
@@ -74,7 +77,7 @@ impl LocalStore {
         }
 
         let key = (chat_id, user_id);
-        let mut counters = self.flood_counters.write().unwrap();
+        let mut counters = self.flood_counters.write().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
 
         let counter = counters.entry(key).or_insert(FloodCounter {
@@ -95,7 +98,7 @@ impl LocalStore {
 
     /// 重置某用户的防刷屏计数器
     pub fn reset_flood(&self, chat_id: i64, user_id: i64) {
-        let mut counters = self.flood_counters.write().unwrap();
+        let mut counters = self.flood_counters.write().unwrap_or_else(|e| e.into_inner());
         counters.remove(&(chat_id, user_id));
     }
 
@@ -108,7 +111,7 @@ impl LocalStore {
     /// 参考: FallenRobot/modules/warns.py
     ///   - user_data[chat_id][user_id]["warnings"] += 1
     pub fn add_warn(&self, chat_id: i64, user_id: i64) -> u8 {
-        let mut warns = self.warn_counts.write().unwrap();
+        let mut warns = self.warn_counts.write().unwrap_or_else(|e| e.into_inner());
         let count = warns.entry((chat_id, user_id)).or_insert(0);
         *count = count.saturating_add(1);
         *count
@@ -116,7 +119,7 @@ impl LocalStore {
 
     /// 减少警告计数，返回新的计数值
     pub fn remove_warn(&self, chat_id: i64, user_id: i64) -> u8 {
-        let mut warns = self.warn_counts.write().unwrap();
+        let mut warns = self.warn_counts.write().unwrap_or_else(|e| e.into_inner());
         let count = warns.entry((chat_id, user_id)).or_insert(0);
         *count = count.saturating_sub(1);
         *count
@@ -124,13 +127,13 @@ impl LocalStore {
 
     /// 重置警告
     pub fn reset_warns(&self, chat_id: i64, user_id: i64) {
-        let mut warns = self.warn_counts.write().unwrap();
+        let mut warns = self.warn_counts.write().unwrap_or_else(|e| e.into_inner());
         warns.remove(&(chat_id, user_id));
     }
 
     /// 获取警告数
     pub fn get_warns(&self, chat_id: i64, user_id: i64) -> u8 {
-        let warns = self.warn_counts.read().unwrap();
+        let warns = self.warn_counts.read().unwrap_or_else(|e| e.into_inner());
         warns.get(&(chat_id, user_id)).copied().unwrap_or(0)
     }
 
@@ -145,7 +148,7 @@ impl LocalStore {
     /// 参考: FallenRobot/modules/helper_funcs/chat_status.py
     ///   - TTLCache(maxsize=512, ttl=300) 缓存管理员列表
     pub fn is_admin_cached(&self, chat_id: i64, user_id: i64) -> Option<bool> {
-        let cache = self.admin_cache.read().unwrap();
+        let cache = self.admin_cache.read().unwrap_or_else(|e| e.into_inner());
         let entry = cache.get(&chat_id)?;
 
         // TTL 检查
@@ -158,7 +161,7 @@ impl LocalStore {
 
     /// 更新管理员缓存
     pub fn set_admin_cache(&self, chat_id: i64, admin_ids: Vec<i64>) {
-        let mut cache = self.admin_cache.write().unwrap();
+        let mut cache = self.admin_cache.write().unwrap_or_else(|e| e.into_inner());
         cache.insert(chat_id, AdminCacheEntry {
             admin_ids,
             cached_at: Instant::now(),
@@ -176,10 +179,10 @@ impl LocalStore {
     ///   - duplicateDetector: Window + Threshold
     ///   - 同一用户在窗口内发送相同内容 > Threshold → spam
     pub fn record_message(&self, chat_id: i64, user_id: i64, text: &str, window_secs: u64) -> u32 {
-        let text_hash = Self::hash_text(text);
+        let text_hash = self.hash_text(text);
         let now = Instant::now();
 
-        let mut messages = self.recent_messages.write().unwrap();
+        let mut messages = self.recent_messages.write().unwrap_or_else(|e| e.into_inner());
         let entries = messages.entry(chat_id).or_insert_with(Vec::new);
 
         // 清理过期条目
@@ -200,9 +203,9 @@ impl LocalStore {
         dup_count + 1 // 包含当前这条
     }
 
-    /// 计算文本哈希
-    fn hash_text(text: &str) -> u64 {
-        let mut hasher = DefaultHasher::new();
+    /// 计算文本哈希（使用进程级随机种子，防碰撞攻击）
+    fn hash_text(&self, text: &str) -> u64 {
+        let mut hasher = self.hash_state.build_hasher();
         text.to_lowercase().hash(&mut hasher);
         hasher.finish()
     }
@@ -217,19 +220,19 @@ impl LocalStore {
 
         // 清理防刷屏（超过 60 秒未更新的计数器）
         {
-            let mut counters = self.flood_counters.write().unwrap();
+            let mut counters = self.flood_counters.write().unwrap_or_else(|e| e.into_inner());
             counters.retain(|_, v| now.duration_since(v.window_start).as_secs() < 60);
         }
 
         // 清理管理员缓存（过期条目）
         {
-            let mut cache = self.admin_cache.write().unwrap();
+            let mut cache = self.admin_cache.write().unwrap_or_else(|e| e.into_inner());
             cache.retain(|_, v| v.cached_at.elapsed().as_secs() < v.ttl_seconds);
         }
 
         // 清理消息指纹（超过 5 分钟的）
         {
-            let mut messages = self.recent_messages.write().unwrap();
+            let mut messages = self.recent_messages.write().unwrap_or_else(|e| e.into_inner());
             for entries in messages.values_mut() {
                 entries.retain(|fp| now.duration_since(fp.timestamp).as_secs() < 300);
             }

@@ -51,7 +51,7 @@ pub mod pallet {
     use sp_runtime::traits::{AtLeast32BitUnsigned, Saturating, Zero};
 
     /// 实体通证配置（原 ShopTokenConfig，Phase 2 扩展）
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     pub struct EntityTokenConfig<Balance, BlockNumber> {
         /// 是否已启用通证
         pub enabled: bool,
@@ -135,6 +135,10 @@ pub mod pallet {
         /// 白名单/黑名单最大地址数
         #[pallet::constant]
         type MaxTransferListSize: Get<u32>;
+
+        /// 分红单次最大接收人数
+        #[pallet::constant]
+        type MaxDividendRecipients: Get<u32>;
 
         /// KYC 查询接口（可选）
         type KycProvider: KycLevelProvider<Self::AccountId>;
@@ -265,6 +269,19 @@ pub mod pallet {
         Blake2_128Concat,
         u64,  // entity_id
         BoundedVec<T::AccountId, T::MaxTransferListSize>,
+        ValueQuery,
+    >;
+
+    /// 预留代币 (entity_id, holder) -> reserved_amount
+    #[pallet::storage]
+    #[pallet::getter(fn reserved_tokens)]
+    pub type ReservedTokens<T: Config> = StorageDoubleMap<
+        _,
+        Blake2_128Concat,
+        u64,  // entity_id
+        Blake2_128Concat,
+        T::AccountId,
+        T::AssetBalance,
         ValueQuery,
     >;
 
@@ -437,6 +454,22 @@ pub mod pallet {
         AddressAlreadyInList,
         /// 地址不在列表中
         AddressNotInList,
+        /// 店铺未激活
+        ShopNotActive,
+        /// 数量为零
+        ZeroAmount,
+        /// 锁仓时长为零
+        InvalidLockDuration,
+        /// 分红接收人过多
+        TooManyRecipients,
+        /// 分红总额不匹配
+        DividendAmountMismatch,
+        /// 兑换限额设置无效（min > max）
+        InvalidRedeemLimits,
+        /// 名称为空
+        EmptyName,
+        /// 符号为空
+        EmptySymbol,
     }
 
     // ==================== Extrinsics ====================
@@ -453,7 +486,7 @@ pub mod pallet {
         /// - `reward_rate`: 购物返积分比例（基点）
         /// - `exchange_rate`: 积分兑换比例（基点）
         #[pallet::call_index(0)]
-        #[pallet::weight(Weight::from_parts(80_000, 0))]
+        #[pallet::weight(Weight::from_parts(200_000_000, 5_000))]
         pub fn create_shop_token(
             origin: OriginFor<T>,
             shop_id: u64,
@@ -467,6 +500,8 @@ pub mod pallet {
 
             // 验证店铺存在且调用者是店主
             ensure!(T::ShopProvider::shop_exists(shop_id), Error::<T>::ShopNotFound);
+            // M1: 检查 Shop 是否激活
+            ensure!(T::ShopProvider::is_shop_active(shop_id), Error::<T>::ShopNotActive);
             let owner = T::ShopProvider::shop_owner(shop_id).ok_or(Error::<T>::ShopNotFound)?;
             ensure!(owner == who, Error::<T>::NotShopOwner);
 
@@ -476,6 +511,9 @@ pub mod pallet {
             // 验证参数
             ensure!(reward_rate <= 10000, Error::<T>::InvalidRewardRate);
             ensure!(exchange_rate <= 10000, Error::<T>::InvalidExchangeRate);
+            // L1: 名称和符号不能为空
+            ensure!(!name.is_empty(), Error::<T>::EmptyName);
+            ensure!(!symbol.is_empty(), Error::<T>::EmptySymbol);
 
             // 转换名称和符号
             let name_bounded: BoundedVec<u8, T::MaxTokenNameLength> =
@@ -534,7 +572,7 @@ pub mod pallet {
 
         /// 更新代币配置
         #[pallet::call_index(1)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(100_000_000, 4_000))]
         pub fn update_token_config(
             origin: OriginFor<T>,
             shop_id: u64,
@@ -575,6 +613,11 @@ pub mod pallet {
                     config.enabled = e;
                 }
 
+                // L6: 验证 min_redeem <= max_redeem_per_order
+                if !config.max_redeem_per_order.is_zero() && config.min_redeem > config.max_redeem_per_order {
+                    return Err(Error::<T>::InvalidRedeemLimits.into());
+                }
+
                 Ok(())
             })?;
 
@@ -584,7 +627,7 @@ pub mod pallet {
 
         /// 店主铸造代币（用于活动奖励等）
         #[pallet::call_index(2)]
-        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        #[pallet::weight(Weight::from_parts(150_000_000, 4_000))]
         pub fn mint_tokens(
             origin: OriginFor<T>,
             shop_id: u64,
@@ -601,6 +644,9 @@ pub mod pallet {
             let config = ShopTokenConfigs::<T>::get(shop_id).ok_or(Error::<T>::TokenNotEnabled)?;
             ensure!(config.enabled, Error::<T>::TokenNotEnabled);
 
+            // H1: 检查 max_supply
+            Self::ensure_within_max_supply(shop_id, &config, amount)?;
+
             // 铸造代币
             let asset_id = Self::shop_to_asset_id(shop_id);
             T::Assets::mint_into(asset_id, &to, amount)?;
@@ -616,7 +662,7 @@ pub mod pallet {
 
         /// 用户转让积分
         #[pallet::call_index(3)]
-        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        #[pallet::weight(Weight::from_parts(150_000_000, 5_000))]
         pub fn transfer_tokens(
             origin: OriginFor<T>,
             shop_id: u64,
@@ -633,10 +679,15 @@ pub mod pallet {
             // Phase 8: 检查转账限制
             Self::check_transfer_restriction(shop_id, &config, &to)?;
 
-            // 检查余额
+            // H4: 检查可用余额（扣除锁仓和预留）
             let asset_id = Self::shop_to_asset_id(shop_id);
             let balance = T::Assets::balance(asset_id, &who);
-            ensure!(balance >= amount, Error::<T>::InsufficientBalance);
+            let locked = LockedTokens::<T>::get(shop_id, &who)
+                .map(|(amt, _)| amt)
+                .unwrap_or_else(Zero::zero);
+            let reserved = ReservedTokens::<T>::get(shop_id, &who);
+            let available = balance.saturating_sub(locked).saturating_sub(reserved);
+            ensure!(available >= amount, Error::<T>::InsufficientBalance);
 
             // 转账
             T::Assets::transfer(asset_id, &who, &to, amount, frame_support::traits::tokens::Preservation::Preserve)?;
@@ -655,7 +706,7 @@ pub mod pallet {
 
         /// 配置分红
         #[pallet::call_index(4)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(100_000_000, 4_000))]
         pub fn configure_dividend(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -691,7 +742,7 @@ pub mod pallet {
 
         /// 分发分红（按持有比例分配）
         #[pallet::call_index(5)]
-        #[pallet::weight(Weight::from_parts(100_000, 0))]
+        #[pallet::weight(Weight::from_parts(300_000_000, 10_000))]
         pub fn distribute_dividend(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -704,9 +755,17 @@ pub mod pallet {
             let owner = T::ShopProvider::shop_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
             ensure!(owner == who, Error::<T>::NotShopOwner);
 
+            // H5: 限制接收人数量
+            ensure!(
+                recipients.len() <= T::MaxDividendRecipients::get() as usize,
+                Error::<T>::TooManyRecipients
+            );
+
             // 检查分红配置
             let config = ShopTokenConfigs::<T>::get(entity_id).ok_or(Error::<T>::TokenNotEnabled)?;
             ensure!(config.dividend_config.enabled, Error::<T>::DividendNotEnabled);
+            // M6: 检查通证类型是否支持分红
+            ensure!(config.token_type.has_dividend_rights(), Error::<T>::TokenTypeNotSupported);
 
             let now = <frame_system::Pallet<T>>::block_number();
             let last = config.dividend_config.last_distribution;
@@ -716,6 +775,13 @@ pub mod pallet {
             if !last.is_zero() {
                 ensure!(now >= last + min_period, Error::<T>::DividendPeriodNotReached);
             }
+
+            // H6: 校验 total_amount == sum(recipients)
+            let mut sum = T::AssetBalance::zero();
+            for (_, amount) in recipients.iter() {
+                sum = sum.saturating_add(*amount);
+            }
+            ensure!(sum == total_amount, Error::<T>::DividendAmountMismatch);
 
             // 分配分红到待领取
             let mut count = 0u32;
@@ -728,10 +794,12 @@ pub mod pallet {
                 }
             }
 
-            // 更新上次分红时间
+            // 更新上次分红时间和累计金额
             ShopTokenConfigs::<T>::mutate(entity_id, |maybe_config| {
                 if let Some(config) = maybe_config {
                     config.dividend_config.last_distribution = now;
+                    // L5: 更新累计分红金额
+                    config.dividend_config.accumulated = config.dividend_config.accumulated.saturating_add(total_amount);
                 }
             });
 
@@ -745,7 +813,7 @@ pub mod pallet {
 
         /// 领取分红
         #[pallet::call_index(6)]
-        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        #[pallet::weight(Weight::from_parts(150_000_000, 4_000))]
         pub fn claim_dividend(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -754,6 +822,11 @@ pub mod pallet {
 
             let pending = PendingDividends::<T>::get(entity_id, &who);
             ensure!(!pending.is_zero(), Error::<T>::NoDividendToClaim);
+
+            // H3: 检查 max_supply
+            if let Some(config) = ShopTokenConfigs::<T>::get(entity_id) {
+                Self::ensure_within_max_supply(entity_id, &config, pending)?;
+            }
 
             // 清空待领取
             PendingDividends::<T>::remove(entity_id, &who);
@@ -777,7 +850,7 @@ pub mod pallet {
 
         /// 锁仓代币
         #[pallet::call_index(7)]
-        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        #[pallet::weight(Weight::from_parts(150_000_000, 4_000))]
         pub fn lock_tokens(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -785,6 +858,14 @@ pub mod pallet {
             lock_duration: BlockNumberFor<T>,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
+
+            // M2: 检查通证是否启用
+            let config = ShopTokenConfigs::<T>::get(entity_id).ok_or(Error::<T>::TokenNotEnabled)?;
+            ensure!(config.enabled, Error::<T>::TokenNotEnabled);
+            // M3: amount > 0
+            ensure!(!amount.is_zero(), Error::<T>::ZeroAmount);
+            // M4: duration > 0
+            ensure!(!lock_duration.is_zero(), Error::<T>::InvalidLockDuration);
 
             // 检查余额
             let asset_id = Self::shop_to_asset_id(entity_id);
@@ -795,7 +876,8 @@ pub mod pallet {
                 .map(|(amt, _)| amt)
                 .unwrap_or_else(Zero::zero);
             
-            let available = balance.saturating_sub(existing_locked);
+            let reserved = ReservedTokens::<T>::get(entity_id, &who);
+            let available = balance.saturating_sub(existing_locked).saturating_sub(reserved);
             ensure!(available >= amount, Error::<T>::InsufficientBalance);
 
             let now = <frame_system::Pallet<T>>::block_number();
@@ -828,7 +910,7 @@ pub mod pallet {
 
         /// 解锁代币
         #[pallet::call_index(8)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(100_000_000, 4_000))]
         pub fn unlock_tokens(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -854,7 +936,7 @@ pub mod pallet {
 
         /// 变更通证类型（需所有者操作）
         #[pallet::call_index(9)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(100_000_000, 4_000))]
         pub fn change_token_type(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -873,6 +955,9 @@ pub mod pallet {
                 
                 // 根据新类型更新可转让性
                 config.transferable = new_type.is_transferable_by_default();
+                // M5: 联动更新转账限制和 KYC 要求
+                config.transfer_restriction = TransferRestrictionMode::from_u8(new_type.default_transfer_restriction());
+                config.min_receiver_kyc = new_type.required_kyc_level().1;
                 
                 Ok(old)
             })?;
@@ -887,7 +972,7 @@ pub mod pallet {
 
         /// 设置最大供应量
         #[pallet::call_index(10)]
-        #[pallet::weight(Weight::from_parts(25_000, 0))]
+        #[pallet::weight(Weight::from_parts(100_000_000, 4_000))]
         pub fn set_max_supply(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -920,7 +1005,7 @@ pub mod pallet {
 
         /// 设置转账限制模式
         #[pallet::call_index(11)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(100_000_000, 4_000))]
         pub fn set_transfer_restriction(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -933,30 +1018,35 @@ pub mod pallet {
             let owner = T::ShopProvider::shop_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
             ensure!(owner == who, Error::<T>::NotShopOwner);
 
+            let clamped_kyc = min_receiver_kyc.min(4);
             ShopTokenConfigs::<T>::try_mutate(entity_id, |maybe_config| -> DispatchResult {
                 let config = maybe_config.as_mut().ok_or(Error::<T>::TokenNotEnabled)?;
                 config.transfer_restriction = mode;
-                config.min_receiver_kyc = min_receiver_kyc.min(4); // 0-4
+                config.min_receiver_kyc = clamped_kyc;
                 Ok(())
             })?;
 
+            // L3: 事件使用 clamped 后的值
             Self::deposit_event(Event::TransferRestrictionSet {
                 entity_id,
                 mode,
-                min_receiver_kyc,
+                min_receiver_kyc: clamped_kyc,
             });
             Ok(())
         }
 
         /// 添加白名单地址
         #[pallet::call_index(12)]
-        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        #[pallet::weight(Weight::from_parts(150_000_000, 5_000))]
         pub fn add_to_whitelist(
             origin: OriginFor<T>,
             entity_id: u64,
             accounts: Vec<T::AccountId>,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
+
+            // M7: 限制输入列表长度
+            ensure!(accounts.len() <= T::MaxTransferListSize::get() as usize, Error::<T>::TransferListFull);
 
             // 验证所有者
             let owner = T::ShopProvider::shop_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
@@ -983,13 +1073,16 @@ pub mod pallet {
 
         /// 移除白名单地址
         #[pallet::call_index(13)]
-        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        #[pallet::weight(Weight::from_parts(150_000_000, 5_000))]
         pub fn remove_from_whitelist(
             origin: OriginFor<T>,
             entity_id: u64,
             accounts: Vec<T::AccountId>,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
+
+            // M7: 限制输入列表长度
+            ensure!(accounts.len() <= T::MaxTransferListSize::get() as usize, Error::<T>::TransferListFull);
 
             // 验证所有者
             let owner = T::ShopProvider::shop_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
@@ -1015,13 +1108,16 @@ pub mod pallet {
 
         /// 添加黑名单地址
         #[pallet::call_index(14)]
-        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        #[pallet::weight(Weight::from_parts(150_000_000, 5_000))]
         pub fn add_to_blacklist(
             origin: OriginFor<T>,
             entity_id: u64,
             accounts: Vec<T::AccountId>,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
+
+            // M7: 限制输入列表长度
+            ensure!(accounts.len() <= T::MaxTransferListSize::get() as usize, Error::<T>::TransferListFull);
 
             // 验证所有者
             let owner = T::ShopProvider::shop_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
@@ -1048,13 +1144,16 @@ pub mod pallet {
 
         /// 移除黑名单地址
         #[pallet::call_index(15)]
-        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        #[pallet::weight(Weight::from_parts(150_000_000, 5_000))]
         pub fn remove_from_blacklist(
             origin: OriginFor<T>,
             entity_id: u64,
             accounts: Vec<T::AccountId>,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
+
+            // M7: 限制输入列表长度
+            ensure!(accounts.len() <= T::MaxTransferListSize::get() as usize, Error::<T>::TransferListFull);
 
             // 验证所有者
             let owner = T::ShopProvider::shop_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
@@ -1126,6 +1225,22 @@ pub mod pallet {
             }
         }
 
+        /// 检查铸造是否在 max_supply 范围内
+        fn ensure_within_max_supply(
+            entity_id: u64,
+            config: &ShopTokenConfigOf<T>,
+            mint_amount: T::AssetBalance,
+        ) -> DispatchResult {
+            if !config.max_supply.is_zero() {
+                let current_supply = Self::get_total_supply(entity_id);
+                ensure!(
+                    current_supply.saturating_add(mint_amount) <= config.max_supply,
+                    Error::<T>::ExceedsMaxSupply
+                );
+            }
+            Ok(())
+        }
+
         /// 资产 ID 转店铺 ID
         pub fn asset_to_shop_id(asset_id: T::AssetId) -> Option<u64> {
             let id: u64 = asset_id.into();
@@ -1161,6 +1276,14 @@ pub mod pallet {
 
             if reward.is_zero() {
                 return Ok(Zero::zero());
+            }
+
+            // H2: 检查 max_supply，超过上限时静默跳过（不报错，避免阻塞订单流程）
+            if !config.max_supply.is_zero() {
+                let current_supply = Self::get_total_supply(shop_id);
+                if current_supply.saturating_add(reward) > config.max_supply {
+                    return Ok(Zero::zero());
+                }
             }
 
             // 铸造代币给买家
@@ -1250,6 +1373,7 @@ impl<T: Config> Pallet<T> {
 // ==================== EntityTokenProvider 实现 ====================
 
 use pallet_entity_common::{EntityTokenProvider, TokenType};
+use sp_runtime::traits::{Zero as _Zero, Saturating as _Saturating};
 
 impl<T: Config> EntityTokenProvider<T::AccountId, T::AssetBalance> for Pallet<T> {
     fn is_token_enabled(entity_id: u64) -> bool {
@@ -1301,22 +1425,37 @@ impl<T: Config> EntityTokenProvider<T::AccountId, T::AssetBalance> for Pallet<T>
     ) -> Result<(), sp_runtime::DispatchError> {
         use frame_support::traits::fungibles::Inspect;
         let asset_id = Pallet::<T>::shop_to_asset_id(entity_id);
-        // 注意：pallet-assets 不直接支持 hold，使用转移到模块账户的方式模拟
-        // 这里简化实现：直接检查余额是否足够
         let balance = T::Assets::balance(asset_id, who);
-        if balance < amount {
+        let locked = pallet::LockedTokens::<T>::get(entity_id, who)
+            .map(|(amt, _)| amt)
+            .unwrap_or_default();
+        let already_reserved = pallet::ReservedTokens::<T>::get(entity_id, who);
+        let available = balance
+            .saturating_sub(locked)
+            .saturating_sub(already_reserved);
+        if available < amount {
             return Err(sp_runtime::DispatchError::Other("InsufficientBalance"));
         }
+        pallet::ReservedTokens::<T>::mutate(entity_id, who, |r| {
+            *r = r.saturating_add(amount);
+        });
         Ok(())
     }
 
     fn unreserve(
-        _entity_id: u64,
-        _who: &T::AccountId,
+        entity_id: u64,
+        who: &T::AccountId,
         amount: T::AssetBalance,
     ) -> T::AssetBalance {
-        // 简化实现：返回解锁的金额
-        amount
+        let current = pallet::ReservedTokens::<T>::get(entity_id, who);
+        let actual = amount.min(current);
+        if actual.is_zero() {
+            return actual;
+        }
+        pallet::ReservedTokens::<T>::mutate(entity_id, who, |r| {
+            *r = r.saturating_sub(actual);
+        });
+        actual
     }
 
     fn repatriate_reserved(
@@ -1325,9 +1464,18 @@ impl<T: Config> EntityTokenProvider<T::AccountId, T::AssetBalance> for Pallet<T>
         to: &T::AccountId,
         amount: T::AssetBalance,
     ) -> Result<T::AssetBalance, sp_runtime::DispatchError> {
-        // 直接转账（简化实现）
-        Self::transfer(entity_id, from, to, amount)?;
-        Ok(amount)
+        let reserved = pallet::ReservedTokens::<T>::get(entity_id, from);
+        let actual = amount.min(reserved);
+        if actual.is_zero() {
+            return Ok(actual);
+        }
+        // 减少 from 的预留
+        pallet::ReservedTokens::<T>::mutate(entity_id, from, |r| {
+            *r = r.saturating_sub(actual);
+        });
+        // 实际转账
+        Self::transfer(entity_id, from, to, actual)?;
+        Ok(actual)
     }
 
     fn get_token_type(entity_id: u64) -> TokenType {

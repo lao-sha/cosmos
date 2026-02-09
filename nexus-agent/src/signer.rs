@@ -124,6 +124,10 @@ impl KeyManager {
 pub struct SequenceManager {
     current: std::sync::atomic::AtomicU64,
     file_path: std::path::PathBuf,
+    /// 保护 fetch_add + 文件写入的原子性
+    write_lock: std::sync::Mutex<()>,
+    /// 审计日志独立序列号（内存态，不持久化，不消耗主序列号）
+    audit_sequence: std::sync::atomic::AtomicU64,
 }
 
 impl SequenceManager {
@@ -150,11 +154,19 @@ impl SequenceManager {
         Ok(Self {
             current: std::sync::atomic::AtomicU64::new(current),
             file_path: file_path.to_path_buf(),
+            write_lock: std::sync::Mutex::new(()),
+            audit_sequence: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
     /// 获取下一个序列号（原子递增 + 持久化）
+    ///
+    /// Mutex 保证 fetch_add 和文件写入是原子操作，
+    /// 防止并发调用导致文件写入乱序（旧值覆盖新值）。
     pub fn next(&self) -> anyhow::Result<u64> {
+        let _guard = self.write_lock.lock()
+            .unwrap_or_else(|e| e.into_inner());
+
         let seq = self.current.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
 
         // 持久化到文件
@@ -173,5 +185,228 @@ impl SequenceManager {
     /// 获取当前序列号（不递增）
     pub fn current(&self) -> u64 {
         self.current.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// 获取下一个审计序列号（仅内存递增，不持久化）
+    ///
+    /// 审计日志使用独立序列号空间，不消耗主消息序列号。
+    pub fn next_audit(&self) -> u64 {
+        self.audit_sequence.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ed25519_dalek::Verifier;
+
+    fn temp_dir() -> tempfile::TempDir {
+        tempfile::tempdir().unwrap()
+    }
+
+    // ═══════════════════════════════════════════
+    // KeyManager 测试
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn test_key_generate_and_reload() {
+        let dir = temp_dir();
+        let path = dir.path().to_str().unwrap();
+
+        // 首次生成
+        let km1 = KeyManager::load_or_generate(path).unwrap();
+        let pk1 = km1.public_key_hex();
+        assert_eq!(pk1.len(), 64); // 32 bytes hex
+
+        // 二次加载
+        let km2 = KeyManager::load_or_generate(path).unwrap();
+        assert_eq!(km2.public_key_hex(), pk1, "重新加载公钥应一致");
+    }
+
+    #[test]
+    fn test_key_corrupt_file() {
+        let dir = temp_dir();
+        let key_path = dir.path().join("agent.key");
+        std::fs::write(&key_path, b"too_short").unwrap();
+
+        let result = KeyManager::load_or_generate(dir.path().to_str().unwrap());
+        assert!(result.is_err(), "损坏密钥文件应返回错误");
+    }
+
+    #[test]
+    fn test_sign_and_verify() {
+        let dir = temp_dir();
+        let km = KeyManager::load_or_generate(dir.path().to_str().unwrap()).unwrap();
+
+        let data = b"hello nexus";
+        let sig_bytes = km.sign(data);
+
+        // 用 ed25519 验证
+        let sig = Signature::from_bytes(&sig_bytes);
+        let vk = VerifyingKey::from_bytes(&km.public_key_bytes()).unwrap();
+        assert!(vk.verify(data, &sig).is_ok(), "签名验证应通过");
+    }
+
+    #[test]
+    fn test_sign_different_data_different_sig() {
+        let dir = temp_dir();
+        let km = KeyManager::load_or_generate(dir.path().to_str().unwrap()).unwrap();
+
+        let sig1 = km.sign(b"data_a");
+        let sig2 = km.sign(b"data_b");
+        assert_ne!(sig1, sig2);
+    }
+
+    #[test]
+    fn test_sign_message_deterministic() {
+        let dir = temp_dir();
+        let km = KeyManager::load_or_generate(dir.path().to_str().unwrap()).unwrap();
+
+        let bot_id = [0xABu8; 32];
+        let json = b"{\"update_id\":1}";
+
+        let (sig1, hash1) = km.sign_message(&bot_id, 1, 1000, json);
+        let (sig2, hash2) = km.sign_message(&bot_id, 1, 1000, json);
+
+        assert_eq!(hash1, hash2, "相同输入的 message_hash 应相同");
+        assert_eq!(sig1, sig2, "相同输入的签名应相同");
+    }
+
+    #[test]
+    fn test_sign_message_different_sequence() {
+        let dir = temp_dir();
+        let km = KeyManager::load_or_generate(dir.path().to_str().unwrap()).unwrap();
+
+        let bot_id = [0xABu8; 32];
+        let json = b"{\"update_id\":1}";
+
+        let (sig1, hash1) = km.sign_message(&bot_id, 1, 1000, json);
+        let (sig2, hash2) = km.sign_message(&bot_id, 2, 1000, json);
+
+        assert_eq!(hash1, hash2, "message_hash 不受 sequence 影响");
+        assert_ne!(sig1, sig2, "不同 sequence 签名不同");
+    }
+
+    #[test]
+    fn test_sign_message_verifiable() {
+        let dir = temp_dir();
+        let km = KeyManager::load_or_generate(dir.path().to_str().unwrap()).unwrap();
+
+        let bot_id = [0xCDu8; 32];
+        let json = b"test_payload";
+        let seq = 42u64;
+        let ts = 99999u64;
+
+        let (sig_bytes, msg_hash) = km.sign_message(&bot_id, seq, ts, json);
+
+        // 重建签名数据
+        let mut sign_data = Vec::new();
+        sign_data.extend_from_slice(&km.public_key_bytes());
+        sign_data.extend_from_slice(&bot_id);
+        sign_data.extend_from_slice(&seq.to_le_bytes());
+        sign_data.extend_from_slice(&ts.to_le_bytes());
+        sign_data.extend_from_slice(&msg_hash);
+
+        let sig = Signature::from_bytes(&sig_bytes);
+        let vk = VerifyingKey::from_bytes(&km.public_key_bytes()).unwrap();
+        assert!(vk.verify(&sign_data, &sig).is_ok(), "sign_message 签名应可验证");
+    }
+
+    // ═══════════════════════════════════════════
+    // SequenceManager 测试
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn test_sequence_init_from_zero() {
+        let dir = temp_dir();
+        let sm = SequenceManager::load_or_init(dir.path().to_str().unwrap()).unwrap();
+        assert_eq!(sm.current(), 0);
+    }
+
+    #[test]
+    fn test_sequence_increment() {
+        let dir = temp_dir();
+        let sm = SequenceManager::load_or_init(dir.path().to_str().unwrap()).unwrap();
+
+        assert_eq!(sm.next().unwrap(), 1);
+        assert_eq!(sm.next().unwrap(), 2);
+        assert_eq!(sm.next().unwrap(), 3);
+        assert_eq!(sm.current(), 3);
+    }
+
+    #[test]
+    fn test_sequence_persistence() {
+        let dir = temp_dir();
+        let path = dir.path().to_str().unwrap();
+
+        {
+            let sm = SequenceManager::load_or_init(path).unwrap();
+            sm.next().unwrap(); // 1
+            sm.next().unwrap(); // 2
+            sm.next().unwrap(); // 3
+        }
+
+        // 重新加载
+        let sm2 = SequenceManager::load_or_init(path).unwrap();
+        assert_eq!(sm2.current(), 3, "重启后应从持久化值恢复");
+        assert_eq!(sm2.next().unwrap(), 4, "续接递增");
+    }
+
+    #[test]
+    fn test_audit_sequence_independent() {
+        let dir = temp_dir();
+        let sm = SequenceManager::load_or_init(dir.path().to_str().unwrap()).unwrap();
+
+        assert_eq!(sm.next().unwrap(), 1);
+        assert_eq!(sm.next_audit(), 1);
+        assert_eq!(sm.next_audit(), 2);
+        assert_eq!(sm.next().unwrap(), 2); // 主序列号不受 audit 影响
+        assert_eq!(sm.current(), 2);
+    }
+
+    #[test]
+    fn test_audit_sequence_not_persisted() {
+        let dir = temp_dir();
+        let path = dir.path().to_str().unwrap();
+
+        {
+            let sm = SequenceManager::load_or_init(path).unwrap();
+            sm.next_audit();
+            sm.next_audit();
+            sm.next_audit(); // audit=3
+        }
+
+        let sm2 = SequenceManager::load_or_init(path).unwrap();
+        assert_eq!(sm2.next_audit(), 1, "审计序列号不持久化，重启归零");
+    }
+
+    #[test]
+    fn test_sequence_concurrent_safety() {
+        let dir = temp_dir();
+        let sm = std::sync::Arc::new(
+            SequenceManager::load_or_init(dir.path().to_str().unwrap()).unwrap()
+        );
+
+        let mut handles = vec![];
+        for _ in 0..10 {
+            let sm_clone = sm.clone();
+            handles.push(std::thread::spawn(move || {
+                let mut seqs = vec![];
+                for _ in 0..10 {
+                    seqs.push(sm_clone.next().unwrap());
+                }
+                seqs
+            }));
+        }
+
+        let mut all_seqs: Vec<u64> = handles.into_iter()
+            .flat_map(|h| h.join().unwrap())
+            .collect();
+        all_seqs.sort();
+        all_seqs.dedup();
+
+        assert_eq!(all_seqs.len(), 100, "100 次并发递增应产生 100 个唯一序列号");
+        assert_eq!(*all_seqs.first().unwrap(), 1);
+        assert_eq!(*all_seqs.last().unwrap(), 100);
     }
 }

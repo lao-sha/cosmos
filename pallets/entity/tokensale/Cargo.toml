@@ -21,6 +21,7 @@ pallet-entity-common = { workspace = true }
 [dev-dependencies]
 sp-core = { workspace = true }
 sp-io = { workspace = true }
+pallet-balances = { workspace = true, features = ["std"] }
 
 [features]
 default = ["std"]

@@ -152,7 +152,7 @@ pub mod pallet {
     pub type TronTxHash = BoundedVec<u8, ConstU32<64>>;
 
     /// 交易订单
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     #[scale_info(skip_type_params(T))]
     pub struct TradeOrder<T: Config> {
         /// 订单 ID
@@ -187,7 +187,7 @@ pub mod pallet {
     }
 
     /// USDT 交易记录（等待验证）
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     #[scale_info(skip_type_params(T))]
     pub struct UsdtTrade<T: Config> {
         /// 交易 ID
@@ -221,7 +221,7 @@ pub mod pallet {
     }
 
     /// 店铺市场配置
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
     pub struct MarketConfig<Balance> {
         /// 是否启用 NXS 交易
         pub cos_enabled: bool,
@@ -240,7 +240,7 @@ pub mod pallet {
     }
 
     /// 市场统计数据
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
     pub struct MarketStats {
         /// 总订单数
         pub total_orders: u64,
@@ -259,7 +259,7 @@ pub mod pallet {
     // ==================== Phase 4: 订单簿深度数据结构 ====================
 
     /// 价格档位（聚合同一价格的订单）
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
     pub struct PriceLevel<Balance, TokenBalance> {
         /// 价格
         pub price: Balance,
@@ -289,7 +289,7 @@ pub mod pallet {
     }
 
     /// 市场摘要
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
     pub struct MarketSummary<Balance, TokenBalance> {
         /// 最优卖价
         pub best_ask: Option<Balance>,
@@ -312,7 +312,7 @@ pub mod pallet {
     // ==================== Phase 5: TWAP 价格预言机数据结构 ====================
 
     /// 价格快照（用于 TWAP 计算）
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
     pub struct PriceSnapshot {
         /// 累积价格 (price × blocks)
         pub cumulative_price: u128,
@@ -321,7 +321,7 @@ pub mod pallet {
     }
 
     /// TWAP 累积器（三周期：1小时、24小时、7天）
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
     pub struct TwapAccumulator<Balance> {
         /// 当前累积价格
         pub current_cumulative: u128,
@@ -359,7 +359,7 @@ pub mod pallet {
     }
 
     /// 价格保护配置
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     pub struct PriceProtectionConfig<Balance> {
         /// 是否启用价格保护
         pub enabled: bool,
@@ -907,6 +907,10 @@ pub mod pallet {
         InsufficientTwapData,
         /// 🆕 买家保证金余额不足
         InsufficientDepositBalance,
+        /// 手续费率无效（超过 5000 bps = 50%）
+        InvalidFeeRate,
+        /// 基点参数无效（超过 10000）
+        InvalidBasisPoints,
     }
 
     // ==================== Extrinsics ====================
@@ -920,7 +924,7 @@ pub mod pallet {
         /// - `token_amount`: 出售的 Token 数量
         /// - `price`: 每个 Token 的 NXS 价格
         #[pallet::call_index(0)]
-        #[pallet::weight(Weight::from_parts(80_000, 0))]
+        #[pallet::weight(Weight::from_parts(50_000_000, 5_000))]
         pub fn place_sell_order(
             origin: OriginFor<T>,
             shop_id: u64,
@@ -943,9 +947,8 @@ pub mod pallet {
             let balance = T::TokenProvider::token_balance(shop_id, &who);
             ensure!(balance >= token_amount, Error::<T>::InsufficientTokenBalance);
 
-            // 锁定 Token（通过转移到模块账户）
-            // 注意：这里需要 TokenProvider 支持转账，暂时跳过实际锁定
-            // 在实际实现中，应该调用 pallet-assets 的 transfer 或 reserve
+            // 锁定 Token
+            T::TokenProvider::reserve(shop_id, &who, token_amount)?;
 
             // 创建订单
             let order_id = Self::do_create_order(
@@ -982,7 +985,7 @@ pub mod pallet {
         /// - `token_amount`: 想购买的 Token 数量
         /// - `price`: 每个 Token 愿意支付的 NXS 价格
         #[pallet::call_index(1)]
-        #[pallet::weight(Weight::from_parts(80_000, 0))]
+        #[pallet::weight(Weight::from_parts(50_000_000, 5_000))]
         pub fn place_buy_order(
             origin: OriginFor<T>,
             shop_id: u64,
@@ -1042,7 +1045,7 @@ pub mod pallet {
         /// - `order_id`: 要吃的订单 ID
         /// - `amount`: 成交数量（None = 全部）
         #[pallet::call_index(2)]
-        #[pallet::weight(Weight::from_parts(100_000, 0))]
+        #[pallet::weight(Weight::from_parts(80_000_000, 8_000))]
         pub fn take_order(
             origin: OriginFor<T>,
             order_id: u64,
@@ -1111,9 +1114,13 @@ pub mod pallet {
                         }
                     }
 
-                    // Token: maker → taker
-                    // 注意：实际实现需要从托管账户转出
-                    // 这里暂时直接铸造给 taker（简化实现）
+                    // Token: maker → taker（从 maker 的 reserved 转出）
+                    T::TokenProvider::repatriate_reserved(
+                        order.shop_id,
+                        &order.maker,
+                        &who,
+                        fill_amount,
+                    )?;
                 }
                 OrderSide::Buy => {
                     // 买单：taker 提供 Token，获得 NXS
@@ -1145,8 +1152,14 @@ pub mod pallet {
                         }
                     }
 
-                    // Token: taker → maker
-                    // 注意：实际实现需要调用 TokenProvider 的转账方法
+                    // Token: taker → maker（先锁定 taker 的 Token，再转给 maker）
+                    T::TokenProvider::reserve(order.shop_id, &who, fill_amount)?;
+                    T::TokenProvider::repatriate_reserved(
+                        order.shop_id,
+                        &who,
+                        &order.maker,
+                        fill_amount,
+                    )?;
                 }
             }
 
@@ -1160,6 +1173,10 @@ pub mod pallet {
                 order.status = OrderStatus::Filled;
                 // 从订单簿移除
                 Self::remove_from_order_book(order.shop_id, order_id, order.side);
+                // M2: 从用户订单列表移除
+                UserOrders::<T>::mutate(&order.maker, |orders| {
+                    orders.retain(|&id| id != order_id);
+                });
             } else {
                 order.status = OrderStatus::PartiallyFilled;
             }
@@ -1190,7 +1207,7 @@ pub mod pallet {
 
         /// 取消订单
         #[pallet::call_index(3)]
-        #[pallet::weight(Weight::from_parts(50_000, 0))]
+        #[pallet::weight(Weight::from_parts(40_000_000, 5_000))]
         pub fn cancel_order(origin: OriginFor<T>, order_id: u64) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -1215,7 +1232,7 @@ pub mod pallet {
             match order.side {
                 OrderSide::Sell => {
                     // 退还锁定的 Token
-                    // 注意：实际实现需要从托管账户转回
+                    T::TokenProvider::unreserve(order.shop_id, &who, unfilled);
                 }
                 OrderSide::Buy => {
                     // 退还锁定的 NXS
@@ -1232,6 +1249,11 @@ pub mod pallet {
             // 从订单簿移除
             Self::remove_from_order_book(order.shop_id, order_id, order.side);
 
+            // M2: 从用户订单列表移除
+            UserOrders::<T>::mutate(&who, |orders| {
+                orders.retain(|&id| id != order_id);
+            });
+
             // 更新最优价格
             Self::update_best_prices(order.shop_id);
 
@@ -1242,7 +1264,7 @@ pub mod pallet {
 
         /// 配置店铺市场
         #[pallet::call_index(4)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(25_000_000, 3_000))]
         pub fn configure_market(
             origin: OriginFor<T>,
             shop_id: u64,
@@ -1259,6 +1281,9 @@ pub mod pallet {
             ensure!(T::ShopProvider::shop_exists(shop_id), Error::<T>::ShopNotFound);
             let owner = T::ShopProvider::shop_owner(shop_id).ok_or(Error::<T>::ShopNotFound)?;
             ensure!(owner == who, Error::<T>::NotShopOwner);
+
+            // H8: 手续费率上限验证（最高 50%）
+            ensure!(fee_rate <= 5000, Error::<T>::InvalidFeeRate);
 
             let config = MarketConfig {
                 cos_enabled,
@@ -1287,7 +1312,7 @@ pub mod pallet {
         /// - `circuit_breaker_threshold`: 熔断阈值（基点，5000 = 50%）
         /// - `min_trades_for_twap`: 启用 TWAP 的最小成交数
         #[pallet::call_index(15)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(25_000_000, 3_000))]
         pub fn configure_price_protection(
             origin: OriginFor<T>,
             shop_id: u64,
@@ -1302,6 +1327,11 @@ pub mod pallet {
             // 验证店主
             let owner = T::ShopProvider::shop_owner(shop_id).ok_or(Error::<T>::ShopNotFound)?;
             ensure!(owner == who, Error::<T>::NotShopOwner);
+
+            // M4: 参数验证（基点不超过 10000）
+            ensure!(max_price_deviation <= 10000, Error::<T>::InvalidBasisPoints);
+            ensure!(max_slippage <= 10000, Error::<T>::InvalidBasisPoints);
+            ensure!(circuit_breaker_threshold <= 10000, Error::<T>::InvalidBasisPoints);
 
             // 获取现有配置或创建新配置
             let mut config = PriceProtection::<T>::get(shop_id).unwrap_or_default();
@@ -1326,7 +1356,7 @@ pub mod pallet {
 
         /// 手动解除熔断（店主调用，仅在熔断时间到期后）
         #[pallet::call_index(16)]
-        #[pallet::weight(Weight::from_parts(20_000, 0))]
+        #[pallet::weight(Weight::from_parts(20_000_000, 3_000))]
         pub fn lift_circuit_breaker(
             origin: OriginFor<T>,
             shop_id: u64,
@@ -1339,13 +1369,15 @@ pub mod pallet {
 
             let current_block: u32 = <frame_system::Pallet<T>>::block_number().saturated_into();
 
+            // M3: 检查熔断是否活跃且已到期
+            let config = PriceProtection::<T>::get(shop_id).unwrap_or_default();
+            ensure!(config.circuit_breaker_active, Error::<T>::MarketCircuitBreakerActive);
+            ensure!(current_block >= config.circuit_breaker_until, Error::<T>::InvalidTradeStatus);
+
             PriceProtection::<T>::mutate(shop_id, |maybe_config| {
                 if let Some(config) = maybe_config {
-                    // 只有在熔断时间到期后才能解除
-                    if config.circuit_breaker_active && current_block >= config.circuit_breaker_until {
-                        config.circuit_breaker_active = false;
-                        config.circuit_breaker_until = 0;
-                    }
+                    config.circuit_breaker_active = false;
+                    config.circuit_breaker_until = 0;
                 }
             });
 
@@ -1365,7 +1397,7 @@ pub mod pallet {
         /// 当市场成交量不足时，将使用此价格作为参考。
         /// 一旦成交量达到 `min_trades_for_twap`，将自动切换到 TWAP 价格。
         #[pallet::call_index(17)]
-        #[pallet::weight(Weight::from_parts(20_000, 0))]
+        #[pallet::weight(Weight::from_parts(30_000_000, 4_000))]
         pub fn set_initial_price(
             origin: OriginFor<T>,
             shop_id: u64,
@@ -1423,7 +1455,7 @@ pub mod pallet {
         /// - `usdt_price`: 每个 Token 的 USDT 价格（精度 10^6）
         /// - `tron_address`: 卖家的 TRON 收款地址
         #[pallet::call_index(5)]
-        #[pallet::weight(Weight::from_parts(80_000, 0))]
+        #[pallet::weight(Weight::from_parts(55_000_000, 6_000))]
         pub fn place_usdt_sell_order(
             origin: OriginFor<T>,
             shop_id: u64,
@@ -1484,7 +1516,7 @@ pub mod pallet {
         /// - `token_amount`: 想购买的 Token 数量
         /// - `usdt_price`: 每个 Token 愿意支付的 USDT 价格（精度 10^6）
         #[pallet::call_index(6)]
-        #[pallet::weight(Weight::from_parts(80_000, 0))]
+        #[pallet::weight(Weight::from_parts(45_000_000, 5_000))]
         pub fn place_usdt_buy_order(
             origin: OriginFor<T>,
             shop_id: u64,
@@ -1538,7 +1570,7 @@ pub mod pallet {
         /// # 安全
         /// 先链上锁定，后链下支付，避免多人同时支付的并发问题
         #[pallet::call_index(7)]
-        #[pallet::weight(Weight::from_parts(100_000, 0))]
+        #[pallet::weight(Weight::from_parts(70_000_000, 8_000))]
         pub fn reserve_usdt_sell_order(
             origin: OriginFor<T>,
             order_id: u64,
@@ -1635,7 +1667,7 @@ pub mod pallet {
         /// 3. 锁定卖家的 Token
         /// 4. 创建 USDT 交易记录，等待买家支付
         #[pallet::call_index(8)]
-        #[pallet::weight(Weight::from_parts(100_000, 0))]
+        #[pallet::weight(Weight::from_parts(75_000_000, 8_000))]
         pub fn accept_usdt_buy_order(
             origin: OriginFor<T>,
             order_id: u64,
@@ -1737,7 +1769,7 @@ pub mod pallet {
         /// # 说明
         /// 用于 accept_usdt_buy_order 流程，买家支付后提交交易哈希
         #[pallet::call_index(9)]
-        #[pallet::weight(Weight::from_parts(50_000, 0))]
+        #[pallet::weight(Weight::from_parts(35_000_000, 5_000))]
         pub fn confirm_usdt_payment(
             origin: OriginFor<T>,
             trade_id: u64,
@@ -1787,7 +1819,7 @@ pub mod pallet {
         /// # 安全
         /// 使用 ValidateUnsigned 验证，只有 OCW 可以提交
         #[pallet::call_index(10)]
-        #[pallet::weight(Weight::from_parts(80_000, 0))]
+        #[pallet::weight(Weight::from_parts(60_000_000, 7_000))]
         pub fn verify_usdt_payment(
             origin: OriginFor<T>,
             trade_id: u64,
@@ -1829,6 +1861,21 @@ pub mod pallet {
                 // 验证失败，退还 Token 给卖家
                 T::TokenProvider::unreserve(trade.shop_id, &trade.seller, trade.token_amount);
 
+                // H6 修复: 退还买家保证金（OCW 验证失败不是买家的过错）
+                if !trade.buyer_deposit.is_zero() && trade.deposit_status == BuyerDepositStatus::Locked {
+                    T::Currency::unreserve(&trade.buyer, trade.buyer_deposit);
+                    trade.deposit_status = BuyerDepositStatus::Released;
+
+                    Self::deposit_event(Event::BuyerDepositReleased {
+                        trade_id,
+                        buyer: trade.buyer.clone(),
+                        deposit: trade.buyer_deposit,
+                    });
+                }
+
+                // H7 修复: 回滚父订单的 filled_amount
+                Self::rollback_order_filled_amount(trade.order_id, trade.token_amount);
+
                 trade.status = UsdtTradeStatus::Cancelled;
                 UsdtTrades::<T>::insert(trade_id, &trade);
 
@@ -1850,7 +1897,7 @@ pub mod pallet {
         /// 
         /// 🆕 超时时买家保证金将按 DepositForfeitRate 比例没收给卖家
         #[pallet::call_index(11)]
-        #[pallet::weight(Weight::from_parts(50_000, 0))]
+        #[pallet::weight(Weight::from_parts(55_000_000, 7_000))]
         pub fn process_usdt_timeout(
             origin: OriginFor<T>,
             trade_id: u64,
@@ -1872,6 +1919,9 @@ pub mod pallet {
 
             // 退还锁定的 Token 给卖家
             T::TokenProvider::unreserve(trade.shop_id, &trade.seller, trade.token_amount);
+
+            // H7 修复: 回滚父订单的 filled_amount
+            Self::rollback_order_filled_amount(trade.order_id, trade.token_amount);
 
             // 🆕 处理买家保证金没收
             if !trade.buyer_deposit.is_zero() && trade.deposit_status == BuyerDepositStatus::Locked {
@@ -1932,7 +1982,7 @@ pub mod pallet {
         /// OCW 验证完成后调用此函数将结果提交到链上
         /// 🆕 支持多档判定结果
         #[pallet::call_index(18)]
-        #[pallet::weight(Weight::from_parts(50_000, 0))]
+        #[pallet::weight(Weight::from_parts(30_000_000, 4_000))]
         pub fn submit_ocw_result(
             origin: OriginFor<T>,
             trade_id: u64,
@@ -1974,7 +2024,7 @@ pub mod pallet {
         /// - 调用者无法伪造验证结果
         /// - 只有 AwaitingVerification 状态的交易可以确认
         #[pallet::call_index(19)]
-        #[pallet::weight(Weight::from_parts(100_000, 0))]
+        #[pallet::weight(Weight::from_parts(80_000_000, 10_000))]
         pub fn claim_verification_reward(
             origin: OriginFor<T>,
             trade_id: u64,
@@ -1992,7 +2042,7 @@ pub mod pallet {
         /// - `token_amount`: 想购买的 Token 数量
         /// - `max_cost`: 最大愿意支付的 NXS 总额（滑点保护）
         #[pallet::call_index(12)]
-        #[pallet::weight(Weight::from_parts(150_000, 0))]
+        #[pallet::weight(Weight::from_parts(120_000_000, 12_000))]
         pub fn market_buy(
             origin: OriginFor<T>,
             shop_id: u64,
@@ -2042,7 +2092,7 @@ pub mod pallet {
         /// - `token_amount`: 想出售的 Token 数量
         /// - `min_receive`: 最低愿意收到的 NXS 总额（滑点保护）
         #[pallet::call_index(13)]
-        #[pallet::weight(Weight::from_parts(150_000, 0))]
+        #[pallet::weight(Weight::from_parts(120_000_000, 12_000))]
         pub fn market_sell(
             origin: OriginFor<T>,
             shop_id: u64,
@@ -2190,10 +2240,9 @@ pub mod pallet {
                 Error::<T>::TokenNotEnabled
             );
 
-            // 检查市场配置（如果没有配置，默认启用）
-            if let Some(config) = MarketConfigs::<T>::get(shop_id) {
-                ensure!(config.cos_enabled, Error::<T>::MarketNotEnabled);
-            }
+            // M6: 检查市场配置（必须显式配置并启用，与 Default cos_enabled=false 一致）
+            let config = MarketConfigs::<T>::get(shop_id).unwrap_or_default();
+            ensure!(config.cos_enabled, Error::<T>::MarketNotEnabled);
 
             Ok(())
         }
@@ -2524,6 +2573,8 @@ pub mod pallet {
             // 退还剩余 Token 给卖家
             if !token_to_refund.is_zero() {
                 T::TokenProvider::unreserve(trade.shop_id, &trade.seller, token_to_refund);
+                // H7 修复: 回滚父订单中未实际成交的部分
+                Self::rollback_order_filled_amount(trade.order_id, token_to_refund);
             }
 
             // 🆕 少付时保证金全部没收归国库（不按比例，全额没收）
@@ -2681,6 +2732,25 @@ pub mod pallet {
             }
         }
 
+        /// H7: 回滚父订单的 filled_amount（USDT 交易失败/超时时调用）
+        fn rollback_order_filled_amount(order_id: u64, amount: T::TokenBalance) {
+            Orders::<T>::mutate(order_id, |maybe_order| {
+                if let Some(order) = maybe_order {
+                    order.filled_amount = order.filled_amount.saturating_sub(amount);
+                    // 如果回滚后 filled_amount < token_amount，重新开放订单
+                    if order.status == OrderStatus::Filled {
+                        if order.filled_amount < order.token_amount {
+                            order.status = OrderStatus::PartiallyFilled;
+                        }
+                    }
+                    // 如果 filled_amount 归零，恢复为 Open
+                    if order.filled_amount.is_zero() {
+                        order.status = OrderStatus::Open;
+                    }
+                }
+            });
+        }
+
         /// 从订单簿移除订单
         fn remove_from_order_book(shop_id: u64, order_id: u64, side: OrderSide) {
             match side {
@@ -2791,8 +2861,13 @@ pub mod pallet {
                     }
                 }
 
-                // Token: maker → buyer (简化实现)
-                // 实际应调用 TokenProvider::transfer
+                // Token: maker → buyer（从 maker 的 reserved 转出）
+                T::TokenProvider::repatriate_reserved(
+                    shop_id,
+                    &order.maker,
+                    buyer,
+                    fill_amount,
+                )?;
 
                 // 更新订单
                 let mut updated_order = order.clone();
@@ -2887,8 +2962,14 @@ pub mod pallet {
                     }
                 }
 
-                // Token: seller → maker (简化实现)
-                // 实际应调用 TokenProvider::transfer
+                // Token: seller → maker（先锁定 seller 的 Token，再转给 maker）
+                T::TokenProvider::reserve(shop_id, seller, fill_amount)?;
+                T::TokenProvider::repatriate_reserved(
+                    shop_id,
+                    seller,
+                    &order.maker,
+                    fill_amount,
+                )?;
 
                 // 更新订单
                 let mut updated_order = order.clone();
@@ -3265,6 +3346,18 @@ pub mod pallet {
 
             // 更新最新成交价
             Self::update_last_trade_price(shop_id, trade_price);
+
+            // L1: 发出 TwapUpdated 事件
+            let twap_1h = Self::calculate_twap(shop_id, TwapPeriod::OneHour);
+            let twap_24h = Self::calculate_twap(shop_id, TwapPeriod::OneDay);
+            let twap_7d = Self::calculate_twap(shop_id, TwapPeriod::OneWeek);
+            Self::deposit_event(Event::TwapUpdated {
+                shop_id,
+                new_price: trade_price,
+                twap_1h,
+                twap_24h,
+                twap_7d,
+            });
 
             // 检查熔断
             Self::check_circuit_breaker(shop_id, trade_price);

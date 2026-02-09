@@ -30,7 +30,9 @@ pub fn compute_community_id_hash(
         .chain_update(b"nexus-community-salt")
         .finalize();
 
+    // 长度前缀防止域分离歧义 (e.g. "ab"+"c..." vs "abc"+"...")
     let result = Sha256::new()
+        .chain_update(&(platform.len() as u32).to_le_bytes())
         .chain_update(platform.as_bytes())
         .chain_update(&chat_id.to_le_bytes())
         .chain_update(&salt)
@@ -62,8 +64,11 @@ pub fn compute_platform_user_id_hash(
         .chain_update(b"nexus-user-salt")
         .finalize();
 
+    // 长度前缀防止域分离歧义
     let result = Sha256::new()
+        .chain_update(&(platform.len() as u32).to_le_bytes())
         .chain_update(platform.as_bytes())
+        .chain_update(&(user_id.len() as u32).to_le_bytes())
         .chain_update(user_id.as_bytes())
         .chain_update(&salt)
         .finalize();

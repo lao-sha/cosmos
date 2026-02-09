@@ -32,6 +32,8 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     pub nodes: RwLock<Vec<NodeInfo>>,
     pub start_time: Instant,
+    pub webhook_limiter: rate_limiter::RateLimiter,
+    pub execute_limiter: rate_limiter::RateLimiter,
 }
 
 #[tokio::main]
@@ -83,8 +85,8 @@ async fn main() -> anyhow::Result<()> {
     let nodes = load_initial_nodes();
     info!(count = nodes.len(), "初始节点列表已加载");
 
-    // TG API 执行器
-    let tg_executor = executor::TelegramExecutor::new(config.bot_token.clone());
+    // TG API 执行器（复用共享 HTTP 客户端）
+    let tg_executor = executor::TelegramExecutor::new(config.bot_token.clone(), http_client.clone());
 
     // 群配置存储
     let config_store = group_config::ConfigStore::new(&config.data_dir);
@@ -92,6 +94,10 @@ async fn main() -> anyhow::Result<()> {
     // 本地状态存储（防刷屏、警告计数等）
     let local_store = local_store::LocalStore::new();
     info!("LocalStore 已初始化");
+
+    // 限流器: webhook 60s/1000次, execute 60s/200次
+    let webhook_limiter = rate_limiter::RateLimiter::new(60, 1000);
+    let execute_limiter = rate_limiter::RateLimiter::new(60, 200);
 
     let state = Arc::new(AppState {
         config: config.clone(),
@@ -103,6 +109,8 @@ async fn main() -> anyhow::Result<()> {
         http_client,
         nodes: RwLock::new(nodes),
         start_time: Instant::now(),
+        webhook_limiter,
+        execute_limiter,
     });
 
     // 定时清理 LocalStore 过期数据 (每 60 秒)
@@ -120,6 +128,7 @@ async fn main() -> anyhow::Result<()> {
     // 注册 Telegram Webhook
     info!("正在注册 Telegram Webhook...");
     match multicaster::register_telegram_webhook(
+        &state.http_client,
         &config.bot_token,
         &config.webhook_url,
         &config.webhook_secret,
@@ -131,13 +140,14 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Axum HTTP 服务器
+    // Axum HTTP 服务器（限制请求体 1MB 防止 OOM 攻击）
     let app = Router::new()
         .route("/webhook", post(webhook::handle_webhook))
         .route("/v1/execute", post(webhook::handle_execute))
         .route("/v1/group-config", get(group_config::handle_get_config))
         .route("/v1/group-config", post(group_config::handle_update_config))
         .route("/health", get(webhook::handle_health))
+        .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", config.webhook_port);
@@ -151,7 +161,7 @@ async fn main() -> anyhow::Result<()> {
 
 /// 从环境变量加载初始节点列表
 ///
-/// 格式: NODES=node_id1:http://host1:port1,node_id2:http://host2:port2,...
+/// 格式: NODES=node_id@http://host:port,node_id2@http://host2:port2,...
 fn load_initial_nodes() -> Vec<NodeInfo> {
     let nodes_str = std::env::var("NODES").unwrap_or_default();
     if nodes_str.is_empty() {
@@ -160,35 +170,20 @@ fn load_initial_nodes() -> Vec<NodeInfo> {
 
     nodes_str
         .split(',')
+        .filter(|s| !s.is_empty())
         .filter_map(|entry| {
-            let parts: Vec<&str> = entry.splitn(2, ':').collect();
+            let parts: Vec<&str> = entry.splitn(2, '@').collect();
             if parts.len() == 2 {
-                // node_id:http://... — 但 http:// 包含 ':'，所以用 splitn(2)
-                // 实际格式改为 node_id@http://host:port
-                None
+                Some(NodeInfo {
+                    node_id: parts[0].trim().to_string(),
+                    endpoint: parts[1].trim().to_string(),
+                    node_public_key: String::new(),
+                    status: "Active".to_string(),
+                })
             } else {
+                tracing::warn!(entry, "无法解析节点条目，期望格式: node_id@http://host:port");
                 None
             }
         })
-        .collect::<Vec<_>>()
-        .into_iter()
-        .chain(
-            // 尝试 @ 分隔符格式: node_id@http://host:port
-            nodes_str
-                .split(',')
-                .filter_map(|entry| {
-                    let parts: Vec<&str> = entry.splitn(2, '@').collect();
-                    if parts.len() == 2 {
-                        Some(NodeInfo {
-                            node_id: parts[0].to_string(),
-                            endpoint: parts[1].to_string(),
-                            node_public_key: String::new(),
-                            status: "Active".to_string(),
-                        })
-                    } else {
-                        None
-                    }
-                })
-        )
         .collect()
 }

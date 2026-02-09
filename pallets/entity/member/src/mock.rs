@@ -1,0 +1,209 @@
+use crate as pallet_entity_member;
+use frame_support::{
+    derive_impl, parameter_types,
+    traits::{ConstU32, ConstU64},
+};
+use sp_runtime::BuildStorage;
+
+type Block = frame_system::mocking::MockBlock<Test>;
+
+// Test accounts
+pub const OWNER: u64 = 1;
+pub const ADMIN: u64 = 2;
+pub const ALICE: u64 = 10;
+pub const BOB: u64 = 11;
+pub const CHARLIE: u64 = 12;
+pub const DAVE: u64 = 13;
+pub const EVE: u64 = 14;
+
+// Test IDs
+pub const ENTITY_1: u64 = 100;
+pub const SHOP_1: u64 = 1000;
+pub const SHOP_2: u64 = 1001;
+pub const INVALID_SHOP: u64 = 9999;
+
+frame_support::construct_runtime!(
+    pub enum Test {
+        System: frame_system,
+        Balances: pallet_balances,
+        MemberPallet: pallet_entity_member,
+    }
+);
+
+#[derive_impl(frame_system::config_preludes::TestDefaultConfig)]
+impl frame_system::Config for Test {
+    type Block = Block;
+    type AccountData = pallet_balances::AccountData<u128>;
+}
+
+#[derive_impl(pallet_balances::config_preludes::TestDefaultConfig)]
+impl pallet_balances::Config for Test {
+    type AccountStore = System;
+    type Balance = u128;
+}
+
+// ============================================================================
+// Mock EntityProvider
+// ============================================================================
+
+pub struct MockEntityProvider;
+
+impl pallet_entity_common::EntityProvider<u64> for MockEntityProvider {
+    fn entity_exists(entity_id: u64) -> bool {
+        entity_id == ENTITY_1
+    }
+
+    fn is_entity_active(entity_id: u64) -> bool {
+        entity_id == ENTITY_1
+    }
+
+    fn entity_status(entity_id: u64) -> Option<pallet_entity_common::EntityStatus> {
+        if entity_id == ENTITY_1 {
+            Some(pallet_entity_common::EntityStatus::Active)
+        } else {
+            None
+        }
+    }
+
+    fn entity_owner(entity_id: u64) -> Option<u64> {
+        if entity_id == ENTITY_1 {
+            Some(OWNER)
+        } else {
+            None
+        }
+    }
+
+    fn entity_account(_entity_id: u64) -> u64 {
+        99
+    }
+
+    fn update_entity_stats(
+        _entity_id: u64,
+        _sales_amount: u128,
+        _order_count: u32,
+    ) -> Result<(), sp_runtime::DispatchError> {
+        Ok(())
+    }
+
+    fn update_entity_rating(
+        _entity_id: u64,
+        _rating: u8,
+    ) -> Result<(), sp_runtime::DispatchError> {
+        Ok(())
+    }
+
+    fn is_entity_admin(entity_id: u64, account: &u64) -> bool {
+        entity_id == ENTITY_1 && *account == ADMIN
+    }
+}
+
+// ============================================================================
+// Mock ShopProvider
+// ============================================================================
+
+pub struct MockShopProvider;
+
+impl pallet_entity_common::ShopProvider<u64> for MockShopProvider {
+    fn shop_exists(shop_id: u64) -> bool {
+        shop_id == SHOP_1 || shop_id == SHOP_2
+    }
+
+    fn is_shop_active(shop_id: u64) -> bool {
+        shop_id == SHOP_1 || shop_id == SHOP_2
+    }
+
+    fn shop_entity_id(shop_id: u64) -> Option<u64> {
+        match shop_id {
+            SHOP_1 | SHOP_2 => Some(ENTITY_1),
+            _ => None,
+        }
+    }
+
+    fn shop_owner(shop_id: u64) -> Option<u64> {
+        match shop_id {
+            SHOP_1 | SHOP_2 => Some(OWNER),
+            _ => None,
+        }
+    }
+
+    fn shop_account(_shop_id: u64) -> u64 {
+        98
+    }
+
+    fn shop_type(_shop_id: u64) -> Option<pallet_entity_common::ShopType> {
+        Some(pallet_entity_common::ShopType::OnlineStore)
+    }
+
+    fn shop_member_mode(_shop_id: u64) -> pallet_entity_common::MemberMode {
+        pallet_entity_common::MemberMode::Inherit
+    }
+
+    fn is_shop_manager(_shop_id: u64, _account: &u64) -> bool {
+        false
+    }
+
+    fn update_shop_stats(
+        _shop_id: u64,
+        _sales_amount: u128,
+        _order_count: u32,
+    ) -> Result<(), sp_runtime::DispatchError> {
+        Ok(())
+    }
+
+    fn update_shop_rating(
+        _shop_id: u64,
+        _rating: u8,
+    ) -> Result<(), sp_runtime::DispatchError> {
+        Ok(())
+    }
+
+    fn deduct_operating_fund(
+        _shop_id: u64,
+        _amount: u128,
+    ) -> Result<(), sp_runtime::DispatchError> {
+        Ok(())
+    }
+
+    fn operating_balance(_shop_id: u64) -> u128 {
+        0
+    }
+}
+
+// ============================================================================
+// Pallet Config
+// ============================================================================
+
+parameter_types! {
+    pub const SilverThreshold: u64 = 100_000_000;   // 100 USDT
+    pub const GoldThreshold: u64 = 500_000_000;      // 500 USDT
+    pub const PlatinumThreshold: u64 = 2_000_000_000; // 2000 USDT
+    pub const DiamondThreshold: u64 = 10_000_000_000; // 10000 USDT
+}
+
+impl pallet_entity_member::Config for Test {
+    type RuntimeEvent = RuntimeEvent;
+    type Currency = Balances;
+    type EntityProvider = MockEntityProvider;
+    type ShopProvider = MockShopProvider;
+    type MaxDirectReferrals = ConstU32<50>;
+    type MaxCustomLevels = ConstU32<10>;
+    type SilverThreshold = SilverThreshold;
+    type GoldThreshold = GoldThreshold;
+    type PlatinumThreshold = PlatinumThreshold;
+    type DiamondThreshold = DiamondThreshold;
+    type MaxUpgradeRules = ConstU32<10>;
+    type MaxUpgradeHistory = ConstU32<50>;
+}
+
+// ============================================================================
+// Test Helpers
+// ============================================================================
+
+pub fn new_test_ext() -> sp_io::TestExternalities {
+    let t = frame_system::GenesisConfig::<Test>::default()
+        .build_storage()
+        .unwrap();
+    let mut ext = sp_io::TestExternalities::new(t);
+    ext.execute_with(|| System::set_block_number(1));
+    ext
+}

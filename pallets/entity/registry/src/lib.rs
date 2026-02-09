@@ -87,7 +87,7 @@ pub mod pallet {
         <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
     /// 实体信息（组织层，Entity-Shop 分离架构）
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     #[scale_info(skip_type_params(MaxNameLen, MaxCidLen, MaxAdmins))]
     pub struct Entity<AccountId, Balance, BlockNumber, MaxNameLen: Get<u32>, MaxCidLen: Get<u32>, MaxAdmins: Get<u32>> {
         /// 实体 ID
@@ -136,9 +136,9 @@ pub mod pallet {
     >;
 
     /// 实体统计
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
     pub struct EntityStatistics {
-        /// 总实体数
+        /// 累计创建实体数（生命周期计数器，只增不减；关闭/封禁不递减）
         pub total_entities: u64,
         /// 活跃实体数
         pub active_entities: u64,
@@ -397,6 +397,12 @@ pub mod pallet {
         // ========== Entity-Shop 分离架构错误 ==========
         /// Entity 已有 Shop（每个 Entity 仅允许 1 个 Shop）
         EntityAlreadyHasShop,
+        /// 充值金额为零
+        ZeroAmount,
+        /// Shop ID 不匹配
+        ShopIdMismatch,
+        /// 实体已验证
+        AlreadyVerified,
     }
 
     // ==================== Extrinsics ====================
@@ -418,7 +424,7 @@ pub mod pallet {
         /// 2. `active_entities` 统计延后到 `approve_entity` 中递增
         /// 3. Primary Shop 创建时机延后到 `approve_entity`（避免 Pending 期间产生可运营的 Shop）
         #[pallet::call_index(0)]
-        #[pallet::weight(Weight::from_parts(50_000, 0))]
+        #[pallet::weight(Weight::from_parts(200_000_000, 10_000))]
         pub fn create_entity(
             origin: OriginFor<T>,
             name: Vec<u8>,
@@ -513,14 +519,14 @@ pub mod pallet {
 
         /// 更新实体信息
         #[pallet::call_index(1)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(80_000_000, 5_000))]
         pub fn update_entity(
             origin: OriginFor<T>,
             entity_id: u64,
             name: Option<Vec<u8>>,
             logo_cid: Option<Vec<u8>>,
             description_cid: Option<Vec<u8>>,
-            customer_service: Option<T::AccountId>,
+            metadata_uri: Option<Vec<u8>>,
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -532,7 +538,9 @@ pub mod pallet {
                     Error::<T>::InvalidEntityStatus
                 );
 
+                // H4: 名称更新时不允许为空
                 if let Some(n) = name {
+                    ensure!(!n.is_empty(), Error::<T>::NameEmpty);
                     entity.name = n.try_into().map_err(|_| Error::<T>::NameTooLong)?;
                 }
                 if let Some(c) = logo_cid {
@@ -541,9 +549,10 @@ pub mod pallet {
                 if let Some(c) = description_cid {
                     entity.description_cid = Some(c.try_into().map_err(|_| Error::<T>::CidTooLong)?);
                 }
-                // DEPRECATED: customer_service 已移动到 Shop 层级，此参数被忽略。
-                // TODO: 下一个 breaking change 版本中移除此参数
-                let _ = customer_service;
+                // M2: 支持更新 metadata_uri
+                if let Some(uri) = metadata_uri {
+                    entity.metadata_uri = Some(uri.try_into().map_err(|_| Error::<T>::CidTooLong)?);
+                }
 
                 Ok(())
             })?;
@@ -554,7 +563,7 @@ pub mod pallet {
 
         /// 申请关闭实体（需治理审批）
         #[pallet::call_index(2)]
-        #[pallet::weight(Weight::from_parts(20_000, 0))]
+        #[pallet::weight(Weight::from_parts(80_000_000, 5_000))]
         pub fn request_close_entity(origin: OriginFor<T>, entity_id: u64) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -588,7 +597,7 @@ pub mod pallet {
 
         /// 充值金库资金
         #[pallet::call_index(3)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(100_000_000, 5_000))]
         pub fn top_up_fund(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -602,6 +611,8 @@ pub mod pallet {
                 entity.status != EntityStatus::Closed && entity.status != EntityStatus::Banned,
                 Error::<T>::InvalidEntityStatus
             );
+            // M1: 充值金额不能为零
+            ensure!(!amount.is_zero(), Error::<T>::ZeroAmount);
 
             let treasury_account = Self::entity_treasury_account(entity_id);
 
@@ -650,7 +661,7 @@ pub mod pallet {
         /// 本函数同时恢复 Shop：因 `reopen_entity` 之前的 close/ban 已
         /// 通过 `force_close_shop` 物理写入终态，需显式 `resume_shop` 恢复。
         #[pallet::call_index(4)]
-        #[pallet::weight(Weight::from_parts(20_000, 0))]
+        #[pallet::weight(Weight::from_parts(80_000_000, 5_000))]
         pub fn approve_entity(origin: OriginFor<T>, entity_id: u64) -> DispatchResult {
             T::GovernanceOrigin::ensure_origin(origin)?;
 
@@ -682,7 +693,7 @@ pub mod pallet {
 
         /// 审批关闭实体（治理，退还全部余额）
         #[pallet::call_index(5)]
-        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        #[pallet::weight(Weight::from_parts(150_000_000, 8_000))]
         pub fn approve_close_entity(origin: OriginFor<T>, entity_id: u64) -> DispatchResult {
             T::GovernanceOrigin::ensure_origin(origin)?;
 
@@ -732,7 +743,7 @@ pub mod pallet {
 
         /// 暂停实体（治理）
         #[pallet::call_index(6)]
-        #[pallet::weight(Weight::from_parts(20_000, 0))]
+        #[pallet::weight(Weight::from_parts(80_000_000, 5_000))]
         pub fn suspend_entity(origin: OriginFor<T>, entity_id: u64) -> DispatchResult {
             T::GovernanceOrigin::ensure_origin(origin)?;
 
@@ -763,7 +774,7 @@ pub mod pallet {
 
         /// 恢复实体（治理，需资金充足）
         #[pallet::call_index(7)]
-        #[pallet::weight(Weight::from_parts(20_000, 0))]
+        #[pallet::weight(Weight::from_parts(80_000_000, 5_000))]
         pub fn resume_entity(origin: OriginFor<T>, entity_id: u64) -> DispatchResult {
             T::GovernanceOrigin::ensure_origin(origin)?;
 
@@ -799,7 +810,7 @@ pub mod pallet {
 
         /// 封禁实体（治理，可选没收资金）
         #[pallet::call_index(8)]
-        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        #[pallet::weight(Weight::from_parts(150_000_000, 8_000))]
         pub fn ban_entity(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -819,14 +830,15 @@ pub mod pallet {
 
             if !balance.is_zero() {
                 if confiscate_fund {
-                    // 没收资金转入平台账户（而非销毁）
-                    let _ = T::Currency::transfer(
+                    // H1: 没收资金转入平台账户，仅成功时发射事件
+                    if T::Currency::transfer(
                         &treasury_account,
                         &T::PlatformAccount::get(),
                         balance,
                         ExistenceRequirement::AllowDeath,
-                    );
-                    Self::deposit_event(Event::FundConfiscated { entity_id, amount: balance });
+                    ).is_ok() {
+                        Self::deposit_event(Event::FundConfiscated { entity_id, amount: balance });
+                    }
                 } else {
                     T::Currency::transfer(
                         &treasury_account,
@@ -873,7 +885,7 @@ pub mod pallet {
 
         /// 添加管理员
         #[pallet::call_index(9)]
-        #[pallet::weight(Weight::from_parts(25_000, 0))]
+        #[pallet::weight(Weight::from_parts(60_000_000, 4_000))]
         pub fn add_admin(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -886,6 +898,11 @@ pub mod pallet {
                 
                 // 只有所有者可以添加管理员
                 ensure!(entity.owner == who, Error::<T>::NotEntityOwner);
+                // H2: 不允许对 Banned/Closed 实体操作
+                ensure!(
+                    !matches!(entity.status, EntityStatus::Banned | EntityStatus::Closed),
+                    Error::<T>::InvalidEntityStatus
+                );
                 
                 // 检查是否已是管理员
                 ensure!(!entity.admins.contains(&new_admin), Error::<T>::AdminAlreadyExists);
@@ -907,7 +924,7 @@ pub mod pallet {
 
         /// 移除管理员
         #[pallet::call_index(10)]
-        #[pallet::weight(Weight::from_parts(25_000, 0))]
+        #[pallet::weight(Weight::from_parts(60_000_000, 4_000))]
         pub fn remove_admin(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -920,6 +937,11 @@ pub mod pallet {
                 
                 // 只有所有者可以移除管理员
                 ensure!(entity.owner == who, Error::<T>::NotEntityOwner);
+                // H2: 不允许对 Banned/Closed 实体操作
+                ensure!(
+                    !matches!(entity.status, EntityStatus::Banned | EntityStatus::Closed),
+                    Error::<T>::InvalidEntityStatus
+                );
                 
                 // 不能移除所有者
                 ensure!(admin != entity.owner, Error::<T>::CannotRemoveOwner);
@@ -941,7 +963,7 @@ pub mod pallet {
 
         /// 转移所有权
         #[pallet::call_index(11)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(100_000_000, 6_000))]
         pub fn transfer_ownership(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -954,6 +976,11 @@ pub mod pallet {
                 
                 // 只有所有者可以转移所有权
                 ensure!(entity.owner == who, Error::<T>::NotEntityOwner);
+                // H3: 不允许对 Banned/Closed 实体转移所有权
+                ensure!(
+                    !matches!(entity.status, EntityStatus::Banned | EntityStatus::Closed),
+                    Error::<T>::InvalidEntityStatus
+                );
                 
                 let old = entity.owner.clone();
                 entity.owner = new_owner.clone();
@@ -984,7 +1011,7 @@ pub mod pallet {
 
         /// 升级实体类型（需治理批准或满足条件）
         #[pallet::call_index(12)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(80_000_000, 5_000))]
         pub fn upgrade_entity_type(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -1045,7 +1072,7 @@ pub mod pallet {
 
         /// 变更治理模式（需治理批准）
         #[pallet::call_index(13)]
-        #[pallet::weight(Weight::from_parts(25_000, 0))]
+        #[pallet::weight(Weight::from_parts(60_000_000, 4_000))]
         pub fn change_governance_mode(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -1081,7 +1108,7 @@ pub mod pallet {
 
         /// 验证实体（治理）
         #[pallet::call_index(14)]
-        #[pallet::weight(Weight::from_parts(20_000, 0))]
+        #[pallet::weight(Weight::from_parts(60_000_000, 4_000))]
         pub fn verify_entity(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -1094,6 +1121,8 @@ pub mod pallet {
                     !matches!(entity.status, EntityStatus::Banned | EntityStatus::Closed),
                     Error::<T>::InvalidEntityStatus
                 );
+                // L3: 幂等检查 — 已验证时直接返回，避免无效写入
+                ensure!(!entity.verified, Error::<T>::AlreadyVerified);
                 entity.verified = true;
                 Ok(())
             })?;
@@ -1103,8 +1132,11 @@ pub mod pallet {
         }
 
         /// 重新开业（owner 申请，Closed → Pending，需重新缴纳押金，等待治理审批）
+        ///
+        /// **注意**: 仅允许 `Closed` 状态的实体重开。`Banned` 状态的实体不可重开，
+        /// 需治理通过其他流程（如链上提案）解除封禁后才能操作。
         #[pallet::call_index(15)]
-        #[pallet::weight(Weight::from_parts(50_000, 0))]
+        #[pallet::weight(Weight::from_parts(200_000_000, 10_000))]
         pub fn reopen_entity(origin: OriginFor<T>, entity_id: u64) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -1408,13 +1440,14 @@ pub mod pallet {
             Ok(())
         }
 
-        fn unregister_shop(entity_id: u64, _shop_id: u64) -> Result<(), sp_runtime::DispatchError> {
-            Entities::<T>::mutate(entity_id, |maybe_entity| {
-                if let Some(entity) = maybe_entity {
-                    entity.shop_id = 0;
-                }
-            });
-            Ok(())
+        fn unregister_shop(entity_id: u64, shop_id: u64) -> Result<(), sp_runtime::DispatchError> {
+            Entities::<T>::try_mutate(entity_id, |maybe_entity| -> Result<(), sp_runtime::DispatchError> {
+                let entity = maybe_entity.as_mut().ok_or(Error::<T>::EntityNotFound)?;
+                // M3: 验证 shop_id 匹配
+                ensure!(entity.shop_id == shop_id, Error::<T>::ShopIdMismatch);
+                entity.shop_id = 0;
+                Ok(())
+            })
         }
 
         fn is_entity_admin(entity_id: u64, account: &T::AccountId) -> bool {

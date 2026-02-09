@@ -1,489 +1,332 @@
-# pallet-entity-product
+# pallet-entity-service
 
-> 📦 Entity 商品管理模块 - 商品生命周期管理与押金机制
+> NEXUS 商品管理模块 — 商品生命周期管理、IPFS 元数据、USDT 等值押金机制
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Substrate](https://img.shields.io/badge/Substrate-polkadot--sdk-blue)](https://github.com/paritytech/polkadot-sdk)
+## 概述
 
-## 📖 概述
+`pallet-entity-service` 管理 Entity 商城系统中的商品全生命周期：创建（含押金）、更新、上架、下架、删除（退押金）、库存管理。商品元数据（名称、图片、详情）存储为 IPFS CID，链上仅记录引用。
 
-`pallet-entity-product` 是 Entity 商城系统的商品管理模块，负责商品的完整生命周期管理，包括创建、更新、上架、下架和库存管理。
-
-### 核心功能
-
-- 📝 **商品创建** - 从店铺派生账户扣取 1 USDT 等值 NXS 押金
-- ✏️ **商品更新** - 修改商品信息
-- 🚀 **商品上架** - 发布商品到店铺
-- 📥 **商品下架** - 从店铺移除商品
-- �️ **商品删除** - 退还押金到店铺派生账户
-- � **库存管理** - 库存扣减与恢复
-- 📈 **销量统计** - 自动记录销售数量
-
-## 💰 押金机制
-
-### 核心设计
-
-创建商品时从**店铺派生账户**扣取 **1 USDT 等值 NXS** 作为押金，转入 **Pallet 账户**托管。
+## 架构依赖
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    商品押金流程                                  │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  创建商品:                                                       │
-│  店铺派生账户 ──→ Product Pallet 账户                            │
-│                   PalletId(*b"et/prod/")                        │
-│                                                                 │
-│  删除商品:                                                       │
-│  Product Pallet 账户 ──→ 店铺派生账户                            │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+pallet-entity-service
+├── EntityProvider          Entity 查询（保留，当前由 ShopProvider::is_shop_active 隐式检查）
+├── ShopProvider            Shop 查询（shop_exists, shop_owner, shop_account, is_shop_active）
+├── PricingProvider         NXS/USDT 价格（get_cos_usdt_price，用于计算等值押金）
+└── ProductProvider trait   供 pallet-entity-transaction 调用库存/价格/类别查询
 ```
 
-### 押金计算
+> **注意**：`EntityProvider` 在 Config 中声明但当前未直接调用。`ShopProvider::is_shop_active` 的 runtime 实现中已隐式检查 Entity 状态（`is_entity_active`），因此无需重复检查。保留此关联类型供未来扩展使用。
+
+## 押金机制
+
+创建商品时从**店铺派生账户**扣取 **1 USDT 等值 NXS** 押金，转入 Pallet 托管账户 `PalletId(*b"et/prod/")`。删除商品时原路退还。
 
 ```
-NXS 押金 = USDT 金额 × 10^12 / NXS价格
+创建商品:   Shop 派生账户 ──KeepAlive──→ Product Pallet 账户 (押金)
+删除商品:   Product Pallet 账户 ──AllowDeath──→ Shop 派生账户 (退还)
 ```
 
-| NXS/USDT 价格 | 1 USDT 等值 NXS |
-|---------------|-----------------|
-| 0.001 | 1,000 NXS |
-| 0.01 | 100 NXS |
-| 0.1 | 10 NXS |
+- 创建时使用 `ExistenceRequirement::KeepAlive` 防止 reap 店铺派生账户
+- 删除时使用 `ExistenceRequirement::AllowDeath`（Pallet 账户可清零）
 
-## 🏗️ 架构
+### 押金计算公式
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                   pallet-entity-product                      │
-│                      (商品管理模块)                              │
-├─────────────────────────────────────────────────────────────────┤
-│  • 商品 CRUD 操作                                                │
-│  • 商品押金管理（从店铺派生账户扣取）                             │
-│  • 商品状态管理                                                  │
-│  • 库存管理                                                      │
-│  • 销量统计                                                      │
-└─────────────────────────────────────────────────────────────────┘
-         │                              │
-         │ ShopProvider                 │ ProductProvider
-         ▼                              ▼
-┌─────────────────────┐    ┌─────────────────────────────────────┐
-│  pallet-entity   │    │        pallet-entity-order       │
-│      -shop          │    │           (订单模块)                 │
-│    (店铺模块)        │    │  • 下单时扣减库存                    │
-│  • 店铺存在性验证    │    │  • 取消时恢复库存                    │
-│  • 店主身份验证      │    │  • 完成时增加销量                    │
-│  • 派生账户提供      │    │                                     │
-└─────────────────────┘    └─────────────────────────────────────┘
+NXS 押金 = ProductDepositUsdt × 10^12 / cos_usdt_price
+最终押金 = clamp(NXS 押金, MinProductDepositCos, MaxProductDepositCos)
 ```
 
-## 📦 安装
-
-### Cargo.toml
-
-```toml
-[dependencies]
-pallet-entity-product = { path = "pallets/entity/product", default-features = false }
-
-[features]
-std = [
-    "pallet-entity-product/std",
-]
-```
-
-## ⚙️ Runtime 配置
+## Config 配置
 
 ```rust
-parameter_types! {
-    /// 商品押金：1 USDT（精度 10^6）
-    pub const ProductDepositUsdt: u64 = 1_000_000;
-    /// 最小押金：1 NXS
-    pub const MinProductDepositCos: Balance = 1 * UNIT;
-    /// 最大押金：100 NXS
-    pub const MaxProductDepositCos: Balance = 100 * UNIT;
-}
-
-impl pallet_entity_product::Config for Runtime {
+impl pallet_entity_service::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type Currency = Balances;
+    type EntityProvider = EntityRegistry;       // 保留，当前未直接调用
     type ShopProvider = EntityShop;
-    type PricingProvider = TradingPricing;
+    type PricingProvider = EntityPricingProvider;
     type MaxProductsPerShop = ConstU32<1000>;
     type MaxCidLength = ConstU32<64>;
-    type ProductDepositUsdt = ProductDepositUsdt;
-    type MinProductDepositCos = MinProductDepositCos;
-    type MaxProductDepositCos = MaxProductDepositCos;
+    type ProductDepositUsdt = ConstU64<1_000_000>;       // 1 USDT (精度 10^6)
+    type MinProductDepositCos = ConstU128<{ UNIT / 100 }>; // 0.01 NXS
+    type MaxProductDepositCos = ConstU128<{ 10 * UNIT }>;  // 10 NXS
 }
 ```
 
-### 配置参数说明
+| 参数 | 说明 |
+|------|------|
+| `Currency` | 货币类型 |
+| `EntityProvider` | Entity 查询接口（保留，由 ShopProvider 隐式使用） |
+| `ShopProvider` | Shop 查询 + 派生账户 + 权限验证 |
+| `PricingProvider` | NXS/USDT 实时价格（`get_cos_usdt_price()`） |
+| `MaxProductsPerShop` | 每店铺最大商品数上限 |
+| `MaxCidLength` | IPFS CID 最大字节数 |
+| `ProductDepositUsdt` | 押金 USDT 金额（精度 10^6） |
+| `MinProductDepositCos` | 押金 NXS 下限 |
+| `MaxProductDepositCos` | 押金 NXS 上限 |
 
-| 参数 | 类型 | 说明 | 示例值 |
-|------|------|------|--------|
-| `Currency` | Currency | 货币类型 | `Balances` |
-| `ShopProvider` | ShopProvider | 店铺查询接口 | `EntityShop` |
-| `PricingProvider` | PricingProvider | **定价提供者** | `TradingPricing` |
-| `MaxProductsPerShop` | u32 | 每店铺最大商品数 | 1000 |
-| `MaxCidLength` | u32 | CID 最大长度 | 64 |
-| `ProductDepositUsdt` | u64 | **押金 USDT（精度 10^6）** | 1_000_000 |
-| `MinProductDepositCos` | Balance | **最小押金 NXS** | 1 UNIT |
-| `MaxProductDepositCos` | Balance | **最大押金 NXS** | 100 UNIT |
+## 数据结构
 
-## 📊 数据结构
-
-### Product - 商品信息
+### Product
 
 ```rust
-pub struct Product<Balance, BlockNumber, MaxCidLen> {
-    pub id: u64,                              // 商品 ID
-    pub shop_id: u64,                         // 所属店铺 ID
-    pub name_cid: BoundedVec<u8, MaxCidLen>,  // 商品名称 IPFS CID
-    pub images_cid: BoundedVec<u8, MaxCidLen>,// 商品图片 IPFS CID
-    pub detail_cid: BoundedVec<u8, MaxCidLen>,// 商品详情 IPFS CID
-    pub price: Balance,                       // 单价
-    pub stock: u32,                           // 库存数量（0 = 无限）
-    pub sold_count: u32,                      // 已售数量
-    pub status: ProductStatus,                // 商品状态
-    pub category: ProductCategory,            // 商品类别
-    pub created_at: BlockNumber,              // 创建时间
-    pub updated_at: BlockNumber,              // 更新时间
+#[derive(Encode, Decode, DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+pub struct Product<Balance, BlockNumber, MaxCidLen: Get<u32>> {
+    pub id: u64,
+    pub shop_id: u64,
+    pub name_cid: BoundedVec<u8, MaxCidLen>,
+    pub images_cid: BoundedVec<u8, MaxCidLen>,
+    pub detail_cid: BoundedVec<u8, MaxCidLen>,
+    pub price: Balance,
+    pub stock: u32,              // 0 = 无限库存
+    pub sold_count: u32,
+    pub status: ProductStatus,
+    pub category: ProductCategory,
+    pub created_at: BlockNumber,
+    pub updated_at: BlockNumber,
 }
 ```
 
-### ProductStatus - 商品状态
+### ProductDepositInfo
 
 ```rust
-pub enum ProductStatus {
-    Draft,      // 草稿（未上架）
-    OnSale,     // 在售
-    OffShelf,   // 已下架
-    SoldOut,    // 售罄
+#[derive(Encode, Decode, DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+pub struct ProductDepositInfo<AccountId, Balance> {
+    pub shop_id: u64,
+    pub amount: Balance,
+    pub source_account: AccountId,  // 店铺派生账户
 }
 ```
 
-### ProductCategory - 商品类别
+### ProductStatistics
 
 ```rust
-pub enum ProductCategory {
-    Digital,    // 数字商品（虚拟物品）
-    Physical,   // 实物商品
-    Service,    // 服务类
-    Other,      // 其他
-}
-```
-
-### ProductStatistics - 商品统计
-
-```rust
+#[derive(Encode, Decode, DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
 pub struct ProductStatistics {
-    pub total_products: u64,     // 总商品数
-    pub on_sale_products: u64,   // 在售商品数
+    pub total_products: u64,
+    pub on_sale_products: u64,
 }
 ```
 
-## 🔧 Extrinsics
+> 所有存储 struct 均已添加 `DecodeWithMemTracking`（v0.3.0 审查修复）。
 
-### 1. create_product
+### ProductStatus（定义于 pallet-entity-common）
 
-创建商品（从店铺派生账户扣取押金）。
+| 状态 | 说明 |
+|------|------|
+| `Draft` | 草稿，未上架 |
+| `OnSale` | 在售 |
+| `OffShelf` | 已下架 |
+| `SoldOut` | 售罄（stock 归零时自动设置） |
 
-```rust
-fn create_product(
-    origin: OriginFor<T>,
-    shop_id: u64,
-    name_cid: Vec<u8>,
-    images_cid: Vec<u8>,
-    detail_cid: Vec<u8>,
-    price: BalanceOf<T>,
-    stock: u32,
-    category: ProductCategory,
-) -> DispatchResult
-```
+### ProductCategory（定义于 pallet-entity-common）
 
-**参数：**
-- `shop_id` - 店铺 ID
-- `name_cid` - 商品名称 IPFS CID
-- `images_cid` - 商品图片 IPFS CID
-- `detail_cid` - 商品详情 IPFS CID
-- `price` - 商品单价
-- `stock` - 库存数量（0 = 无限库存）
-- `category` - 商品类别
+| 类别 | 说明 | 订单流程 |
+|------|------|----------|
+| `Digital` | 数字/虚拟商品 | 支付即完成 |
+| `Physical` | 实物商品 | 需发货+确认 |
+| `Service` | 服务类 | 需开始+完成+确认 |
+| `Other` | 其他 | 同 Physical |
 
-**权限：** 仅店主
+## 存储项
 
-**押金：** 从店铺派生账户扣取 1 USDT 等值 NXS
-
-**示例：**
-```javascript
-api.tx.entityService.createProduct(
-    1,                    // shop_id
-    "QmName...",         // name_cid
-    "QmImages...",       // images_cid
-    "QmDetail...",       // detail_cid
-    1000000000000,       // price: 1 UNIT
-    100,                 // stock
-    { Physical: null }   // category
-)
-```
-
-### 2. update_product
-
-更新商品信息。
-
-```rust
-fn update_product(
-    origin: OriginFor<T>,
-    product_id: u64,
-    name_cid: Option<Vec<u8>>,
-    images_cid: Option<Vec<u8>>,
-    detail_cid: Option<Vec<u8>>,
-    price: Option<BalanceOf<T>>,
-    stock: Option<u32>,
-    category: Option<ProductCategory>,
-) -> DispatchResult
-```
-
-**权限：** 仅店主
-
-**说明：** 所有参数均为可选，仅更新提供的字段
-
-### 3. publish_product
-
-上架商品（草稿 → 在售）。
-
-```rust
-fn publish_product(
-    origin: OriginFor<T>,
-    product_id: u64,
-) -> DispatchResult
-```
-
-**权限：** 仅店主
-
-**前提条件：** 店铺必须处于激活状态
-
-### 4. unpublish_product
-
-下架商品（在售 → 已下架）。
-
-```rust
-fn unpublish_product(
-    origin: OriginFor<T>,
-    product_id: u64,
-) -> DispatchResult
-```
-
-**权限：** 仅店主
-
-### 5. delete_product
-
-删除商品（退还押金）。
-
-```rust
-fn delete_product(
-    origin: OriginFor<T>,
-    product_id: u64,
-) -> DispatchResult
-```
-
-**权限：** 仅店主
-
-**前提条件：** 商品状态必须为 `Draft` 或 `OffShelf`
-
-**说明：** 删除商品后，创建时支付的押金将自动退还给店主
-
-## 📡 Events
-
-| 事件 | 说明 | 字段 |
+| 存储 | 类型 | 说明 |
 |------|------|------|
-| `ProductCreated` | 商品已创建 | `product_id`, `shop_id` |
-| `ProductUpdated` | 商品已更新 | `product_id` |
-| `ProductStatusChanged` | 商品状态已变更 | `product_id`, `status` |
-| `ProductDeleted` | 商品已删除 | `product_id` |
-| `StockUpdated` | 库存已更新 | `product_id`, `new_stock` |
-| `DepositReserved` | **押金已收取** | `product_id`, `depositor`, `amount` |
-| `DepositUnreserved` | **押金已退还** | `product_id`, `depositor`, `amount` |
+| `NextProductId` | `StorageValue<u64>` | 下一个商品 ID（自增） |
+| `Products` | `StorageMap<u64, Product>` | 商品主表 |
+| `ShopProducts` | `StorageMap<u64, BoundedVec<u64, MaxProductsPerShop>>` | 店铺→商品索引 |
+| `ProductStats` | `StorageValue<ProductStatistics>` | 全局商品统计（on_sale_products 由所有状态变更路径同步维护） |
+| `ProductDeposits` | `StorageMap<u64, ProductDepositInfo>` | 商品→押金记录 |
 
-## ❌ Errors
+## Extrinsics
 
-| 错误 | 说明 |
-|------|------|
-| `ProductNotFound` | 商品不存在 |
-| `ShopNotFound` | 店铺不存在 |
-| `NotShopOwner` | 不是店主 |
-| `ShopNotActive` | 店铺未激活 |
-| `InsufficientStock` | 库存不足 |
-| `MaxProductsReached` | 达到最大商品数 |
-| `InvalidProductStatus` | 无效的商品状态 |
-| `CidTooLong` | CID 过长 |
-| `InsufficientBalanceForDeposit` | **余额不足以支付押金** |
+| # | 调用 | Weight | 权限 | 说明 |
+|---|------|--------|------|------|
+| 0 | `create_product(shop_id, name_cid, images_cid, detail_cid, price, stock, category)` | 250M / 12k | 店主 | 创建商品，price>0，从店铺账户扣押金（KeepAlive） |
+| 1 | `update_product(product_id, name_cid?, images_cid?, detail_cid?, price?, stock?, category?)` | 150M / 8k | 店主 | 更新商品（所有字段可选，补货可恢复 SoldOut→OnSale） |
+| 2 | `publish_product(product_id)` | 120M / 6k | 店主 | 上架（需 Shop 激活，状态须为 Draft/OffShelf） |
+| 3 | `unpublish_product(product_id)` | 120M / 6k | 店主 | 下架（状态须为 OnSale/SoldOut） |
+| 4 | `delete_product(product_id)` | 200M / 10k | 店主 | 删除商品并退还押金（状态须为 Draft/OffShelf） |
 
-## 🔌 ProductProvider Trait
+### create_product 详细流程
 
-本模块实现了 `ProductProvider` trait，供其他模块（如订单模块）调用：
+1. 验证 `price > 0`（`InvalidPrice`）
+2. 验证 Shop 存在且激活，调用者 == 店主
+3. 检查店铺商品数 < `MaxProductsPerShop`
+4. CID 转为 `BoundedVec`（校验长度，失败返回 `CidTooLong`）
+5. `calculate_product_deposit()` 计算押金（PricingProvider 报价 + clamp）
+6. 检查店铺派生账户余额 >= 押金
+7. `Currency::transfer`（KeepAlive）从店铺账户转押金到 Pallet 账户
+8. 创建商品（状态 `Draft`），写入 `Products` + `ShopProducts` + `ProductDeposits`
+9. `NextProductId` 自增，更新 `ProductStats.total_products`
 
-```rust
-pub trait ProductProvider<AccountId, Balance> {
-    /// 商品是否存在
-    fn product_exists(product_id: u64) -> bool;
-    
-    /// 商品是否在售
-    fn is_product_on_sale(product_id: u64) -> bool;
-    
-    /// 获取商品所属店铺 ID
-    fn product_shop_id(product_id: u64) -> Option<u64>;
-    
-    /// 获取商品价格
-    fn product_price(product_id: u64) -> Option<Balance>;
-    
-    /// 获取商品库存
-    fn product_stock(product_id: u64) -> Option<u32>;
-    
-    /// 扣减库存（下单时调用）
-    fn deduct_stock(product_id: u64, quantity: u32) -> Result<(), DispatchError>;
-    
-    /// 恢复库存（取消订单时调用）
-    fn restore_stock(product_id: u64, quantity: u32) -> Result<(), DispatchError>;
-    
-    /// 增加销量（订单完成时调用）
-    fn add_sold_count(product_id: u64, quantity: u32) -> Result<(), DispatchError>;
-}
-```
+### delete_product 详细流程
 
-## 💡 商品生命周期
+1. 验证调用者 == 店主
+2. 状态必须为 `Draft` 或 `OffShelf`
+3. 从 `ProductDeposits` 取出押金记录（`take` 同时删除）
+4. `Currency::transfer`（AllowDeath）从 Pallet 账户退还押金到店铺派生账户
+5. 删除 `Products`、从 `ShopProducts` 移除
+6. 更新 `ProductStats`（total_products -1；若状态为 OnSale 则 on_sale_products -1）
+
+## 商品状态机
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        商品生命周期                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  1. 创建商品                                                     │
-│     └── create_product() → 状态: Draft                          │
-│                                                                 │
-│  2. 上架商品                                                     │
-│     └── publish_product() → 状态: OnSale                        │
-│                                                                 │
-│  3. 销售中                                                       │
-│     ├── 用户下单 → deduct_stock()                               │
-│     ├── 订单取消 → restore_stock()                              │
-│     └── 订单完成 → add_sold_count()                             │
-│                                                                 │
-│  4. 库存售罄                                                     │
-│     └── stock = 0 → 状态: SoldOut                               │
-│                                                                 │
-│  5. 下架商品                                                     │
-│     └── unpublish_product() → 状态: OffShelf                    │
-│                                                                 │
-│  6. 重新上架                                                     │
-│     └── publish_product() → 状态: OnSale                        │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+                                                    unpublish_product
+create_product ──→ [Draft] ──→ publish_product ──→ [OnSale] ──────────────→ [OffShelf]
+                                    ↑                 │                         ↑
+                                    │                 │ deduct_stock            │
+                                    │                 │ (stock→0)              │
+                                    │                 ↓                         │
+                                    │            [SoldOut] ─── unpublish ──────┘
+                                    │                 │
+                                    │                 │ restore_stock /
+                                    │                 │ update_product(补货)
+                                    │                 ↓
+                                    └─────────── [OnSale]
+                                                      ↑
+                       [OffShelf] ─── publish_product ┘
+
+                  [Draft] 或 [OffShelf] ──→ delete_product ──→ (已删除，退押金)
 ```
 
-## 📈 库存管理
+### on_sale_products 统计同步
 
-### 库存扣减逻辑
+`ProductStats.on_sale_products` 由以下路径精确维护：
 
-```rust
-fn deduct_stock(product_id: u64, quantity: u32) -> Result<(), DispatchError> {
-    // 1. 检查库存是否足够
-    // 2. 扣减库存
-    // 3. 如果库存归零，状态变为 SoldOut
-}
-```
-
-### 库存恢复逻辑
-
-```rust
-fn restore_stock(product_id: u64, quantity: u32) -> Result<(), DispatchError> {
-    // 1. 增加库存
-    // 2. 如果之前是 SoldOut，状态恢复为 OnSale
-}
-```
-
-### 无限库存
-
-当 `stock = 0` 时，表示无限库存：
-- 不会扣减库存
-- 不会变为 SoldOut 状态
-
-## 🔐 安全考虑
-
-### 权限控制
-
-| 操作 | 权限 |
-|------|------|
-| 创建商品 | 店主 |
-| 更新商品 | 店主 |
-| 上架商品 | 店主（店铺需激活） |
-| 下架商品 | 店主 |
-| 扣减库存 | 系统（订单模块） |
-| 恢复库存 | 系统（订单模块） |
-
-### 商品数量限制
-
-```rust
-ensure!(
-    product_ids.len() < T::MaxProductsPerShop::get() as usize,
-    Error::<T>::MaxProductsReached
-);
-```
-
-**目的**：防止单店铺创建过多商品
-
-### 💰 存储押金机制
-
-为防止存储膨胀，创建商品时需要支付押金：
-
-```rust
-// 创建商品时收取押金
-let deposit = T::ProductDeposit::get();
-T::Currency::reserve(&who, deposit)?;
-
-// 删除商品时退还押金
-T::Currency::unreserve(&depositor, deposit);
-```
-
-**机制说明：**
-
-| 操作 | 押金行为 |
+| 路径 | 统计变化 |
 |------|----------|
-| `create_product` | 收取押金（锁定） |
-| `delete_product` | 退还押金（解锁） |
+| `publish_product` (Draft/OffShelf → OnSale) | +1 |
+| `unpublish_product` (OnSale → OffShelf) | -1 |
+| `unpublish_product` (SoldOut → OffShelf) | 不变（SoldOut 时已减过） |
+| `deduct_stock` (OnSale → SoldOut) | -1 |
+| `restore_stock` (SoldOut → OnSale) | +1 |
+| `update_product` 补货 (SoldOut → OnSale) | +1 |
+| `delete_product` (OnSale 状态删除) | -1（但实际不可达，删除需 Draft/OffShelf） |
 
-**优点：**
-- 经济激励用户清理无用商品
-- 防止恶意创建大量商品占用存储
-- 押金可配置，灵活调整
+## 库存管理
 
-**存储成本估算：**
-- 单个商品约 242 bytes
-- 1000 个商品约 242 KB
-- 押金应覆盖存储成本
+| 场景 | 行为 | 统计影响 |
+|------|------|----------|
+| `stock = 0` 创建时 | 无限库存，`deduct_stock` 不扣减 | 无 |
+| `deduct_stock` 扣到 0 | 自动设为 `SoldOut` | `on_sale_products` -1 |
+| `restore_stock` 从 SoldOut | 自动恢复为 `OnSale` | `on_sale_products` +1 |
+| `update_product` 补货 | stock > 0 且 SoldOut → 恢复为 `OnSale` | `on_sale_products` +1 |
 
-## 🧪 测试
+## ProductProvider Trait 实现
+
+供 `pallet-entity-transaction` 调用：
+
+```rust
+impl ProductProvider<AccountId, Balance> for Pallet<T> {
+    fn product_exists(product_id: u64) -> bool;
+    fn is_product_on_sale(product_id: u64) -> bool;
+    fn product_shop_id(product_id: u64) -> Option<u64>;
+    fn product_price(product_id: u64) -> Option<Balance>;
+    fn product_stock(product_id: u64) -> Option<u32>;
+    fn product_category(product_id: u64) -> Option<ProductCategory>;
+    fn deduct_stock(product_id: u64, quantity: u32) -> DispatchResult;   // 同步 on_sale 统计
+    fn restore_stock(product_id: u64, quantity: u32) -> DispatchResult;  // 同步 on_sale 统计
+    fn add_sold_count(product_id: u64, quantity: u32) -> DispatchResult;
+}
+```
+
+## 辅助函数
+
+| 函数 | 说明 |
+|------|------|
+| `pallet_account()` | 返回押金托管 Pallet 账户 `PalletId(*b"et/prod/")` |
+| `calculate_product_deposit()` | 计算当前 1 USDT 等值 NXS 押金（含 clamp） |
+| `get_current_deposit()` | 供前端查询当前押金金额（调用 `calculate_product_deposit`） |
+
+## Events
+
+| 事件 | 字段 | 触发时机 |
+|------|------|----------|
+| `ProductCreated` | `product_id`, `shop_id`, `deposit` | `create_product` |
+| `ProductUpdated` | `product_id` | `update_product` |
+| `ProductStatusChanged` | `product_id`, `status` | `publish_product` / `unpublish_product` |
+| `ProductDeleted` | `product_id`, `deposit_refunded` | `delete_product` |
+| `StockUpdated` | `product_id`, `new_stock` | `deduct_stock` / `restore_stock`（trait 内部） |
+
+## Errors
+
+| 错误 | 触发位置 | 说明 |
+|------|----------|------|
+| `ProductNotFound` | 所有需要商品的操作 | 商品不存在 |
+| `ShopNotFound` | `create_product`, `publish_product` 等 | 店铺不存在 |
+| `NotShopOwner` | 所有 extrinsic | 调用者不是店主 |
+| `ShopNotActive` | `create_product`, `publish_product` | 店铺未激活（含 Entity 状态检查） |
+| `InsufficientStock` | `deduct_stock` | 库存不足 |
+| `MaxProductsReached` | `create_product` | 店铺商品数达到上限 |
+| `InvalidProductStatus` | `publish_product`, `unpublish_product`, `delete_product` | 状态不允许此操作 |
+| `CidTooLong` | `create_product`, `update_product` | CID 超过 `MaxCidLength` |
+| `InsufficientShopFund` | `create_product` | 店铺派生账户余额不足以支付押金 |
+| `DepositNotFound` | `delete_product`（未使用，代码中 fallback 为 0） | 押金记录不存在 |
+| `PriceUnavailable` | `calculate_product_deposit` | NXS/USDT 价格为 0 |
+| `ArithmeticOverflow` | `calculate_product_deposit` | 押金计算溢出 |
+| `InvalidPrice` | `create_product` | 商品价格不能为 0 |
+
+## 权限模型
+
+| 操作 | 调用方 | 前置条件 |
+|------|--------|----------|
+| `create_product` | 店主（signed） | Shop 激活 + 商品数未满 + price > 0 + CID 合法 + 运营资金充足 |
+| `update_product` | 店主（signed） | — |
+| `publish_product` | 店主（signed） | Shop 激活 + 状态为 Draft/OffShelf |
+| `unpublish_product` | 店主（signed） | 状态为 OnSale/SoldOut |
+| `delete_product` | 店主（signed） | 状态为 Draft/OffShelf |
+| `deduct_stock` | 系统（trait 调用） | 由 `pallet-entity-transaction` 下单时调用 |
+| `restore_stock` | 系统（trait 调用） | 由 `pallet-entity-transaction` 取消/退款时调用 |
+| `add_sold_count` | 系统（trait 调用） | 由 `pallet-entity-transaction` 订单完成时调用 |
+
+## 测试
 
 ```bash
-# 运行单元测试
-cargo test -p pallet-entity-product
-
-# 运行特定测试
-cargo test -p pallet-entity-product test_create_product
+cargo test -p pallet-entity-service
+# 42 tests (mock runtime + 单元测试)
 ```
 
-## 📝 版本历史
+### 测试覆盖
+
+| 类别 | 测试数 | 覆盖内容 |
+|------|--------|----------|
+| `create_product` | 8 | 正常创建、零价格、店铺不存在/未激活/非店主、CID 过长、数量上限、无限库存 |
+| `update_product` | 3 | 部分更新、非店主、补货 SoldOut→OnSale 统计 |
+| `publish_product` | 5 | 正常上架、重复上架、SoldOut 不可上架、从 OffShelf 上架、Shop 未激活 |
+| `unpublish_product` | 4 | 正常下架、Draft 不可下架、重复下架、SoldOut 下架 |
+| `delete_product` | 5 | Draft 删除、OffShelf 删除、OnSale 不可删、SoldOut 不可删、非店主 |
+| `ProductProvider` | 7 | 基本查询、扣库存、售罄、库存不足、无限库存扣减/恢复、销量累加 |
+| 押金机制 | 5 | 押金计算、min/max clamp、价格为零、删除退还 |
+| 统计一致性 | 1 | 多商品混合操作后 on_sale_products 精确验证 |
+| ShopProducts 索引 | 1 | 创建+删除后索引正确 |
+
+## v0.3.0 审查修复清单
+
+| 编号 | 优先级 | 修复内容 |
+|------|--------|----------|
+| C1 | Critical | 创建 `mock.rs` + `tests.rs`（42 tests） |
+| C2 | Critical | `Product`/`ProductStatistics`/`ProductDepositInfo` 添加 `DecodeWithMemTracking` |
+| C3 | Critical | `publish_product` 添加源状态检查（仅 Draft/OffShelf → OnSale） |
+| C4 | Critical | `unpublish_product` 添加源状态检查（仅 OnSale/SoldOut → OffShelf），精确统计 |
+| H1 | High | `create_product` CID 校验移到 `Currency::transfer` 之前 |
+| H3 | High | `EntityProvider` 未使用 — 确认由 `ShopProvider` 隐式检查，添加说明注释 |
+| H4 | High | `create_product` 添加 `price > 0` 校验 + `InvalidPrice` 错误 |
+| M1 | Medium | 5 个 extrinsic Weight 修正（120M-250M ref_time + 6k-12k proof_size） |
+| M3 | Medium | `update_product` 补货 SoldOut→OnSale 时同步 `on_sale_products` |
+| M4 | Medium | `deduct_stock`/`restore_stock` 状态变更时同步 `on_sale_products` |
+| L2 | Low | `create_product` 押金转账 `AllowDeath` → `KeepAlive` |
+
+## 版本历史
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
-| v0.1.0 | 2026-01-31 | 从 pallet-mall 拆分 |
+| v0.1.0 | 2026-01-31 | 从 pallet-mall 拆分，初始版本 |
+| v0.2.0 | 2026-02-01 | 实现店铺派生账户押金机制 |
+| v0.2.1 | 2026-02-05 | 重命名为 pallet-entity-service，适配 Entity-Shop 分离架构 |
+| v0.3.0 | 2026-02-09 | 深度审查修复（11 项），创建 mock+tests（42 tests） |
 
-## 📄 许可证
+## 许可证
 
 MIT License
-
-## 🔗 相关链接
-
-- [pallet-entity-shop](../shop/README.md)
-- [pallet-entity-order](../order/README.md)
-- [pallet-entity-common](../common/README.md)

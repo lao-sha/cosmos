@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use tokio::sync::Mutex;
 use tracing::{info, warn, debug};
 
-use crate::types::SignedMessage;
+// SignedMessage used by ConfirmationEntry and ActionLogEntry fields
 
 /// 批量上链提交器
 ///
@@ -83,9 +83,16 @@ impl ChainSubmitter {
         }
     }
 
+    /// 队列容量上限（防止 OOM）
+    const MAX_QUEUE_SIZE: usize = 10_000;
+
     /// 添加消息确认到队列
     pub async fn queue_confirmation(&self, entry: ConfirmationEntry) {
         let mut queue = self.confirmation_queue.lock().await;
+        if queue.len() >= Self::MAX_QUEUE_SIZE {
+            warn!(queue_size = queue.len(), "确认队列已满，丢弃最旧条目");
+            queue.pop_front();
+        }
         queue.push_back(entry);
         debug!(queue_size = queue.len(), "确认已入队");
     }
@@ -93,6 +100,10 @@ impl ChainSubmitter {
     /// 添加动作日志到队列
     pub async fn queue_action_log(&self, entry: ActionLogEntry) {
         let mut queue = self.action_log_queue.lock().await;
+        if queue.len() >= Self::MAX_QUEUE_SIZE {
+            warn!(queue_size = queue.len(), "动作日志队列已满，丢弃最旧条目");
+            queue.pop_front();
+        }
         queue.push_back(entry);
         debug!(queue_size = queue.len(), "动作日志已入队");
     }
@@ -100,6 +111,10 @@ impl ChainSubmitter {
     /// 添加 Equivocation 举报到队列（优先级最高）
     pub async fn queue_equivocation(&self, entry: EquivocationEntry) {
         let mut queue = self.equivocation_queue.lock().await;
+        if queue.len() >= Self::MAX_QUEUE_SIZE {
+            warn!(queue_size = queue.len(), "举报队列已满，丢弃最旧条目");
+            queue.pop_front();
+        }
         queue.push_back(entry);
         warn!(queue_size = queue.len(), "Equivocation 举报已入队");
     }
@@ -274,16 +289,15 @@ impl SequenceTracker {
     pub fn check_and_update(&self, bot_id_hash: &str, sequence: u64) -> bool {
         let key = bot_id_hash.to_string();
 
-        match self.last_seen.get(&key) {
-            Some(last) => {
-                let last_val = *last;
+        // 使用 entry API 避免 TOCTOU 竞态
+        let entry = self.last_seen.entry(key);
+        match entry {
+            dashmap::mapref::entry::Entry::Occupied(mut occ) => {
+                let last_val = *occ.get();
                 if sequence > last_val {
-                    // 有效: 更新
-                    drop(last);
-                    self.last_seen.insert(key, sequence);
+                    occ.insert(sequence);
                     true
                 } else if sequence == last_val {
-                    // 完全重放
                     warn!(bot_id_hash, sequence, "重放检测: 序列号重复");
                     false
                 } else {
@@ -297,9 +311,8 @@ impl SequenceTracker {
                     }
                 }
             }
-            None => {
-                // 首次见到
-                self.last_seen.insert(key, sequence);
+            dashmap::mapref::entry::Entry::Vacant(vac) => {
+                vac.insert(sequence);
                 true
             }
         }
@@ -308,6 +321,25 @@ impl SequenceTracker {
     /// 获取某 bot 的最后序列号
     pub fn last_sequence(&self, bot_id_hash: &str) -> Option<u64> {
         self.last_seen.get(bot_id_hash).map(|v| *v)
+    }
+
+    /// 清理不活跃的条目（防止内存泄漏）
+    ///
+    /// 保留最近活跃的 max_entries 条，按 sequence 值排序保留最大的
+    pub fn gc(&self, max_entries: usize) {
+        if self.last_seen.len() <= max_entries {
+            return;
+        }
+        // 收集所有条目并按 sequence 排序
+        let mut entries: Vec<(String, u64)> = self.last_seen
+            .iter()
+            .map(|r| (r.key().clone(), *r.value()))
+            .collect();
+        entries.sort_by(|a, b| b.1.cmp(&a.1)); // 降序
+        // 保留 top max_entries，删除其余
+        for (key, _) in entries.into_iter().skip(max_entries) {
+            self.last_seen.remove(&key);
+        }
     }
 }
 

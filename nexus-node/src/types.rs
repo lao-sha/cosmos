@@ -18,6 +18,24 @@ pub enum MessageAction {
     Pin,
     /// 取消置顶
     Unpin,
+    /// 编辑消息文本 (editMessageText)
+    EditText,
+    /// 编辑消息 Inline 键盘 (editMessageReplyMarkup)
+    EditReplyMarkup,
+    /// 发送投票 (sendPoll)
+    SendPoll,
+    /// 停止投票 (stopPoll)
+    StopPoll,
+    /// 发送图片 (sendPhoto)
+    SendPhoto,
+    /// 发送文件 (sendDocument)
+    SendDocument,
+    /// 发送媒体组 (sendMediaGroup)
+    SendMediaGroup,
+    /// 发送聊天动作 (sendChatAction)
+    SendChatAction,
+    /// 取消所有置顶 (unpinAllChatMessages)
+    UnpinAll,
 }
 
 /// 管理操作
@@ -43,6 +61,20 @@ pub enum AdminAction {
     Promote,
     /// 降级管理员
     Demote,
+    /// 注册 Bot 命令菜单 (setMyCommands)
+    SetMyCommands,
+    /// 设置管理员自定义头衔 (setChatAdministratorCustomTitle)
+    SetCustomTitle,
+    /// 设置群标题 (setChatTitle)
+    SetChatTitle,
+    /// 设置群描述 (setChatDescription)
+    SetChatDescription,
+    /// 创建邀请链接 (createChatInviteLink)
+    CreateInviteLink,
+    /// 导出邀请链接 (exportChatInviteLink)
+    ExportInviteLink,
+    /// 撤销邀请链接 (revokeChatInviteLink)
+    RevokeInviteLink,
 }
 
 /// 查询操作（只读，不需要共识）
@@ -56,14 +88,41 @@ pub enum QueryAction {
     GetChat,
     /// 获取 Bot 自身信息
     GetMe,
+    /// 回复 Inline 键盘回调 (answerCallbackQuery)
+    AnswerCallback,
+}
+
+/// 配置更新操作（通过管理员命令修改 GroupConfig）
+///
+/// 需要共识确认后由 Agent 执行配置变更。
+/// params JSON 携带具体更新参数。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConfigUpdateAction {
+    /// 添加黑名单词 — params: {"word": "..."}
+    AddBlacklistWord,
+    /// 移除黑名单词 — params: {"word": "..."}
+    RemoveBlacklistWord,
+    /// 锁定消息类型 — params: {"lock_type": "Photo"}
+    LockType,
+    /// 解锁消息类型 — params: {"lock_type": "Photo"}
+    UnlockType,
+    /// 设置欢迎消息 — params: {"text": "..."}
+    SetWelcome,
+    /// 设置防刷屏阈值 — params: {"limit": N, "window": W}
+    SetFloodLimit,
+    /// 设置警告上限 — params: {"limit": N}
+    SetWarnLimit,
+    /// 设置警告超限动作 — params: {"action": "Ban|Kick|Mute"}
+    SetWarnAction,
 }
 
 /// 动作类型（嵌套枚举）
 ///
-/// 分为四类:
+/// 分为五类:
 /// - Message: 消息操作（发送/删除/置顶）
 /// - Admin: 管理操作（封禁/禁言/审批）
 /// - Query: 查询操作（不需要共识，任意节点可直接请求 Agent）
+/// - ConfigUpdate: 配置更新操作（通过命令修改 GroupConfig，需要共识）
 /// - NoAction: 无需动作
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActionType {
@@ -73,6 +132,8 @@ pub enum ActionType {
     Admin(AdminAction),
     /// 查询操作（不需要共识）
     Query(QueryAction),
+    /// 配置更新操作（需要共识）
+    ConfigUpdate(ConfigUpdateAction),
     /// 无需动作
     NoAction,
 }
@@ -148,7 +209,7 @@ pub enum GossipType {
 
 /// Gossip 载荷
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(tag = "payload_type")]
 pub enum GossipPayload {
     Seen(SeenPayload),
     Pull(PullPayload),
@@ -423,9 +484,10 @@ pub enum LockType {
 // ═══════════════════════════════════════════════════════════════
 
 /// 入群审批策略
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum JoinApprovalPolicy {
     /// 自动通过所有申请
+    #[default]
     AutoApprove,
     /// 需要人工审批
     ManualApproval,

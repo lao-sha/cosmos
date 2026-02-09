@@ -48,6 +48,7 @@ impl ChainClient {
                 let json_str = format!("{:?}", decoded);
                 debug!(raw = json_str, "Bot 原始数据");
 
+                warn!("fetch_bot 返回占位值 — SCALE 解码未实现，公钥为全零");
                 Ok(Some(BotInfoCache {
                     bot_id_hash: hex::encode(bot_id_hash),
                     owner_public_key: [0u8; 32], // TODO: 从 decoded 提取
@@ -70,10 +71,10 @@ impl ChainClient {
             Some(val) => {
                 // 原始 SCALE 编码的 bytes → 手动解码 Vec<[u8;32]>
                 let raw = val.encoded();
-                let mut node_ids = Vec::new();
+                let node_ids = Vec::new();
                 // SCALE: Vec prefix = compact length, then N * 32 bytes
                 // 简化: 仅记录日志，实际解码需要 codec
-                debug!(raw_len = raw.len(), "活跃节点列表原始数据");
+                warn!(raw_len = raw.len(), "fetch_active_node_list 返回空列表 — SCALE 解码未实现");
                 Ok(node_ids)
             }
             None => Ok(vec![]),
@@ -94,6 +95,7 @@ impl ChainClient {
                 let json_str = format!("{:?}", decoded);
                 debug!(raw = json_str, "Node 原始数据");
 
+                warn!("fetch_node 返回占位值 — SCALE 解码未实现");
                 Ok(Some(NodeInfoCache {
                     node_id: hex::encode(node_id),
                     endpoint: String::new(), // TODO: 从 decoded 提取
@@ -129,7 +131,7 @@ impl ChainClient {
             vec![Value::unnamed_composite(encoded)],
         );
 
-        let events = self.api.tx()
+        let _events = self.api.tx()
             .sign_and_submit_then_watch_default(&tx, &self.signer)
             .await?
             .wait_for_finalized_success()
@@ -231,6 +233,6 @@ fn action_type_name(idx: u8) -> &'static str {
         0 => "Ban", 1 => "Mute", 2 => "Unmute",
         3 => "DeleteMessage", 4 => "PinMessage",
         5 => "ApproveJoin", 6 => "DeclineJoin",
-        7 => "SendMessage", _ => "Ban",
+        7 => "SendMessage", _ => "Unknown",
     }
 }

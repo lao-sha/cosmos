@@ -46,7 +46,7 @@ pub mod pallet {
         <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
     /// 订单信息
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     #[scale_info(skip_type_params(MaxCidLen))]
     pub struct MallOrder<AccountId, Balance, BlockNumber, MaxCidLen: Get<u32>> {
         /// 订单 ID
@@ -102,7 +102,7 @@ pub mod pallet {
     >;
 
     /// 订单统计
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
     pub struct OrderStatistics<Balance: Default> {
         /// 总订单数
         pub total_orders: u64,
@@ -291,6 +291,10 @@ pub mod pallet {
         DigitalProductCannotRefund,
         /// 非服务类订单
         NotServiceOrder,
+        /// 支付金额无效（不能为 0）
+        InvalidAmount,
+        /// 超时队列已满
+        ExpiryQueueFull,
     }
 
     // ==================== Hooks ====================
@@ -299,10 +303,10 @@ pub mod pallet {
     impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
         /// 空闲时处理超时订单（基于 ExpiryQueue 精确索引）
         fn on_idle(now: BlockNumberFor<T>, remaining_weight: Weight) -> Weight {
-            // 每个订单处理约 50_000 weight（读 + 写 + escrow 操作）
-            let per_order_weight = Weight::from_parts(50_000, 0);
+            // 每个订单处理约 200M weight（读 + 写 + escrow + commission 操作）
+            let per_order_weight = Weight::from_parts(200_000_000, 8_000);
             // 至少能处理 1 个订单才值得进入
-            if remaining_weight.ref_time() < per_order_weight.ref_time().saturating_add(10_000) {
+            if remaining_weight.ref_time() < per_order_weight.ref_time().saturating_add(50_000_000) {
                 return Weight::zero();
             }
 
@@ -323,7 +327,7 @@ pub mod pallet {
         /// - `shipping_cid`: 收货地址 IPFS CID
         /// - `use_tokens`: 使用积分抵扣金额（可选）
         #[pallet::call_index(0)]
-        #[pallet::weight(Weight::from_parts(60_000, 0))]
+        #[pallet::weight(Weight::from_parts(350_000_000, 16_000))]
         pub fn place_order(
             origin: OriginFor<T>,
             product_id: u64,
@@ -369,6 +373,8 @@ pub mod pallet {
                     final_amount = final_amount.saturating_sub(discount);
                 }
             }
+            // C2: 积分抵扣后金额不能为零
+            ensure!(!final_amount.is_zero(), Error::<T>::InvalidAmount);
             
             let platform_fee = final_amount
                 .saturating_mul(T::PlatformFeeRate::get().into())
@@ -446,7 +452,9 @@ pub mod pallet {
                     // 服务类：等待卖家开始服务的超时（复用 ShipTimeout）
                     now.saturating_add(T::ShipTimeout::get())
                 };
-                let _ = ExpiryQueue::<T>::try_mutate(expiry_block, |ids| ids.try_push(order_id));
+                ExpiryQueue::<T>::try_mutate(expiry_block, |ids| {
+                    ids.try_push(order_id).map_err(|_| Error::<T>::ExpiryQueueFull)
+                })?;
             }
 
             OrderStats::<T>::mutate(|stats| {
@@ -474,7 +482,7 @@ pub mod pallet {
 
         /// 取消订单（数字商品不可取消）
         #[pallet::call_index(1)]
-        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        #[pallet::weight(Weight::from_parts(250_000_000, 12_000))]
         pub fn cancel_order(origin: OriginFor<T>, order_id: u64) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -487,8 +495,9 @@ pub mod pallet {
                 Error::<T>::DigitalProductCannotCancel
             );
             
+            // L1: place_order 直接设为 Paid，移除 Created 死分支
             ensure!(
-                order.status == MallOrderStatus::Created || order.status == MallOrderStatus::Paid,
+                order.status == MallOrderStatus::Paid,
                 Error::<T>::CannotCancelOrder
             );
 
@@ -497,6 +506,9 @@ pub mod pallet {
 
             // 恢复库存
             let _ = T::ProductProvider::restore_stock(order.product_id, order.quantity);
+
+            // C3: 通知佣金系统订单已取消
+            let _ = T::CommissionHandler::on_order_cancelled(order_id);
 
             Orders::<T>::mutate(order_id, |maybe_order| {
                 if let Some(o) = maybe_order {
@@ -510,7 +522,7 @@ pub mod pallet {
 
         /// 发货
         #[pallet::call_index(2)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(200_000_000, 8_000))]
         pub fn ship_order(
             origin: OriginFor<T>,
             order_id: u64,
@@ -534,7 +546,9 @@ pub mod pallet {
             // 写入过期检查队列：发货后 ConfirmTimeout 区块自动确认
             let now = <frame_system::Pallet<T>>::block_number();
             let expiry_block = now.saturating_add(T::ConfirmTimeout::get());
-            let _ = ExpiryQueue::<T>::try_mutate(expiry_block, |ids| ids.try_push(order_id));
+            ExpiryQueue::<T>::try_mutate(expiry_block, |ids| {
+                ids.try_push(order_id).map_err(|_| Error::<T>::ExpiryQueueFull)
+            })?;
 
             Self::deposit_event(Event::OrderShipped { order_id });
             Ok(())
@@ -542,7 +556,7 @@ pub mod pallet {
 
         /// 确认收货
         #[pallet::call_index(3)]
-        #[pallet::weight(Weight::from_parts(50_000, 0))]
+        #[pallet::weight(Weight::from_parts(300_000_000, 12_000))]
         pub fn confirm_receipt(origin: OriginFor<T>, order_id: u64) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -555,7 +569,7 @@ pub mod pallet {
 
         /// 申请退款（数字商品不可退款）
         #[pallet::call_index(4)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(150_000_000, 8_000))]
         pub fn request_refund(
             origin: OriginFor<T>,
             order_id: u64,
@@ -588,7 +602,7 @@ pub mod pallet {
 
         /// 同意退款（卖家）
         #[pallet::call_index(5)]
-        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        #[pallet::weight(Weight::from_parts(250_000_000, 12_000))]
         pub fn approve_refund(origin: OriginFor<T>, order_id: u64) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -601,6 +615,9 @@ pub mod pallet {
 
             // 恢复库存
             let _ = T::ProductProvider::restore_stock(order.product_id, order.quantity);
+
+            // C3: 通知佣金系统订单已取消
+            let _ = T::CommissionHandler::on_order_cancelled(order_id);
 
             Orders::<T>::mutate(order_id, |maybe_order| {
                 if let Some(o) = maybe_order {
@@ -617,7 +634,7 @@ pub mod pallet {
 
         /// 开始服务（卖家，服务类订单）
         #[pallet::call_index(6)]
-        #[pallet::weight(Weight::from_parts(20_000, 0))]
+        #[pallet::weight(Weight::from_parts(150_000_000, 8_000))]
         pub fn start_service(origin: OriginFor<T>, order_id: u64) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -638,7 +655,7 @@ pub mod pallet {
 
         /// 标记服务完成（卖家，服务类订单）
         #[pallet::call_index(7)]
-        #[pallet::weight(Weight::from_parts(20_000, 0))]
+        #[pallet::weight(Weight::from_parts(175_000_000, 8_000))]
         pub fn complete_service(origin: OriginFor<T>, order_id: u64) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -655,7 +672,9 @@ pub mod pallet {
             // 写入过期检查队列：服务完成后 ServiceConfirmTimeout 区块自动确认
             let now = <frame_system::Pallet<T>>::block_number();
             let expiry_block = now.saturating_add(T::ServiceConfirmTimeout::get());
-            let _ = ExpiryQueue::<T>::try_mutate(expiry_block, |ids| ids.try_push(order_id));
+            ExpiryQueue::<T>::try_mutate(expiry_block, |ids| {
+                ids.try_push(order_id).map_err(|_| Error::<T>::ExpiryQueueFull)
+            })?;
 
             Self::deposit_event(Event::ServiceCompleted { order_id });
             Ok(())
@@ -663,7 +682,7 @@ pub mod pallet {
 
         /// 确认服务完成（买家，服务类订单）
         #[pallet::call_index(8)]
-        #[pallet::weight(Weight::from_parts(50_000, 0))]
+        #[pallet::weight(Weight::from_parts(300_000_000, 12_000))]
         pub fn confirm_service(origin: OriginFor<T>, order_id: u64) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
@@ -765,6 +784,7 @@ pub mod pallet {
                                 // 实物商品：未发货 → 退款
                                 let _ = T::Escrow::refund_all(order_id, &order.buyer);
                                 let _ = T::ProductProvider::restore_stock(order.product_id, order.quantity);
+                                let _ = T::CommissionHandler::on_order_cancelled(order_id);
                                 Orders::<T>::mutate(order_id, |o| {
                                     if let Some(ord) = o {
                                         ord.status = MallOrderStatus::Refunded;
@@ -774,6 +794,8 @@ pub mod pallet {
                             } else if order.product_category == ProductCategory::Service {
                                 // 服务类商品：卖家未开始服务 → 退款
                                 let _ = T::Escrow::refund_all(order_id, &order.buyer);
+                                let _ = T::ProductProvider::restore_stock(order.product_id, order.quantity);
+                                let _ = T::CommissionHandler::on_order_cancelled(order_id);
                                 Orders::<T>::mutate(order_id, |o| {
                                     if let Some(ord) = o {
                                         ord.status = MallOrderStatus::Refunded;
@@ -796,10 +818,10 @@ pub mod pallet {
             // 清理已处理的队列条目
             ExpiryQueue::<T>::remove(now);
 
-            // 精确报告 weight：读队列 + 每个订单读写 + escrow 操作
+            // 精确报告 weight：读队列 + 每个订单读写 + escrow + commission 操作
             Weight::from_parts(
-                5_000u64.saturating_add(50_000u64.saturating_mul(reads as u64)),
-                0,
+                50_000_000u64.saturating_add(200_000_000u64.saturating_mul(processed as u64)),
+                4_000u64.saturating_add(8_000u64.saturating_mul(processed as u64)),
             )
         }
     }

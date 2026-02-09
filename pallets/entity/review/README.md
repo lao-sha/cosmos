@@ -6,37 +6,61 @@
 
 `pallet-entity-review` 是 Entity 商城系统的评价管理模块，负责订单完成后的评分提交和店铺评分更新。
 
+- **Runtime pallet_index:** 123
+- **版本:** 0.2.0-audit
+
 ### 核心功能
 
 - **订单评价** — 买家在订单完成后提交 1-5 星评分
-- **评价内容** — 支持通过 IPFS CID 关联评价详情
-- **店铺评分更新** — 评价提交后自动调用 `ShopProvider::update_shop_rating`
-- **一单一评** — 每个订单仅允许一次评价
+- **评价内容** — 支持通过 IPFS CID 关联评价详情（可选）
+- **店铺评分联动** — 评价提交后通过 `ShopProvider::update_shop_rating` 更新店铺评分（失败则事务回滚）
+- **一单一评** — 每个订单仅允许一次评价，以 `order_id` 为 key 存储
 
 ## 数据结构
 
 ### MallReview — 评价记录
 
 ```rust
-pub struct MallReview<AccountId, BlockNumber, MaxCidLen> {
-    pub order_id: u64,                              // 订单 ID
-    pub reviewer: AccountId,                        // 评价者
-    pub rating: u8,                                 // 评分（1-5）
-    pub content_cid: Option<BoundedVec<u8, MaxCidLen>>, // 评价内容 IPFS CID
-    pub created_at: BlockNumber,                    // 评价时间
+#[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+pub struct MallReview<AccountId, BlockNumber, MaxCidLen: Get<u32>> {
+    pub order_id: u64,                                  // 订单 ID
+    pub reviewer: AccountId,                            // 评价者账户
+    pub rating: u8,                                     // 评分（1-5）
+    pub content_cid: Option<BoundedVec<u8, MaxCidLen>>, // 评价内容 IPFS CID（可选）
+    pub created_at: BlockNumber,                        // 评价区块高度
 }
+```
+
+类型别名：
+
+```rust
+pub type MallReviewOf<T> = MallReview<
+    <T as frame_system::Config>::AccountId,
+    BlockNumberFor<T>,
+    <T as Config>::MaxCidLength,
+>;
 ```
 
 ## Runtime 配置
 
 ```rust
+// runtime/src/configs/mod.rs
 impl pallet_entity_review::Config for Runtime {
-    type RuntimeEvent = RuntimeEvent;
-    type OrderProvider = EntityTransaction;   // 订单查询接口
-    type ShopProvider = EntityShop;           // 店铺更新接口
-    type MaxCidLength = ConstU32<64>;         // CID 最大长度
+    type OrderProvider = EntityTransaction;   // 订单查询 — pallet-entity-transaction
+    type ShopProvider = EntityShop;           // 店铺评分更新 — pallet-entity-shop
+    type MaxCidLength = ConstU32<64>;         // CID 最大长度 64 字节
 }
 ```
+
+> **注意：** `RuntimeEvent` 已从 Config trait 中移除（polkadot-sdk #7229 自动追加）。
+
+### Config 关联类型
+
+| 类型 | 约束 | 说明 |
+|------|------|------|
+| `OrderProvider` | `OrderProvider<AccountId, u128>` | 订单查询接口 |
+| `ShopProvider` | `ShopProvider<AccountId>` | 店铺更新接口 |
+| `MaxCidLength` | `Get<u32>` (常量) | CID 最大长度 |
 
 ## Extrinsics
 
@@ -45,7 +69,9 @@ impl pallet_entity_review::Config for Runtime {
 提交订单评价。
 
 ```rust
-fn submit_review(
+#[pallet::call_index(0)]
+#[pallet::weight(Weight::from_parts(35_000_000, 5_000))]
+pub fn submit_review(
     origin: OriginFor<T>,
     order_id: u64,
     rating: u8,                    // 1-5 星
@@ -53,54 +79,96 @@ fn submit_review(
 ) -> DispatchResult
 ```
 
-**权限：** 仅订单买家
+**权限：** 仅订单买家（signed extrinsic）
 
-**前提条件：**
-1. 订单存在且已完成（`OrderProvider::is_order_completed`）
-2. 调用者是订单买家（`OrderProvider::order_buyer`）
-3. 该订单尚未评价
+**验证流程：**
+1. `rating` 在 1-5 范围内 → `InvalidRating`
+2. 获取订单买家并验证调用者身份 → `OrderNotFound` / `NotOrderBuyer`（`OrderProvider::order_buyer`）
+3. 订单已完成 → `OrderNotCompleted`（`OrderProvider::is_order_completed`）
+4. 该订单尚未评价 → `AlreadyReviewed`（`Reviews` 不含该 key）
+5. CID 长度校验 → `CidTooLong`（`BoundedVec::try_into`）
 
-**流程：**
-1. 验证评分范围 1-5
-2. 验证订单存在、已完成、调用者是买家
-3. 检查未重复评价
-4. 存储评价记录
-5. 递增全局评价计数
-6. 通过 `ShopProvider::update_shop_rating` 更新店铺评分
+**执行逻辑：**
+1. 构建 `MallReview` 记录（含当前区块号）
+2. 写入 `Reviews` 存储（key = `order_id`）
+3. `ReviewCount` 递增（`saturating_add`）
+4. 通过 `OrderProvider::order_shop_id` 获取店铺 ID，调用 `ShopProvider::update_shop_rating` 更新评分（失败传播错误，事务回滚）
+5. 发出 `ReviewSubmitted` 事件（含 `shop_id`）
 
 ## Storage
 
 | 存储项 | 类型 | 说明 |
 |--------|------|------|
-| `Reviews` | `StorageMap<u64, MallReview>` | 订单 ID → 评价记录 |
-| `ReviewCount` | `StorageValue<u64>` | 全局评价总数 |
+| `Reviews` | `StorageMap<Blake2_128Concat, u64, MallReviewOf<T>>` | 订单 ID → 评价记录 |
+| `ReviewCount` | `StorageValue<u64, ValueQuery>` | 全局评价总数（默认 0） |
+
+> **L1 备注：** 当前无用户→评价索引（仅 `order_id → review`），按用户查询需遍历或链下索引。
 
 ## Events
 
-| 事件 | 说明 | 字段 |
+| 事件 | 字段 | 说明 |
 |------|------|------|
-| `ReviewSubmitted` | 评价已提交 | `order_id`, `reviewer`, `rating` |
+| `ReviewSubmitted` | `order_id: u64`, `reviewer: AccountId`, `shop_id: Option<u64>`, `rating: u8` | 评价已提交 |
 
 ## Errors
 
 | 错误 | 说明 |
 |------|------|
 | `OrderNotFound` | 订单不存在 |
-| `NotOrderBuyer` | 不是订单买家 |
-| `OrderNotCompleted` | 订单未完成 |
-| `AlreadyReviewed` | 已评价过 |
-| `InvalidRating` | 无效评分（不在 1-5 范围） |
-| `CidTooLong` | CID 超过最大长度 |
+| `NotOrderBuyer` | 调用者不是订单买家 |
+| `OrderNotCompleted` | 订单尚未完成 |
+| `AlreadyReviewed` | 该订单已评价 |
+| `InvalidRating` | 评分不在 1-5 范围 |
+| `CidTooLong` | CID 超过 `MaxCidLength` 限制 |
 
 ## 依赖接口
 
-| Trait | 提供者 | 用途 |
-|-------|--------|------|
-| `OrderProvider` | `pallet-entity-transaction` | 验证订单状态和买家身份 |
-| `ShopProvider` | `pallet-entity-shop` | 更新店铺评分 |
+### OrderProvider（来自 pallet-entity-common）
+
+由 `pallet-entity-transaction` 实现。
+
+```rust
+pub trait OrderProvider<AccountId, Balance> {
+    fn order_exists(order_id: u64) -> bool;
+    fn order_buyer(order_id: u64) -> Option<AccountId>;
+    fn order_shop_id(order_id: u64) -> Option<u64>;
+    fn is_order_completed(order_id: u64) -> bool;
+}
+```
+
+### ShopProvider（来自 pallet-entity-common）
+
+由 `pallet-entity-shop` 实现，本模块使用 `update_shop_rating(shop_id, rating)` 方法。
+
+## 文件结构
+
+```
+pallets/entity/review/
+├── Cargo.toml
+├── README.md
+└── src/
+    ├── lib.rs      # 主模块（Config、Storage、Extrinsics、Events、Errors）
+    ├── mock.rs     # 测试 mock runtime
+    └── tests.rs    # 单元测试（24 tests）
+```
+
+## 审计记录 (v0.2.0)
+
+| 级别 | ID | 问题 | 修复 |
+|------|-----|------|------|
+| Critical | C1 | `MallReview` 缺少 `DecodeWithMemTracking` | 添加 derive |
+| Critical | C2 | `mock.rs` / `tests.rs` 不存在，零测试覆盖 | 创建 24 个测试 |
+| Critical | C3 | `submit_review` weight `proof_size=0` | 修复为 `(35_000_000, 5_000)` |
+| High | H1 | `update_shop_rating` 失败被 `let _ =` 静默忽略 | 改为传播错误 `?` |
+| High | H2 | `order_exists` 冗余调用（`order_buyer` 已隐含检查） | 移除 |
+| Medium | M1 | Cargo.toml 有未使用依赖（`log`/`sp-runtime`/`sp-std`） | 移除，dev-deps 加 `std` features |
+| Medium | M2 | `ReviewSubmitted` 事件缺少 `shop_id` | 添加 `shop_id: Option<u64>` |
+| Medium | M3 | Config 中 `RuntimeEvent` 已弃用 | 移除，使用 bound 语法 |
+| Low | L1 | 无用户→评价索引 | 文档标注，暂不实现 |
 
 ## 版本历史
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
-| v0.1.0 | 2026-01-31 | 从 pallet-mall 拆分 |
+| v0.2.0 | 2026-02-09 | 深度审计：C3/H2/M3/L1 共 9 项修复，24 测试 |
+| v0.1.0 | 2026-01-31 | 从 pallet-mall 拆分，独立评价模块 |

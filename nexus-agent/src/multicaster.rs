@@ -16,24 +16,26 @@ pub async fn multicast_to_nodes(
     state: &Arc<AppState>,
     message: &SignedMessage,
 ) -> anyhow::Result<MulticastResult> {
-    let nodes = state.nodes.read().await;
-
-    if nodes.is_empty() {
-        warn!("活跃节点列表为空，跳过多播");
-        return Ok(MulticastResult {
-            success_count: 0,
-            failure_count: 0,
-            timeout_count: 0,
-            details: vec![],
-        });
-    }
-
-    // 选择目标节点
-    let k = select_k(nodes.len());
-    let target_nodes = deterministic_select(&nodes, &message.message_hash, message.sequence, k);
+    // 提前释放读锁，避免在多播期间（最长 MULTICAST_TIMEOUT_MS）阻塞节点列表更新
+    let (k, target_nodes, total) = {
+        let nodes = state.nodes.read().await;
+        if nodes.is_empty() {
+            warn!("活跃节点列表为空，跳过多播");
+            return Ok(MulticastResult {
+                success_count: 0,
+                failure_count: 0,
+                timeout_count: 0,
+                details: vec![],
+            });
+        }
+        let k = select_k(nodes.len());
+        let targets = deterministic_select(&nodes, &message.message_hash, message.sequence, k);
+        let total = nodes.len();
+        (k, targets, total)
+    }; // RwLock 在此释放
 
     info!(
-        total_nodes = nodes.len(),
+        total_nodes = total,
         k,
         targets = ?target_nodes.iter().map(|n| &n.node_id).collect::<Vec<_>>(),
         "确定性选择 {} 个目标节点",
@@ -192,11 +194,11 @@ fn deterministic_select(
 ///
 /// 调用 TG API: setWebhook(url, secret_token)
 pub async fn register_telegram_webhook(
+    client: &reqwest::Client,
     bot_token: &str,
     webhook_url: &str,
     secret_token: &str,
 ) -> anyhow::Result<()> {
-    let client = reqwest::Client::new();
     let url = format!(
         "https://api.telegram.org/bot{}/setWebhook",
         bot_token

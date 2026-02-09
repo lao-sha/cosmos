@@ -5,7 +5,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 
 use crate::AppState;
 
@@ -14,8 +14,9 @@ use crate::AppState;
 // ═══════════════════════════════════════════════════════════════
 
 /// 入群审批策略
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum JoinApprovalPolicy {
+    #[default]
     AutoApprove,
     ManualApproval,
     CaptchaRequired,
@@ -97,19 +98,33 @@ pub enum LockType {
 /// 群配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupConfig {
+    #[serde(default)]
     pub version: u64,
+    #[serde(default)]
     pub bot_id_hash: String,
+    #[serde(default)]
     pub join_policy: JoinApprovalPolicy,
+    #[serde(default)]
     pub filter_links: bool,
+    #[serde(default)]
     pub restrict_mentions: bool,
+    #[serde(default)]
     pub rate_limit_per_minute: u16,
+    #[serde(default)]
     pub auto_mute_duration: u64,
+    #[serde(default)]
     pub new_member_restrict_duration: u64,
+    #[serde(default)]
     pub welcome_message: String,
+    #[serde(default)]
     pub whitelist: Vec<String>,
+    #[serde(default)]
     pub admins: Vec<String>,
+    #[serde(default)]
     pub quiet_hours_start: Option<u8>,
+    #[serde(default)]
     pub quiet_hours_end: Option<u8>,
+    #[serde(default)]
     pub updated_at: u64,
 
     // ═══ Bot 功能扩展字段 ═══
@@ -243,11 +258,24 @@ impl ConfigStore {
             .unwrap_or(0)
     }
 
-    pub fn set(&self, config: SignedGroupConfig) {
+    /// 设置群配置（CAS 版本检查，防止并发覆盖）
+    ///
+    /// `expected_version`: 调用方读取时的版本号，必须与当前版本匹配
+    pub fn set(&self, config: SignedGroupConfig, expected_version: u64) -> Result<(), String> {
+        let mut guard = self.current.write()
+            .unwrap_or_else(|e| e.into_inner());
+        let current_ver = guard.as_ref().map(|c| c.config.version).unwrap_or(0);
+        if current_ver != expected_version {
+            return Err(format!(
+                "版本冲突: 期望 {}, 当前 {} (可能被并发请求更新)",
+                expected_version, current_ver
+            ));
+        }
         if let Err(e) = self.persist_to_disk(&config) {
             warn!(error = %e, "群配置持久化失败");
         }
-        *self.current.write().unwrap() = Some(config);
+        *guard = Some(config);
+        Ok(())
     }
 
     fn persist_to_disk(&self, config: &SignedGroupConfig) -> Result<(), String> {
@@ -256,8 +284,15 @@ impl ConfigStore {
             .map_err(|e| format!("Create dir failed: {}", e))?;
         let json = serde_json::to_string_pretty(config)
             .map_err(|e| format!("Serialize failed: {}", e))?;
-        std::fs::write(&path, json)
-            .map_err(|e| format!("Write failed: {}", e))?;
+        atomicwrites::AtomicFile::new(
+            &path,
+            atomicwrites::OverwriteBehavior::AllowOverwrite,
+        )
+        .write(|f| {
+            use std::io::Write;
+            f.write_all(json.as_bytes())
+        })
+        .map_err(|e| format!("Atomic write failed: {}", e))?;
         Ok(())
     }
 
@@ -366,8 +401,17 @@ pub async fn handle_update_config(
         welcome_message: req.welcome_message.unwrap_or(base.welcome_message),
         whitelist: req.whitelist.unwrap_or(base.whitelist),
         admins: req.admins.unwrap_or(base.admins),
-        quiet_hours_start: req.quiet_hours_start.or(base.quiet_hours_start),
-        quiet_hours_end: req.quiet_hours_end.or(base.quiet_hours_end),
+        // quiet_hours: 值 255 表示清除，None 表示保持原值
+        quiet_hours_start: match req.quiet_hours_start {
+            Some(255) => None,
+            Some(v) => Some(v),
+            None => base.quiet_hours_start,
+        },
+        quiet_hours_end: match req.quiet_hours_end {
+            Some(255) => None,
+            Some(v) => Some(v),
+            None => base.quiet_hours_end,
+        },
         updated_at: now,
         antiflood_limit: req.antiflood_limit.unwrap_or(base.antiflood_limit),
         antiflood_window: req.antiflood_window.unwrap_or(base.antiflood_window),
@@ -402,8 +446,15 @@ pub async fn handle_update_config(
         signer_public_key: state.key_manager.public_key_hex(),
     };
 
-    // 4. 存储
-    state.config_store.set(signed_config.clone());
+    // 4. 存储 (CAS: 检查版本未被并发修改)
+    if let Err(e) = state.config_store.set(signed_config.clone(), current_version) {
+        warn!(error = %e, "群配置存储失败");
+        return (StatusCode::CONFLICT, Json(UpdateGroupConfigResponse {
+            success: false,
+            version: 0,
+            error: Some(e),
+        }));
+    }
     info!(version = new_version, "群配置已更新 v{}", new_version);
 
     // 5. 异步广播到所有 Node
@@ -474,7 +525,7 @@ fn verify_config_auth(
 }
 
 /// 广播配置到所有 Node
-async fn broadcast_config_to_nodes(
+pub async fn broadcast_config_to_nodes(
     state: &Arc<AppState>,
     bot_id_hash: &str,
     signed_config: SignedGroupConfig,
@@ -502,7 +553,7 @@ async fn broadcast_config_to_nodes(
     let mut failure = 0;
 
     for node in nodes.iter() {
-        let url = format!("{}/v1/gossip", node.endpoint);
+        let url = format!("{}/v1/message", node.endpoint);
         match state.http_client.post(&url)
             .json(&payload)
             .timeout(std::time::Duration::from_secs(5))
@@ -530,4 +581,210 @@ async fn broadcast_config_to_nodes(
         total = nodes.len(),
         "ConfigSync 广播完成"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_signed_config(version: u64) -> SignedGroupConfig {
+        SignedGroupConfig {
+            config: GroupConfig {
+                version,
+                bot_id_hash: "test_bot".into(),
+                join_policy: JoinApprovalPolicy::AutoApprove,
+                filter_links: false,
+                restrict_mentions: false,
+                rate_limit_per_minute: 0,
+                auto_mute_duration: 300,
+                new_member_restrict_duration: 0,
+                welcome_message: String::new(),
+                whitelist: vec![],
+                admins: vec![],
+                quiet_hours_start: None,
+                quiet_hours_end: None,
+                updated_at: 0,
+                antiflood_limit: 0,
+                antiflood_window: 10,
+                antiflood_action: FloodAction::default(),
+                warn_limit: 3,
+                warn_action: WarnAction::default(),
+                blacklist_words: vec![],
+                blacklist_mode: BlacklistMode::default(),
+                blacklist_action: BlacklistAction::default(),
+                lock_types: vec![],
+                spam_detection_enabled: false,
+                spam_max_emoji: 0,
+                spam_first_messages_only: 0,
+            },
+            signature: "sig".into(),
+            signer_public_key: "pk".into(),
+        }
+    }
+
+    // ═══════════════════════════════════════════
+    // ConfigStore 基础操作
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn test_config_store_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(dir.path().to_str().unwrap());
+        assert!(store.get().is_none());
+        assert_eq!(store.get_version(), 0);
+    }
+
+    #[test]
+    fn test_config_store_set_and_get() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(dir.path().to_str().unwrap());
+
+        let config = make_signed_config(1);
+        store.set(config.clone(), 0).unwrap();
+
+        let got = store.get().unwrap();
+        assert_eq!(got.config.version, 1);
+        assert_eq!(store.get_version(), 1);
+    }
+
+    #[test]
+    fn test_config_store_persistence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap();
+
+        {
+            let store = ConfigStore::new(path);
+            store.set(make_signed_config(5), 0).unwrap();
+        }
+
+        // 重新加载
+        let store2 = ConfigStore::new(path);
+        assert_eq!(store2.get_version(), 5, "应从磁盘恢复版本号");
+    }
+
+    // ═══════════════════════════════════════════
+    // CAS (Compare-And-Swap) 版本检查
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn test_cas_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(dir.path().to_str().unwrap());
+
+        // v0 → v1
+        store.set(make_signed_config(1), 0).unwrap();
+        assert_eq!(store.get_version(), 1);
+
+        // v1 → v2
+        store.set(make_signed_config(2), 1).unwrap();
+        assert_eq!(store.get_version(), 2);
+    }
+
+    #[test]
+    fn test_cas_version_conflict() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(dir.path().to_str().unwrap());
+
+        store.set(make_signed_config(1), 0).unwrap();
+
+        // 试图用 expected_version=0 再次写入 → 冲突
+        let result = store.set(make_signed_config(2), 0);
+        assert!(result.is_err(), "版本冲突应返回错误");
+        assert!(result.unwrap_err().contains("版本冲突"));
+
+        // 原值应保持不变
+        assert_eq!(store.get_version(), 1);
+    }
+
+    #[test]
+    fn test_cas_stale_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ConfigStore::new(dir.path().to_str().unwrap());
+
+        store.set(make_signed_config(1), 0).unwrap();
+        store.set(make_signed_config(2), 1).unwrap();
+
+        // 试图用过期的 expected_version=1 写入
+        let result = store.set(make_signed_config(3), 1);
+        assert!(result.is_err());
+        assert_eq!(store.get_version(), 2, "CAS 失败不应修改数据");
+    }
+
+    // ═══════════════════════════════════════════
+    // GroupConfig 序列化
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn test_group_config_serde_roundtrip() {
+        let config = make_signed_config(42);
+        let json = serde_json::to_string(&config).unwrap();
+        let back: SignedGroupConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.config.version, 42);
+        assert_eq!(back.config.bot_id_hash, "test_bot");
+        assert_eq!(back.signature, "sig");
+    }
+
+    #[test]
+    fn test_group_config_defaults() {
+        // 最小 JSON — 所有字段都有 serde(default)，应全部成功
+        let json = r#"{}"#;
+        let config: GroupConfig = serde_json::from_str(json).unwrap();
+        // 基础字段默认值
+        assert_eq!(config.version, 0);
+        assert!(config.bot_id_hash.is_empty());
+        assert!(matches!(config.join_policy, JoinApprovalPolicy::AutoApprove));
+        assert!(!config.filter_links);
+        assert!(config.quiet_hours_start.is_none());
+        // Bot 扩展字段默认值
+        assert_eq!(config.antiflood_window, 10, "default_antiflood_window");
+        assert_eq!(config.warn_limit, 3, "default_warn_limit");
+        assert_eq!(config.antiflood_limit, 0);
+        assert!(!config.spam_detection_enabled);
+        assert!(config.blacklist_words.is_empty());
+        assert!(config.lock_types.is_empty());
+    }
+
+    // ═══════════════════════════════════════════
+    // quiet_hours sentinel 清除
+    // ═══════════════════════════════════════════
+
+    #[test]
+    fn test_quiet_hours_clear_sentinel() {
+        // 模拟 quiet_hours 合并逻辑中 255 清除行为
+        let req_start: Option<u8> = Some(255);
+        let base_start: Option<u8> = Some(22);
+
+        let result = match req_start {
+            Some(255) => None,
+            Some(v) => Some(v),
+            None => base_start,
+        };
+        assert!(result.is_none(), "255 应清除 quiet_hours");
+    }
+
+    #[test]
+    fn test_quiet_hours_preserve() {
+        let req_start: Option<u8> = None;
+        let base_start: Option<u8> = Some(22);
+
+        let result = match req_start {
+            Some(255) => None,
+            Some(v) => Some(v),
+            None => base_start,
+        };
+        assert_eq!(result, Some(22), "None 应保留原值");
+    }
+
+    #[test]
+    fn test_quiet_hours_set_new() {
+        let req_start: Option<u8> = Some(8);
+        let base_start: Option<u8> = Some(22);
+
+        let result = match req_start {
+            Some(255) => None,
+            Some(v) => Some(v),
+            None => base_start,
+        };
+        assert_eq!(result, Some(8), "新值应覆盖");
+    }
 }

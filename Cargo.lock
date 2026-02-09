@@ -6653,7 +6653,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-entity-governance"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -6740,11 +6740,10 @@ dependencies = [
 
 [[package]]
 name = "pallet-entity-review"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "frame-support",
  "frame-system",
- "log",
  "pallet-balances",
  "pallet-entity-common",
  "parity-scale-codec",
@@ -6752,7 +6751,6 @@ dependencies = [
  "sp-core",
  "sp-io",
  "sp-runtime",
- "sp-std",
 ]
 
 [[package]]
@@ -6812,6 +6810,7 @@ version = "0.1.0"
 dependencies = [
  "frame-support",
  "frame-system",
+ "pallet-balances",
  "pallet-entity-common",
  "parity-scale-codec",
  "scale-info",

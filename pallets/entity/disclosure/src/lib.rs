@@ -106,7 +106,7 @@ pub mod pallet {
     }
 
     /// 披露记录
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     #[scale_info(skip_type_params(MaxCidLen))]
     pub struct DisclosureRecord<AccountId, BlockNumber, MaxCidLen: Get<u32>> {
         /// 披露 ID
@@ -127,9 +127,9 @@ pub mod pallet {
         pub status: DisclosureStatus,
         /// 关联的前一个披露 ID（用于更正）
         pub previous_id: Option<u64>,
-        /// 验证者（如有）
+        /// 验证者 — 预留字段，待后续版本实现验证流程
         pub verifier: Option<AccountId>,
-        /// 验证时间
+        /// 验证时间 — 预留字段
         pub verified_at: Option<BlockNumber>,
     }
 
@@ -141,13 +141,13 @@ pub mod pallet {
     >;
 
     /// 实体披露配置
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug, Default)]
     pub struct DisclosureConfig<BlockNumber> {
         /// 披露级别
         pub level: DisclosureLevel,
         /// 是否启用内幕交易控制
         pub insider_trading_control: bool,
-        /// 披露前黑窗口期（区块数）
+        /// 披露前黑窗口期（区块数）— 预留，当前仅 blackout_period_after 生效
         pub blackout_period_before: BlockNumber,
         /// 披露后黑窗口期（区块数）
         pub blackout_period_after: BlockNumber,
@@ -155,7 +155,7 @@ pub mod pallet {
         pub next_required_disclosure: BlockNumber,
         /// 上次披露时间
         pub last_disclosure: BlockNumber,
-        /// 连续违规次数
+        /// 连续违规次数 — 预留，当前未自动递增（需外部 hook 或 off-chain 触发）
         pub violation_count: u32,
     }
 
@@ -163,7 +163,7 @@ pub mod pallet {
     pub type DisclosureConfigOf<T> = DisclosureConfig<BlockNumberFor<T>>;
 
     /// 内幕人员记录
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     pub struct InsiderRecord<AccountId, BlockNumber> {
         /// 内幕人员账户
         pub account: AccountId,
@@ -231,7 +231,7 @@ pub mod pallet {
         #[pallet::constant]
         type EnhancedDisclosureInterval: Get<BlockNumberFor<Self>>;
 
-        /// 大股东阈值（基点，如 500 = 5%）
+        /// 大股东阈值（基点，如 500 = 5%）— 预留，供外部模块判断 MajorHolder 角色
         #[pallet::constant]
         type MajorHolderThreshold: Get<u16>;
     }
@@ -347,7 +347,7 @@ pub mod pallet {
         BlackoutEnded {
             entity_id: u64,
         },
-        /// 披露违规
+        /// 披露违规 — 预留事件，当前未自动发出（需 off-chain worker 或外部 hook 检测违规后调用）
         DisclosureViolation {
             entity_id: u64,
             violation_type: ViolationType,
@@ -385,13 +385,13 @@ pub mod pallet {
         InsiderNotFound,
         /// 内幕人员列表已满
         InsidersFull,
-        /// 黑窗口期内禁止交易
+        /// 黑窗口期内禁止交易 — 预留，供外部模块调用 can_insider_trade 后自行使用
         InBlackoutPeriod,
         /// 无效的披露状态
         InvalidDisclosureStatus,
-        /// 披露级别不满足要求
+        /// 披露级别不满足要求 — 预留，供外部模块按级别限制操作
         InsufficientDisclosureLevel,
-        /// 披露间隔未到
+        /// 披露间隔未到 — 预留，供外部模块检查披露频率
         DisclosureIntervalNotReached,
     }
 
@@ -401,7 +401,7 @@ pub mod pallet {
     impl<T: Config> Pallet<T> {
         /// 配置实体披露设置
         #[pallet::call_index(0)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(25_000_000, 3_000))]
         pub fn configure_disclosure(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -438,7 +438,7 @@ pub mod pallet {
 
         /// 发布披露
         #[pallet::call_index(1)]
-        #[pallet::weight(Weight::from_parts(50_000, 0))]
+        #[pallet::weight(Weight::from_parts(50_000_000, 6_000))]
         pub fn publish_disclosure(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -485,26 +485,24 @@ pub mod pallet {
                 Ok(())
             })?;
 
-            // 更新配置
+            // H4: 更新配置并检查黑窗口期（合并为单次读写）
             DisclosureConfigs::<T>::mutate(entity_id, |maybe_config| {
                 if let Some(config) = maybe_config {
                     config.last_disclosure = now;
                     config.next_required_disclosure = Self::calculate_next_disclosure(config.level, now);
+
+                    // 如果启用内幕交易控制，开始黑窗口期
+                    if config.insider_trading_control && !config.blackout_period_after.is_zero() {
+                        let end_block = now.saturating_add(config.blackout_period_after);
+                        BlackoutPeriods::<T>::insert(entity_id, (now, end_block));
+                        Self::deposit_event(Event::BlackoutStarted {
+                            entity_id,
+                            start_block: now,
+                            end_block,
+                        });
+                    }
                 }
             });
-
-            // 如果启用内幕交易控制，开始黑窗口期
-            if let Some(config) = DisclosureConfigs::<T>::get(entity_id) {
-                if config.insider_trading_control && !config.blackout_period_after.is_zero() {
-                    let end_block = now.saturating_add(config.blackout_period_after);
-                    BlackoutPeriods::<T>::insert(entity_id, (now, end_block));
-                    Self::deposit_event(Event::BlackoutStarted {
-                        entity_id,
-                        start_block: now,
-                        end_block,
-                    });
-                }
-            }
 
             Self::deposit_event(Event::DisclosurePublished {
                 disclosure_id,
@@ -517,7 +515,7 @@ pub mod pallet {
 
         /// 撤回披露
         #[pallet::call_index(2)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(25_000_000, 4_000))]
         pub fn withdraw_disclosure(
             origin: OriginFor<T>,
             disclosure_id: u64,
@@ -547,7 +545,7 @@ pub mod pallet {
 
         /// 更正披露（发布新版本）
         #[pallet::call_index(3)]
-        #[pallet::weight(Weight::from_parts(50_000, 0))]
+        #[pallet::weight(Weight::from_parts(50_000_000, 6_000))]
         pub fn correct_disclosure(
             origin: OriginFor<T>,
             old_disclosure_id: u64,
@@ -559,6 +557,9 @@ pub mod pallet {
             let old_record = Disclosures::<T>::get(old_disclosure_id)
                 .ok_or(Error::<T>::DisclosureNotFound)?;
             
+            // H2: 只能更正 Published 状态的记录
+            ensure!(old_record.status == DisclosureStatus::Published, Error::<T>::InvalidDisclosureStatus);
+
             // 验证权限
             let owner = T::EntityProvider::entity_owner(old_record.entity_id)
                 .ok_or(Error::<T>::EntityNotFound)?;
@@ -615,7 +616,7 @@ pub mod pallet {
 
         /// 添加内幕人员
         #[pallet::call_index(4)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(25_000_000, 3_000))]
         pub fn add_insider(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -630,20 +631,26 @@ pub mod pallet {
             let now = <frame_system::Pallet<T>>::block_number();
 
             Insiders::<T>::try_mutate(entity_id, |insiders| -> DispatchResult {
-                // 检查是否已存在
+                // 检查是否已活跃
                 ensure!(
                     !insiders.iter().any(|i| i.account == account && i.active),
                     Error::<T>::InsiderExists
                 );
 
-                let record = InsiderRecord {
-                    account: account.clone(),
-                    role,
-                    added_at: now,
-                    active: true,
-                };
-
-                insiders.try_push(record).map_err(|_| Error::<T>::InsidersFull)?;
+                // H3: 尝试重新激活已存在的非活跃记录
+                if let Some(existing) = insiders.iter_mut().find(|i| i.account == account && !i.active) {
+                    existing.role = role;
+                    existing.added_at = now;
+                    existing.active = true;
+                } else {
+                    let record = InsiderRecord {
+                        account: account.clone(),
+                        role,
+                        added_at: now,
+                        active: true,
+                    };
+                    insiders.try_push(record).map_err(|_| Error::<T>::InsidersFull)?;
+                }
                 Ok(())
             })?;
 
@@ -657,7 +664,7 @@ pub mod pallet {
 
         /// 移除内幕人员
         #[pallet::call_index(5)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(25_000_000, 3_000))]
         pub fn remove_insider(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -684,7 +691,7 @@ pub mod pallet {
 
         /// 手动开始黑窗口期
         #[pallet::call_index(6)]
-        #[pallet::weight(Weight::from_parts(20_000, 0))]
+        #[pallet::weight(Weight::from_parts(20_000_000, 2_000))]
         pub fn start_blackout(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -710,7 +717,7 @@ pub mod pallet {
 
         /// 结束黑窗口期
         #[pallet::call_index(7)]
-        #[pallet::weight(Weight::from_parts(20_000, 0))]
+        #[pallet::weight(Weight::from_parts(20_000_000, 2_000))]
         pub fn end_blackout(
             origin: OriginFor<T>,
             entity_id: u64,

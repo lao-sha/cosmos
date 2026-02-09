@@ -55,9 +55,9 @@ pub mod pallet {
     pub type ProposalId = u64;
 
     /// 提案状态
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     pub enum ProposalStatus {
-        /// 已创建，等待投票
+        /// 已创建，等待投票（保留，当前提案直接进入 Voting）
         Created,
         /// 投票中
         Voting,
@@ -246,7 +246,7 @@ pub mod pallet {
     }
 
     /// 提案
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     #[scale_info(skip_type_params(T))]
     pub struct Proposal<T: Config> {
         /// 提案 ID
@@ -282,7 +282,7 @@ pub mod pallet {
     }
 
     /// 投票记录
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     pub struct VoteRecord<AccountId, Balance, BlockNumber> {
         /// 投票者
         pub voter: AccountId,
@@ -324,7 +324,7 @@ pub mod pallet {
     }
 
     /// 治理配置
-    #[derive(Encode, Decode, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
+    #[derive(Encode, Decode, codec::DecodeWithMemTracking, Clone, PartialEq, Eq, TypeInfo, MaxEncodedLen, RuntimeDebug)]
     #[scale_info(skip_type_params(MaxCommitteeSize))]
     pub struct GovernanceConfig<AccountId, Balance, BlockNumber, MaxCommitteeSize: Get<u32>> {
         /// 治理模式
@@ -349,12 +349,10 @@ pub mod pallet {
         pub admin_veto_enabled: bool,
         /// 需要具有投票权的 TokenType
         pub required_token_type: Option<TokenType>,
-        /// 委员会成员（Committee 模式）
-        pub committee: BoundedVec<AccountId, MaxCommitteeSize>,
         /// 最小委员会批准数
         pub min_committee_approval: u8,
         /// _phantom
-        _phantom: core::marker::PhantomData<Balance>,
+        _phantom: core::marker::PhantomData<(AccountId, AccountId, Balance, MaxCommitteeSize)>,
     }
 
     impl<AccountId, Balance, BlockNumber: Default, MaxCommitteeSize: Get<u32>> Default 
@@ -373,7 +371,6 @@ pub mod pallet {
                 proposal_threshold: 100, // 1%
                 admin_veto_enabled: true,
                 required_token_type: None,
-                committee: BoundedVec::default(),
                 min_committee_approval: 1,
                 _phantom: core::marker::PhantomData,
             }
@@ -391,10 +388,7 @@ pub mod pallet {
     // ==================== 配置 ====================
 
     #[pallet::config]
-    pub trait Config: frame_system::Config {
-        /// 运行时事件类型
-        type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
-
+    pub trait Config: frame_system::Config<RuntimeEvent: From<Event<Self>>> {
         /// 余额类型
         type Balance: Member
             + Parameter
@@ -457,18 +451,6 @@ pub mod pallet {
         /// 委员会最大成员数
         #[pallet::constant]
         type MaxCommitteeSize: Get<u32>;
-    }
-
-    /// 代币余额查询 trait (向后兼容别名)
-    pub trait GovernanceTokenProvider<AccountId, Balance> {
-        /// 获取用户在实体的代币余额
-        fn token_balance(entity_id: u64, holder: &AccountId) -> Balance;
-        /// 获取实体代币总供应量
-        fn total_supply(entity_id: u64) -> Balance;
-        /// 检查店铺代币是否启用
-        fn is_enabled(shop_id: u64) -> bool;
-        /// Phase 8: 获取代币类型
-        fn get_token_type(shop_id: u64) -> TokenType;
     }
 
     #[pallet::pallet]
@@ -552,6 +534,8 @@ pub mod pallet {
     >;
 
     /// 委员会成员 (entity_id) -> Vec<AccountId>
+    /// L1 注意: 委员会投票模式尚未在 vote/finalize_voting 中实现，
+    /// 当前仅用于存储成员列表，待后续版本集成
     #[pallet::storage]
     #[pallet::getter(fn committee_members)]
     pub type CommitteeMembers<T: Config> = StorageMap<
@@ -678,6 +662,8 @@ pub mod pallet {
         NoVetoRight,
         /// TokenType 不具有投票权
         TokenTypeNoVotingPower,
+        /// 参数无效
+        InvalidParameter,
     }
 
     // ==================== Extrinsics ====================
@@ -692,7 +678,7 @@ pub mod pallet {
         /// - `title`: 提案标题
         /// - `description_cid`: 提案描述 CID（可选）
         #[pallet::call_index(0)]
-        #[pallet::weight(Weight::from_parts(50_000, 0))]
+        #[pallet::weight(Weight::from_parts(50_000_000, 6_000))]
         pub fn create_proposal(
             origin: OriginFor<T>,
             shop_id: u64,
@@ -704,6 +690,17 @@ pub mod pallet {
 
             // 验证店铺存在
             ensure!(T::ShopProvider::shop_exists(shop_id), Error::<T>::ShopNotFound);
+
+            // H1: 检查治理模式，None 模式不允许创建提案
+            let entity_id = T::ShopProvider::shop_entity_id(shop_id).unwrap_or(shop_id);
+            let gov_config = GovernanceConfigs::<T>::get(entity_id);
+            if let Some(ref cfg) = gov_config {
+                ensure!(cfg.mode != GovernanceMode::None, Error::<T>::GovernanceModeNotAllowed);
+            }
+            // 无配置时允许（向后兼容，使用全局默认参数）
+
+            // H2: 验证提案参数有效性
+            Self::validate_proposal_type(&proposal_type)?;
 
             // 验证代币已启用
             ensure!(T::TokenProvider::is_token_enabled(shop_id), Error::<T>::TokenNotEnabled);
@@ -775,7 +772,7 @@ pub mod pallet {
         /// - `proposal_id`: 提案 ID
         /// - `vote`: 投票类型
         #[pallet::call_index(1)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(40_000_000, 5_000))]
         pub fn vote(
             origin: OriginFor<T>,
             proposal_id: ProposalId,
@@ -804,25 +801,24 @@ pub mod pallet {
             let token_type = T::TokenProvider::get_token_type(proposal.shop_id);
             ensure!(token_type.has_voting_power(), Error::<T>::TokenTypeNoVotingPower);
 
-            // P1 安全修复: 使用快照机制防止闪电贷攻击
-            // 检查用户是否在提案创建前就持有代币
-            if let Some(first_hold) = FirstHoldTime::<T>::get(proposal.shop_id, &who) {
-                ensure!(first_hold <= proposal.snapshot_block, Error::<T>::NoVotingPower);
-            } else {
-                // 用户没有持币记录，无投票权
-                return Err(Error::<T>::NoVotingPower.into());
-            }
-
-            // 获取投票权重（使用快照或当前余额的较小值）
+            // H1 修复: 获取当前投票权重
             let current_balance = Self::calculate_voting_power(proposal.shop_id, &who);
-            let snapshot_balance = VotingPowerSnapshot::<T>::get(proposal_id, &who)
-                .unwrap_or(current_balance);
-            let weight = current_balance.min(snapshot_balance);
-            ensure!(!weight.is_zero(), Error::<T>::NoVotingPower);
-            
-            // 保存快照（首次投票时锁定）
-            if !VotingPowerSnapshot::<T>::contains_key(proposal_id, &who) {
+            ensure!(!current_balance.is_zero(), Error::<T>::NoVotingPower);
+
+            // P1 安全: 使用快照机制防止闪电贷（首次投票时锁定权重）
+            let weight = if let Some(snapshot) = VotingPowerSnapshot::<T>::get(proposal_id, &who) {
+                // 已有快照，取快照与当前余额的较小值
+                current_balance.min(snapshot)
+            } else {
+                // 首次投票，保存快照
                 VotingPowerSnapshot::<T>::insert(proposal_id, &who, current_balance);
+                current_balance
+            };
+            ensure!(!weight.is_zero(), Error::<T>::NoVotingPower);
+
+            // 懒写入 FirstHoldTime（便于未来时间加权）
+            if !FirstHoldTime::<T>::contains_key(proposal.shop_id, &who) {
+                FirstHoldTime::<T>::insert(proposal.shop_id, &who, now);
             }
 
             // 记录投票
@@ -856,7 +852,7 @@ pub mod pallet {
         ///
         /// 任何人都可以调用（投票期结束后）
         #[pallet::call_index(2)]
-        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        #[pallet::weight(Weight::from_parts(35_000_000, 5_000))]
         pub fn finalize_voting(
             origin: OriginFor<T>,
             proposal_id: ProposalId,
@@ -874,6 +870,8 @@ pub mod pallet {
             ensure!(now > proposal.voting_end, Error::<T>::VotingNotEnded);
 
             // 计算结果
+            // L2 注意: 使用当前 total_supply 而非快照时的供应量，
+            // 如果在投票期间有增发/销毁，法定人数计算可能偏差
             let total_votes = proposal.yes_votes
                 .saturating_add(proposal.no_votes)
                 .saturating_add(proposal.abstain_votes);
@@ -900,6 +898,8 @@ pub mod pallet {
             if proposal.yes_votes > pass_threshold {
                 proposal.status = ProposalStatus::Passed;
                 proposal.execution_time = Some(now.saturating_add(T::ExecutionDelay::get()));
+                // H5 修复: 通过的提案也从活跃列表移除，不阻塞新提案
+                Self::remove_from_active(proposal_id, proposal.shop_id);
                 Proposals::<T>::insert(proposal_id, proposal);
                 Self::deposit_event(Event::ProposalPassed { proposal_id });
             } else {
@@ -916,7 +916,7 @@ pub mod pallet {
         ///
         /// 任何人都可以调用（执行时间到达后）
         #[pallet::call_index(3)]
-        #[pallet::weight(Weight::from_parts(80_000, 0))]
+        #[pallet::weight(Weight::from_parts(80_000_000, 10_000))]
         pub fn execute_proposal(
             origin: OriginFor<T>,
             proposal_id: ProposalId,
@@ -939,9 +939,7 @@ pub mod pallet {
 
             // 更新状态
             proposal.status = ProposalStatus::Executed;
-            let shop_id = proposal.shop_id;
             Proposals::<T>::insert(proposal_id, proposal);
-            Self::remove_from_active(proposal_id, shop_id);
 
             Self::deposit_event(Event::ProposalExecuted { proposal_id });
 
@@ -952,7 +950,7 @@ pub mod pallet {
         ///
         /// 提案者或店主可以取消
         #[pallet::call_index(4)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(30_000_000, 4_000))]
         pub fn cancel_proposal(
             origin: OriginFor<T>,
             proposal_id: ProposalId,
@@ -990,7 +988,7 @@ pub mod pallet {
 
         /// 配置实体治理
         #[pallet::call_index(5)]
-        #[pallet::weight(Weight::from_parts(40_000, 0))]
+        #[pallet::weight(Weight::from_parts(25_000_000, 3_000))]
         pub fn configure_governance(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -1002,9 +1000,17 @@ pub mod pallet {
         ) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
-            // 验证所有者
-            let owner = T::ShopProvider::shop_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
+            // H2 修复: 用 EntityProvider 验证实体所有者
+            let owner = T::EntityProvider::entity_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
             ensure!(owner == who, Error::<T>::NotShopOwner);
+
+            // H4: 参数验证
+            if let Some(q) = quorum_threshold {
+                ensure!(q <= 100, Error::<T>::InvalidParameter);
+            }
+            if let Some(t) = proposal_threshold {
+                ensure!(t <= 10000, Error::<T>::InvalidParameter);
+            }
 
             GovernanceConfigs::<T>::mutate(entity_id, |maybe_config| {
                 let config = maybe_config.get_or_insert_with(GovernanceConfigOf::<T>::default);
@@ -1034,7 +1040,7 @@ pub mod pallet {
 
         /// 设置分层治理阈值
         #[pallet::call_index(6)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(25_000_000, 3_000))]
         pub fn set_tiered_thresholds(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -1047,6 +1053,12 @@ pub mod pallet {
 
             let owner = T::EntityProvider::entity_owner(entity_id).ok_or(Error::<T>::ShopNotFound)?;
             ensure!(owner == who, Error::<T>::NotShopOwner);
+
+            // H4: 阈值验证（百分比不超过 100）
+            ensure!(operational <= 100, Error::<T>::InvalidParameter);
+            ensure!(significant <= 100, Error::<T>::InvalidParameter);
+            ensure!(critical <= 100, Error::<T>::InvalidParameter);
+            ensure!(constitutional <= 100, Error::<T>::InvalidParameter);
 
             GovernanceConfigs::<T>::mutate(entity_id, |maybe_config| {
                 let config = maybe_config.get_or_insert_with(GovernanceConfigOf::<T>::default);
@@ -1067,7 +1079,7 @@ pub mod pallet {
 
         /// 添加委员会成员
         #[pallet::call_index(7)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(25_000_000, 3_000))]
         pub fn add_committee_member(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -1093,7 +1105,7 @@ pub mod pallet {
 
         /// 移除委员会成员
         #[pallet::call_index(8)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(25_000_000, 3_000))]
         pub fn remove_committee_member(
             origin: OriginFor<T>,
             entity_id: u64,
@@ -1120,7 +1132,7 @@ pub mod pallet {
 
         /// 管理员否决提案（DualTrack 模式）
         #[pallet::call_index(9)]
-        #[pallet::weight(Weight::from_parts(30_000, 0))]
+        #[pallet::weight(Weight::from_parts(35_000_000, 5_000))]
         pub fn veto_proposal(
             origin: OriginFor<T>,
             proposal_id: ProposalId,
@@ -1135,8 +1147,10 @@ pub mod pallet {
                 .ok_or(Error::<T>::ShopNotFound)?;
             ensure!(owner == who, Error::<T>::NoVetoRight);
 
-            // 检查治理配置是否允许否决
-            let config = GovernanceConfigs::<T>::get(proposal.shop_id)
+            // H3 修复: 通过 shop_id 解析 entity_id 查询治理配置
+            let entity_id = T::ShopProvider::shop_entity_id(proposal.shop_id)
+                .unwrap_or(proposal.shop_id);
+            let config = GovernanceConfigs::<T>::get(entity_id)
                 .unwrap_or_default();
             ensure!(config.admin_veto_enabled, Error::<T>::NoVetoRight);
             ensure!(
@@ -1167,6 +1181,68 @@ pub mod pallet {
     // ==================== 内部函数 ====================
 
     impl<T: Config> Pallet<T> {
+        /// H2: 验证提案类型参数有效性（basis points ≤ 10000，百分比 ≤ 100）
+        fn validate_proposal_type(pt: &ProposalType<BalanceOf<T>>) -> DispatchResult {
+            match pt {
+                ProposalType::Promotion { discount_rate, .. } => {
+                    ensure!(*discount_rate <= 10000, Error::<T>::InvalidParameter);
+                },
+                ProposalType::Dividend { rate } => {
+                    ensure!(*rate <= 10000, Error::<T>::InvalidParameter);
+                },
+                ProposalType::FeeAdjustment { new_fee_rate } => {
+                    ensure!(*new_fee_rate <= 10000, Error::<T>::InvalidParameter);
+                },
+                ProposalType::RevenueShare { owner_share, token_holder_share } => {
+                    ensure!(
+                        owner_share.saturating_add(*token_holder_share) <= 10000,
+                        Error::<T>::InvalidParameter
+                    );
+                },
+                ProposalType::QuorumChange { new_quorum } => {
+                    ensure!(*new_quorum <= 100, Error::<T>::InvalidParameter);
+                },
+                ProposalType::ProposalThresholdChange { new_threshold } => {
+                    ensure!(*new_threshold <= 10000, Error::<T>::InvalidParameter);
+                },
+                ProposalType::DirectRewardChange { rate } => {
+                    ensure!(*rate <= 10000, Error::<T>::InvalidParameter);
+                },
+                ProposalType::MultiLevelChange { max_total_rate, .. } => {
+                    ensure!(*max_total_rate <= 10000, Error::<T>::InvalidParameter);
+                },
+                ProposalType::LevelDiffChange { normal_rate, silver_rate, gold_rate, platinum_rate, diamond_rate } => {
+                    ensure!(*normal_rate <= 10000, Error::<T>::InvalidParameter);
+                    ensure!(*silver_rate <= 10000, Error::<T>::InvalidParameter);
+                    ensure!(*gold_rate <= 10000, Error::<T>::InvalidParameter);
+                    ensure!(*platinum_rate <= 10000, Error::<T>::InvalidParameter);
+                    ensure!(*diamond_rate <= 10000, Error::<T>::InvalidParameter);
+                },
+                ProposalType::FirstOrderChange { rate, .. } => {
+                    ensure!(*rate <= 10000, Error::<T>::InvalidParameter);
+                },
+                ProposalType::RepeatPurchaseChange { rate, .. } => {
+                    ensure!(*rate <= 10000, Error::<T>::InvalidParameter);
+                },
+                ProposalType::SingleLineChange { upline_rate, downline_rate, .. } => {
+                    ensure!(*upline_rate <= 10000, Error::<T>::InvalidParameter);
+                    ensure!(*downline_rate <= 10000, Error::<T>::InvalidParameter);
+                },
+                ProposalType::MinRepurchaseRateChange { min_rate } => {
+                    ensure!(*min_rate <= 10000, Error::<T>::InvalidParameter);
+                },
+                ProposalType::AddCustomLevel { discount_rate, commission_bonus, .. } => {
+                    ensure!(*discount_rate <= 10000, Error::<T>::InvalidParameter);
+                    ensure!(*commission_bonus <= 10000, Error::<T>::InvalidParameter);
+                },
+                ProposalType::SetUpgradeMode { mode } => {
+                    ensure!(*mode <= 2, Error::<T>::InvalidParameter);
+                },
+                _ => {},
+            }
+            Ok(())
+        }
+
         /// 计算投票权重（时间加权）
         pub fn calculate_voting_power(shop_id: u64, holder: &T::AccountId) -> BalanceOf<T> {
             let balance = T::TokenProvider::token_balance(shop_id, holder);
@@ -1180,11 +1256,13 @@ pub mod pallet {
             balance
         }
 
-        /// 从活跃提案列表移除
+        /// 从活跃提案列表移除，并清理投票权快照
         fn remove_from_active(proposal_id: ProposalId, shop_id: u64) {
             ShopProposals::<T>::mutate(shop_id, |proposals| {
                 proposals.retain(|&id| id != proposal_id);
             });
+            // M4: 清理 VotingPowerSnapshot 避免存储泄漏
+            let _ = VotingPowerSnapshot::<T>::clear_prefix(proposal_id, u32::MAX, None);
         }
 
         /// 执行提案
@@ -1343,27 +1421,27 @@ pub mod pallet {
 
                 // ==================== 治理参数类 ====================
                 ProposalType::VotingPeriodChange { new_period_blocks } => {
-                    // 更新店铺治理配置
-                    GovernanceConfigs::<T>::mutate(shop_id, |maybe_config| {
-                        if let Some(config) = maybe_config {
-                            config.voting_period = (*new_period_blocks).into();
-                        }
+                    // H6 修复: 无配置时创建默认配置再更新
+                    let entity_id = T::ShopProvider::shop_entity_id(shop_id).unwrap_or(shop_id);
+                    GovernanceConfigs::<T>::mutate(entity_id, |maybe_config| {
+                        let config = maybe_config.get_or_insert_with(GovernanceConfigOf::<T>::default);
+                        config.voting_period = (*new_period_blocks).into();
                     });
                     Ok(())
                 },
                 ProposalType::QuorumChange { new_quorum } => {
-                    GovernanceConfigs::<T>::mutate(shop_id, |maybe_config| {
-                        if let Some(config) = maybe_config {
-                            config.quorum_threshold = *new_quorum;
-                        }
+                    let entity_id = T::ShopProvider::shop_entity_id(shop_id).unwrap_or(shop_id);
+                    GovernanceConfigs::<T>::mutate(entity_id, |maybe_config| {
+                        let config = maybe_config.get_or_insert_with(GovernanceConfigOf::<T>::default);
+                        config.quorum_threshold = *new_quorum;
                     });
                     Ok(())
                 },
                 ProposalType::ProposalThresholdChange { new_threshold } => {
-                    GovernanceConfigs::<T>::mutate(shop_id, |maybe_config| {
-                        if let Some(config) = maybe_config {
-                            config.proposal_threshold = *new_threshold;
-                        }
+                    let entity_id = T::ShopProvider::shop_entity_id(shop_id).unwrap_or(shop_id);
+                    GovernanceConfigs::<T>::mutate(entity_id, |maybe_config| {
+                        let config = maybe_config.get_or_insert_with(GovernanceConfigOf::<T>::default);
+                        config.proposal_threshold = *new_threshold;
                     });
                     Ok(())
                 },

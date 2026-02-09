@@ -91,7 +91,7 @@ async fn run_ws_server(
 
     while let Ok((stream, peer_addr)) = listener.accept().await {
         let peers = peers.clone();
-        let node_id = node_id.clone();
+        let _node_id = node_id.clone();
 
         tokio::spawn(async move {
             let ws_stream = match accept_async(stream).await {
@@ -131,7 +131,7 @@ async fn run_ws_server(
                             // TODO: 转发到 GossipEngine 处理
                         }
                     }
-                    Ok(Message::Ping(data)) => {
+                    Ok(Message::Ping(_data)) => {
                         // Pong 由 tungstenite 自动处理
                     }
                     Ok(Message::Close(_)) => break,

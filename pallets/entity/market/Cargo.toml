@@ -42,6 +42,8 @@ std = [
 	"pallet-entity-common/std",
 	"pallet-entity-registry/std",
 	"pallet-entity-token/std",
+	"pallet-balances/std",
+	"pallet-assets/std",
 ]
 runtime-benchmarks = [
 	"frame-support/runtime-benchmarks",
