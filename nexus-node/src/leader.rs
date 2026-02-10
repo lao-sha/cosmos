@@ -45,6 +45,13 @@ pub struct ExecuteAction {
     pub leader_node_id: String,
     /// 共识证据: 参与 Seen 的节点列表
     pub consensus_nodes: Vec<String>,
+    /// 目标平台（telegram/discord），默认 telegram 以兼容旧版
+    #[serde(default = "default_execute_platform")]
+    pub platform: String,
+}
+
+fn default_execute_platform() -> String {
+    "telegram".to_string()
 }
 
 /// 执行结果
@@ -183,6 +190,7 @@ impl LeaderExecutor {
             leader_signature: self.sign_action(msg_id, &message.bot_id_hash, &action_type, chat_id),
             leader_node_id: self.node_id.clone(),
             consensus_nodes,
+            platform: message.platform.clone(),
         };
 
         // 3. 查找 Agent 端点（从 Bot 注册信息推断）
@@ -249,138 +257,14 @@ impl LeaderExecutor {
         }
     }
 
-    /// 根据 Telegram Update 内容判断动作类型
+    /// 根据平台事件内容判断动作类型
+    ///
+    /// 根据 message.platform 分发到对应的 NodePlatformAdapter，
+    /// 默认回退到 Telegram 适配器以兼容旧消息。
     fn determine_action(&self, message: &SignedMessage) -> (ActionType, i64, serde_json::Value) {
-        let update = &message.telegram_update;
-
-        // 提取 chat_id
-        let chat_id = update
-            .pointer("/message/chat/id")
-            .or_else(|| update.pointer("/callback_query/message/chat/id"))
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-
-        // 提取文本（用于规则引擎匹配）
-        let text = update
-            .pointer("/message/text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
-        // 入群申请
-        if update.get("chat_join_request").is_some() {
-            let user_id = update
-                .pointer("/chat_join_request/from/id")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0);
-
-            return (
-                ActionType::Admin(AdminAction::ApproveJoinRequest),
-                chat_id,
-                serde_json::json!({ "user_id": user_id }),
-            );
-        }
-
-        // 群成员变动
-        if update.get("chat_member").is_some() {
-            return (ActionType::NoAction, chat_id, serde_json::json!({}));
-        }
-
-        // 回调查询（按钮）
-        if update.get("callback_query").is_some() {
-            let callback_data = update
-                .pointer("/callback_query/data")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-
-            return (
-                ActionType::NoAction,
-                chat_id,
-                serde_json::json!({ "callback_data": callback_data }),
-            );
-        }
-
-        // 命令消息（以 / 开头）
-        if text.starts_with('/') {
-            let parts: Vec<&str> = text.splitn(2, ' ').collect();
-            let command = parts[0];
-            let _args = parts.get(1).unwrap_or(&"");
-
-            return match command {
-                "/ban" | "/kick" => {
-                    let reply_user_id = update
-                        .pointer("/message/reply_to_message/from/id")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0);
-                    (
-                        ActionType::Admin(AdminAction::Ban),
-                        chat_id,
-                        serde_json::json!({ "user_id": reply_user_id }),
-                    )
-                }
-                "/unban" => {
-                    let reply_user_id = update
-                        .pointer("/message/reply_to_message/from/id")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0);
-                    (
-                        ActionType::Admin(AdminAction::Unban),
-                        chat_id,
-                        serde_json::json!({ "user_id": reply_user_id }),
-                    )
-                }
-                "/mute" => {
-                    let reply_user_id = update
-                        .pointer("/message/reply_to_message/from/id")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0);
-                    (
-                        ActionType::Admin(AdminAction::Mute),
-                        chat_id,
-                        serde_json::json!({
-                            "user_id": reply_user_id,
-                            "duration_seconds": 3600,
-                        }),
-                    )
-                }
-                "/unmute" => {
-                    let reply_user_id = update
-                        .pointer("/message/reply_to_message/from/id")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0);
-                    (
-                        ActionType::Admin(AdminAction::Unmute),
-                        chat_id,
-                        serde_json::json!({ "user_id": reply_user_id }),
-                    )
-                }
-                "/pin" => {
-                    let reply_msg_id = update
-                        .pointer("/message/reply_to_message/message_id")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0);
-                    (
-                        ActionType::Message(MessageAction::Pin),
-                        chat_id,
-                        serde_json::json!({ "message_id": reply_msg_id }),
-                    )
-                }
-                "/del" | "/delete" => {
-                    let reply_msg_id = update
-                        .pointer("/message/reply_to_message/message_id")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0);
-                    (
-                        ActionType::Message(MessageAction::Delete),
-                        chat_id,
-                        serde_json::json!({ "message_id": reply_msg_id }),
-                    )
-                }
-                _ => (ActionType::NoAction, chat_id, serde_json::json!({})),
-            };
-        }
-
-        // 普通消息 — 无需动作（纯转发/记录）
-        (ActionType::NoAction, chat_id, serde_json::json!({}))
+        let adapter = crate::platform::get_adapter(&message.platform)
+            .unwrap_or_else(|| crate::platform::get_adapter("telegram").unwrap());
+        adapter.determine_action(message)
     }
 }
 
@@ -479,7 +363,7 @@ mod tests {
             sequence: 1,
             timestamp: 0,
             message_hash: String::new(),
-            telegram_update: serde_json::json!({
+            platform_event: serde_json::json!({
                 "update_id": 1,
                 "chat_join_request": {
                     "chat": {"id": -100123},
@@ -509,7 +393,7 @@ mod tests {
             sequence: 1,
             timestamp: 0,
             message_hash: String::new(),
-            telegram_update: serde_json::json!({
+            platform_event: serde_json::json!({
                 "update_id": 1,
                 "message": {
                     "message_id": 100,
@@ -545,7 +429,7 @@ mod tests {
             sequence: 1,
             timestamp: 0,
             message_hash: String::new(),
-            telegram_update: serde_json::json!({
+            platform_event: serde_json::json!({
                 "update_id": 1,
                 "message": {
                     "message_id": 100,

@@ -12,6 +12,13 @@ pub struct ExecuteAction {
     pub leader_signature: String,
     pub leader_node_id: String,
     pub consensus_nodes: Vec<String>,
+    /// 目标平台（telegram/discord），默认 telegram 以兼容旧版
+    #[serde(default = "default_platform")]
+    pub platform: String,
+}
+
+fn default_platform() -> String {
+    "telegram".to_string()
 }
 
 /// 消息操作
@@ -111,12 +118,37 @@ pub struct ExecuteResult {
     pub action_id: String,
     pub success: bool,
     pub error: Option<String>,
-    /// 实际调用的 TG API 方法
-    pub tg_api_method: Option<String>,
-    /// Telegram API 原始响应 JSON
-    pub tg_api_response: Option<serde_json::Value>,
+    /// 实际调用的平台 API 方法
+    #[serde(alias = "tg_api_method")]
+    pub api_method: Option<String>,
+    /// 平台 API 原始响应 JSON
+    #[serde(alias = "tg_api_response")]
+    pub api_response: Option<serde_json::Value>,
     /// Agent Ed25519 签名回执: sign(action_id + method + response_hash)
     pub agent_signature: Option<String>,
+}
+
+/// 平台执行器 Trait
+///
+/// 每个平台实现此 trait，将 ExecuteAction 映射到具体的平台 API 调用。
+#[allow(async_fn_in_trait)]
+pub trait PlatformExecutor: Send + Sync {
+    /// 执行动作
+    async fn execute(&self, action: &ExecuteAction, key_manager: &crate::signer::KeyManager) -> ExecuteResult;
+
+    /// 快速确认交互（Discord 3 秒限制）
+    async fn ack_interaction(
+        &self,
+        _interaction_id: &str,
+        _interaction_token: &str,
+    ) -> anyhow::Result<()> {
+        Ok(()) // Telegram 不需要，默认空实现
+    }
+
+    /// 注册平台命令
+    async fn register_commands(&self, _group_id: &str) -> anyhow::Result<()> {
+        Ok(()) // 可选
+    }
 }
 
 /// TG API 执行器
@@ -166,8 +198,8 @@ impl TelegramExecutor {
                         action_id: action.action_id.clone(),
                         success: true,
                         error: None,
-                        tg_api_method: Some("deleteMessages".into()),
-                        tg_api_response: Some(serde_json::json!({"ok": true, "result": true})),
+                        api_method: Some("deleteMessages".into()),
+                        api_response: Some(serde_json::json!({"ok": true, "result": true})),
                         agent_signature: None,
                     };
                 }
@@ -597,8 +629,8 @@ impl TelegramExecutor {
                     action_id: action.action_id.clone(),
                     success: true,
                     error: None,
-                    tg_api_method: Some(method),
-                    tg_api_response: Some(tg_response),
+                    api_method: Some(method),
+                    api_response: Some(tg_response),
                     agent_signature: Some(sig),
                 }
             }
@@ -608,8 +640,8 @@ impl TelegramExecutor {
                     action_id: action.action_id.clone(),
                     success: false,
                     error: Some(e.to_string()),
-                    tg_api_method: None,
-                    tg_api_response: None,
+                    api_method: None,
+                    api_response: None,
                     agent_signature: None,
                 }
             }
@@ -790,14 +822,14 @@ mod tests {
             action_id: "act_001".into(),
             success: true,
             error: None,
-            tg_api_method: Some("banChatMember".into()),
-            tg_api_response: Some(serde_json::json!({"ok": true})),
+            api_method: Some("banChatMember".into()),
+            api_response: Some(serde_json::json!({"ok": true})),
             agent_signature: Some("pk:sig".into()),
         };
 
         let json = serde_json::to_value(&result).unwrap();
         assert_eq!(json["success"], true);
-        assert_eq!(json["tg_api_method"], "banChatMember");
+        assert_eq!(json["api_method"], "banChatMember");
         assert!(json["error"].is_null());
     }
 

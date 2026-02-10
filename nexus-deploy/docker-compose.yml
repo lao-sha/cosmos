@@ -43,10 +43,18 @@ services:
       context: ../nexus-agent
       dockerfile: Dockerfile
     environment:
+      # 平台模式: telegram (默认) | discord | both
+      PLATFORM: "${PLATFORM:-telegram}"
+      # Telegram 配置
       BOT_TOKEN: "${BOT_TOKEN:-test_token_for_dev}"
       WEBHOOK_URL: "http://agent:8443"
       WEBHOOK_PORT: "8443"
       WEBHOOK_SECRET: "dev_secret_12345"
+      # Discord 配置 (PLATFORM=discord 或 both 时需要)
+      DISCORD_BOT_TOKEN: "${DISCORD_BOT_TOKEN:-}"
+      DISCORD_APPLICATION_ID: "${DISCORD_APPLICATION_ID:-}"
+      DISCORD_INTENTS: "${DISCORD_INTENTS:-33283}"
+      # 通用配置
       CHAIN_RPC: "ws://chain:9944"
       DATA_DIR: "/data"
       MULTICAST_TIMEOUT_MS: "5000"

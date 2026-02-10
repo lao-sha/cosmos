@@ -6,6 +6,7 @@ mod config;
 // pub mod crypto; // TODO: Sprint 后续实现
 mod gossip;
 mod leader;
+pub mod platform;
 #[allow(dead_code)]
 mod rule_engine;
 #[allow(dead_code)]

@@ -504,7 +504,7 @@ mod tests {
             sequence: seq,
             timestamp: chrono::Utc::now().timestamp() as u64,
             message_hash: format!("hash_{}", seq),
-            telegram_update: serde_json::json!({"update_id": seq}),
+            platform_event: serde_json::json!({"update_id": seq}),
             owner_signature: "cc".repeat(32),
             platform: "telegram".into(),
         }

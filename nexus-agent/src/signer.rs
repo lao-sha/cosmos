@@ -97,11 +97,11 @@ impl KeyManager {
         bot_id_hash: &[u8; 32],
         sequence: u64,
         timestamp: u64,
-        telegram_update_json: &[u8],
+        platform_event_json: &[u8],
     ) -> ([u8; 64], [u8; 32]) {
-        // message_hash = SHA256(telegram_update_json)
+        // message_hash = SHA256(platform_event_json)
         let mut hasher = Sha256::new();
-        hasher.update(telegram_update_json);
+        hasher.update(platform_event_json);
         let hash_result = hasher.finalize();
         let mut message_hash = [0u8; 32];
         message_hash.copy_from_slice(&hash_result);

@@ -116,66 +116,35 @@ impl RuleEngine {
     }
 
     /// 从 SignedMessage 构建规则上下文
+    ///
+    /// 根据 message.platform 分发到对应的 NodePlatformAdapter，
+    /// 默认回退到 Telegram 适配器以兼容旧消息。
     fn build_context(message: &SignedMessage, chain_cache: Option<&ChainCache>) -> RuleContext {
-        let update = &message.telegram_update;
+        // 尝试通过平台适配器构建上下文
+        let adapter = crate::platform::get_adapter(&message.platform)
+            .unwrap_or_else(|| crate::platform::get_adapter("telegram").unwrap());
 
-        let chat_id = update.pointer("/message/chat/id")
-            .or_else(|| update.pointer("/callback_query/message/chat/id"))
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
+        let mut ctx = adapter.build_context(message, chain_cache)
+            .unwrap_or_else(|| RuleContext {
+                message: message.clone(),
+                text: String::new(),
+                chat_id: 0,
+                sender_id: 0,
+                is_command: false,
+                command: None,
+                command_args: None,
+                reply_to_user_id: None,
+                reply_to_message_id: None,
+                is_join_request: false,
+                join_request_user_id: None,
+                is_callback: false,
+                callback_data: None,
+                group_config: None,
+            });
 
-        let text = update.pointer("/message/text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        let sender_id = update.pointer("/message/from/id")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-
-        let is_command = text.starts_with('/');
-        let (command, command_args) = if is_command {
-            let parts: Vec<&str> = text.splitn(2, ' ').collect();
-            let cmd = parts[0].trim_start_matches('/').to_string();
-            // 去掉 @bot_name
-            let cmd = cmd.split('@').next().unwrap_or("").to_string();
-            let args = parts.get(1).map(|s| s.to_string());
-            (Some(cmd), args)
-        } else {
-            (None, None)
-        };
-
-        let reply_to_user_id = update.pointer("/message/reply_to_message/from/id")
-            .and_then(|v| v.as_i64());
-
-        let reply_to_message_id = update.pointer("/message/reply_to_message/message_id")
-            .and_then(|v| v.as_i64());
-
-        let is_join_request = update.get("chat_join_request").is_some();
-        let join_request_user_id = update.pointer("/chat_join_request/from/id")
-            .and_then(|v| v.as_i64());
-
-        let is_callback = update.get("callback_query").is_some();
-        let callback_data = update.pointer("/callback_query/data")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
-        RuleContext {
-            message: message.clone(),
-            text,
-            chat_id,
-            sender_id,
-            is_command,
-            command,
-            command_args,
-            reply_to_user_id,
-            reply_to_message_id,
-            is_join_request,
-            join_request_user_id,
-            is_callback,
-            callback_data,
-            group_config: Self::lookup_group_config(&message.bot_id_hash, chain_cache),
-        }
+        // 补充 group_config（适配器不负责查找）
+        ctx.group_config = Self::lookup_group_config(&message.bot_id_hash, chain_cache);
+        ctx
     }
 }
 
@@ -217,6 +186,28 @@ impl Rule for JoinRequestRule {
 /// 命令规则 (/ban, /mute, /unmute, /pin, /del)
 struct CommandRule;
 
+/// 从 command_args 中提取 "user:<id>" 格式的目标用户 ID（Discord slash command 格式）
+fn extract_user_from_args(args: Option<&str>) -> i64 {
+    args.and_then(|s| {
+        s.split_whitespace()
+            .find(|part| part.starts_with("user:"))
+            .map(|part| &part[5..])
+            .and_then(|id| id.parse::<i64>().ok())
+    })
+    .unwrap_or(0)
+}
+
+/// 从 command_args 中提取 "duration:<secs>" 格式的时长（Discord slash command 格式）
+fn extract_duration_from_args(args: Option<&str>) -> u64 {
+    args.and_then(|s| {
+        s.split_whitespace()
+            .find(|part| part.starts_with("duration:"))
+            .map(|part| &part[9..])
+            .and_then(|v| v.parse::<u64>().ok())
+    })
+    .unwrap_or(0)
+}
+
 impl Rule for CommandRule {
     fn name(&self) -> &str { "command" }
 
@@ -229,7 +220,8 @@ impl Rule for CommandRule {
 
         match cmd {
             "ban" | "kick" => {
-                let user_id = ctx.reply_to_user_id.unwrap_or(0);
+                let user_id = ctx.reply_to_user_id
+                    .unwrap_or_else(|| extract_user_from_args(ctx.command_args.as_deref()));
                 if user_id == 0 { return None; }
                 Some(RuleAction {
                     action_type: ActionType::Admin(AdminAction::Ban),
@@ -239,11 +231,15 @@ impl Rule for CommandRule {
                 })
             }
             "mute" => {
-                let user_id = ctx.reply_to_user_id.unwrap_or(0);
+                let user_id = ctx.reply_to_user_id
+                    .unwrap_or_else(|| extract_user_from_args(ctx.command_args.as_deref()));
                 if user_id == 0 { return None; }
-                let duration = ctx.command_args.as_deref()
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(3600);
+                let duration = extract_duration_from_args(ctx.command_args.as_deref());
+                let duration = if duration > 0 { duration } else {
+                    ctx.command_args.as_deref()
+                        .and_then(|s| s.parse::<u64>().ok())
+                        .unwrap_or(3600)
+                };
                 Some(RuleAction {
                     action_type: ActionType::Admin(AdminAction::Mute),
                     chat_id: ctx.chat_id,
@@ -255,7 +251,8 @@ impl Rule for CommandRule {
                 })
             }
             "unmute" => {
-                let user_id = ctx.reply_to_user_id.unwrap_or(0);
+                let user_id = ctx.reply_to_user_id
+                    .unwrap_or_else(|| extract_user_from_args(ctx.command_args.as_deref()));
                 if user_id == 0 { return None; }
                 Some(RuleAction {
                     action_type: ActionType::Admin(AdminAction::Unmute),
@@ -285,7 +282,8 @@ impl Rule for CommandRule {
                 })
             }
             "unban" => {
-                let user_id = ctx.reply_to_user_id.unwrap_or(0);
+                let user_id = ctx.reply_to_user_id
+                    .unwrap_or_else(|| extract_user_from_args(ctx.command_args.as_deref()));
                 if user_id == 0 { return None; }
                 Some(RuleAction {
                     action_type: ActionType::Admin(AdminAction::Unban),
@@ -295,7 +293,8 @@ impl Rule for CommandRule {
                 })
             }
             "warn" => {
-                let user_id = ctx.reply_to_user_id.unwrap_or(0);
+                let user_id = ctx.reply_to_user_id
+                    .unwrap_or_else(|| extract_user_from_args(ctx.command_args.as_deref()));
                 if user_id == 0 { return None; }
                 let reason = ctx.command_args.clone().unwrap_or_default();
                 Some(RuleAction {
@@ -310,7 +309,8 @@ impl Rule for CommandRule {
                 })
             }
             "unwarn" => {
-                let user_id = ctx.reply_to_user_id.unwrap_or(0);
+                let user_id = ctx.reply_to_user_id
+                    .unwrap_or_else(|| extract_user_from_args(ctx.command_args.as_deref()));
                 if user_id == 0 { return None; }
                 Some(RuleAction {
                     action_type: ActionType::NoAction,
@@ -932,7 +932,7 @@ impl Rule for LinkFilterRule {
             || ctx.text.contains("t.me/");
 
         if has_link {
-            let msg_id = ctx.message.telegram_update
+            let msg_id = ctx.message.platform_event
                 .pointer("/message/message_id")
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0);
@@ -1036,9 +1036,17 @@ impl Rule for BlacklistRule {
             return None;
         }
 
-        let msg_id = ctx.message.telegram_update
+        // 平台无关的 message_id 提取: Telegram /message/message_id, Discord /d/id
+        let msg_id = ctx.message.platform_event
             .pointer("/message/message_id")
             .and_then(|v| v.as_i64())
+            .or_else(|| {
+                ctx.message.platform_event
+                    .pointer("/d/id")
+                    .or_else(|| ctx.message.platform_event.get("id"))
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<i64>().ok())
+            })
             .unwrap_or(0);
 
         if msg_id == 0 {
@@ -1123,7 +1131,7 @@ impl Rule for LockRule {
             return None;
         }
 
-        let update = &ctx.message.telegram_update;
+        let update = &ctx.message.platform_event;
         let msg = update.get("message")?;
 
         // 检测消息类型
@@ -1197,7 +1205,7 @@ impl Rule for WelcomeRule {
             return None;
         }
 
-        let update = &ctx.message.telegram_update;
+        let update = &ctx.message.platform_event;
         let new_members = update.pointer("/message/new_chat_members")?;
         let members = new_members.as_array()?;
 
@@ -1319,7 +1327,7 @@ impl Rule for AdminPermissionRule {
             chat_id: ctx.chat_id,
             params: serde_json::json!({
                 "text": format!("⛔ You don't have permission to use /{}", cmd),
-                "reply_to_message_id": ctx.message.telegram_update
+                "reply_to_message_id": ctx.message.platform_event
                     .pointer("/message/message_id")
                     .and_then(|v| v.as_i64())
                     .unwrap_or(0),
@@ -1364,7 +1372,7 @@ impl Rule for SpamDetectorRule {
         }
 
         let text = &ctx.text;
-        let msg_id = ctx.message.telegram_update
+        let msg_id = ctx.message.platform_event
             .pointer("/message/message_id")
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
@@ -1637,7 +1645,7 @@ impl PlatformAdapter for DiscordAdapter {
                         sequence: 0,
                         timestamp: 0,
                         message_hash: String::new(),
-                        telegram_update: raw_json.clone(),
+                        platform_event: raw_json.clone(),
                         owner_signature: String::new(),
                         platform: "discord".into(),
                     },
@@ -1673,7 +1681,7 @@ impl PlatformAdapter for DiscordAdapter {
                         sequence: 0,
                         timestamp: 0,
                         message_hash: String::new(),
-                        telegram_update: raw_json.clone(),
+                        platform_event: raw_json.clone(),
                         owner_signature: String::new(),
                         platform: "discord".into(),
                     },
@@ -1846,7 +1854,7 @@ impl PlatformAdapter for SlackAdapter {
                         sequence: 0,
                         timestamp: 0,
                         message_hash: String::new(),
-                        telegram_update: raw_json.clone(),
+                        platform_event: raw_json.clone(),
                         owner_signature: String::new(),
                         platform: "slack".into(),
                     },
@@ -1877,7 +1885,7 @@ impl PlatformAdapter for SlackAdapter {
                         sequence: 0,
                         timestamp: 0,
                         message_hash: String::new(),
-                        telegram_update: raw_json.clone(),
+                        platform_event: raw_json.clone(),
                         owner_signature: String::new(),
                         platform: "slack".into(),
                     },
@@ -2028,7 +2036,7 @@ mod tests {
             sequence: 1,
             timestamp: 0,
             message_hash: String::new(),
-            telegram_update: update,
+            platform_event: update,
             owner_signature: String::new(),
             platform: "telegram".into(),
         }
@@ -2403,7 +2411,7 @@ mod tests {
                 sequence: 1,
                 timestamp: 1000,
                 message_hash: String::new(),
-                telegram_update: update,
+                platform_event: update,
                 owner_signature: String::new(),
                 platform: "telegram".into(),
             },
@@ -2575,7 +2583,7 @@ mod tests {
             sequence: 1,
             timestamp: 1000,
             message_hash: String::new(),
-            telegram_update: serde_json::json!({
+            platform_event: serde_json::json!({
                 "message": {
                     "message_id": 100,
                     "chat": {"id": -100, "type": "supergroup"},
@@ -3300,7 +3308,7 @@ mod tests {
             sequence: 1,
             timestamp: 1000,
             message_hash: String::new(),
-            telegram_update: serde_json::json!({
+            platform_event: serde_json::json!({
                 "message": {
                     "message_id": 99,
                     "chat": { "id": -100999, "title": "TestGroup", "type": "supergroup" },
@@ -3322,5 +3330,143 @@ mod tests {
         let caption = action.params["caption"].as_str().unwrap();
         assert!(caption.contains("Alice"), "Caption should contain user name");
         assert!(caption.contains("TestGroup"), "Caption should contain chat name");
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Discord E2E 测试
+    // ═══════════════════════════════════════════════════════════════
+
+    fn make_discord_msg(update: serde_json::Value) -> SignedMessage {
+        SignedMessage {
+            owner_public_key: String::new(),
+            bot_id_hash: String::new(),
+            sequence: 1,
+            timestamp: 0,
+            message_hash: String::new(),
+            platform_event: update,
+            owner_signature: String::new(),
+            platform: "discord".into(),
+        }
+    }
+
+    #[test]
+    fn test_discord_plain_message_no_action() {
+        let engine = RuleEngine::default_engine();
+        let msg = make_discord_msg(serde_json::json!({
+            "_discord_event_type": "MESSAGE_CREATE",
+            "d": {
+                "guild_id": "100200",
+                "channel_id": "300400",
+                "author": {"id": "42"},
+                "content": "hello everyone"
+            }
+        }));
+
+        let action = engine.evaluate(&msg, None);
+        assert!(action.action_type.is_no_action());
+    }
+
+    #[test]
+    fn test_discord_ban_command() {
+        let engine = RuleEngine::default_engine();
+        let msg = make_discord_msg(serde_json::json!({
+            "_discord_event_type": "MESSAGE_CREATE",
+            "d": {
+                "guild_id": "100200",
+                "channel_id": "300400",
+                "author": {"id": "42"},
+                "content": "!ban baduser",
+                "referenced_message": {
+                    "author": {"id": "789"}
+                },
+                "message_reference": {
+                    "message_id": "99"
+                }
+            }
+        }));
+
+        let action = engine.evaluate(&msg, None);
+        assert!(matches!(action.action_type, ActionType::Admin(AdminAction::Ban)),
+            "Expected Ban, got {:?}", action.action_type);
+    }
+
+    #[test]
+    fn test_discord_member_add_join_request() {
+        let engine = RuleEngine::default_engine();
+        let msg = make_discord_msg(serde_json::json!({
+            "_discord_event_type": "GUILD_MEMBER_ADD",
+            "d": {
+                "guild_id": "100200",
+                "user": {"id": "456"}
+            }
+        }));
+
+        let action = engine.evaluate(&msg, None);
+        assert!(matches!(action.action_type, ActionType::Admin(AdminAction::ApproveJoinRequest)),
+            "Expected ApproveJoinRequest for GUILD_MEMBER_ADD, got {:?}", action.action_type);
+    }
+
+    #[test]
+    fn test_discord_slash_command_mute() {
+        let engine = RuleEngine::default_engine();
+        let msg = make_discord_msg(serde_json::json!({
+            "_discord_event_type": "INTERACTION_CREATE",
+            "d": {
+                "guild_id": "100200",
+                "channel_id": "300400",
+                "member": {"user": {"id": "42"}},
+                "data": {
+                    "name": "mute",
+                    "options": [
+                        {"name": "user", "value": "789", "type": 6},
+                        {"name": "duration", "value": 7200, "type": 4}
+                    ]
+                }
+            }
+        }));
+
+        let action = engine.evaluate(&msg, None);
+        assert!(matches!(action.action_type, ActionType::Admin(AdminAction::Mute)),
+            "Expected Mute for /mute slash command, got {:?}", action.action_type);
+        assert_eq!(action.params["duration_seconds"], 7200);
+    }
+
+    #[test]
+    fn test_discord_blacklist_filter() {
+        let engine = RuleEngine::default_engine();
+        // Reuse existing E2E cache (has blacklist_words: ["spam"])
+        let (cache, _tmp) = make_e2e_cache();
+
+        let msg = SignedMessage {
+            owner_public_key: String::new(),
+            bot_id_hash: "test".into(),
+            sequence: 1,
+            timestamp: 0,
+            message_hash: String::new(),
+            platform_event: serde_json::json!({
+                "_discord_event_type": "MESSAGE_CREATE",
+                "d": {
+                    "id": "99887766",
+                    "guild_id": "100200",
+                    "channel_id": "300400",
+                    "author": {"id": "42"},
+                    "content": "check this spam link"
+                }
+            }),
+            owner_signature: String::new(),
+            platform: "discord".into(),
+        };
+
+        let action = engine.evaluate(&msg, Some(&cache));
+        assert!(matches!(action.action_type, ActionType::Message(MessageAction::Delete)),
+            "Expected Delete for blacklisted word, got {:?}", action.action_type);
+    }
+
+    #[test]
+    fn test_discord_platform_adapter_dispatch() {
+        // Verify that get_adapter returns correct adapter for discord
+        let adapter = crate::platform::get_adapter("discord");
+        assert!(adapter.is_some(), "Discord adapter should be registered");
+        assert_eq!(adapter.unwrap().platform_name(), "discord");
     }
 }

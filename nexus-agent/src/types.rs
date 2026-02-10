@@ -97,11 +97,12 @@ pub struct SignedMessage {
     /// 时间戳（Unix 秒）
     pub timestamp: u64,
 
-    /// 消息哈希 SHA256(telegram_update_json) (hex)
+    /// 消息哈希 SHA256(platform_event_json) (hex)
     pub message_hash: String,
 
-    /// 原始 Telegram Update JSON
-    pub telegram_update: serde_json::Value,
+    /// 原始平台事件 JSON（TG Update / Discord Gateway Event）
+    #[serde(alias = "telegram_update")]
+    pub platform_event: serde_json::Value,
 
     /// Ed25519 签名 (hex)
     pub owner_signature: String,

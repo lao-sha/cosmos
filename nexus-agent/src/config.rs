@@ -1,8 +1,61 @@
 use serde::Deserialize;
 
+/// 平台运行模式
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum PlatformMode {
+    /// 仅 Telegram（默认，向后兼容）
+    #[default]
+    Telegram,
+    /// 仅 Discord
+    Discord,
+    /// 同时运行 Telegram + Discord
+    Both,
+}
+
+impl PlatformMode {
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "discord" => PlatformMode::Discord,
+            "both" => PlatformMode::Both,
+            _ => PlatformMode::Telegram,
+        }
+    }
+
+    pub fn needs_telegram(&self) -> bool {
+        matches!(self, PlatformMode::Telegram | PlatformMode::Both)
+    }
+
+    pub fn needs_discord(&self) -> bool {
+        matches!(self, PlatformMode::Discord | PlatformMode::Both)
+    }
+}
+
+/// Discord 专用配置
+#[derive(Debug, Clone, Default)]
+pub struct DiscordConfig {
+    /// Discord Bot Token
+    pub bot_token: String,
+    /// Discord Application ID
+    pub application_id: String,
+    /// Discord Gateway Intents (位掩码)
+    pub intents: u64,
+    /// bot_id_hash = SHA256(discord_bot_token)
+    pub bot_id_hash: [u8; 32],
+}
+
+impl DiscordConfig {
+    pub fn bot_id_hash_hex(&self) -> String {
+        hex::encode(self.bot_id_hash)
+    }
+}
+
 /// Agent 全局配置（从环境变量加载）
 #[derive(Clone, Deserialize)]
 pub struct AgentConfig {
+    /// 平台运行模式
+    #[serde(skip)]
+    pub platform: PlatformMode,
+
     /// Telegram Bot Token（永不上链，只在本地内存）
     pub bot_token: String,
 
@@ -37,6 +90,10 @@ pub struct AgentConfig {
     /// bot_id_hash（SHA256(bot_token)，启动时自动计算）
     #[serde(skip)]
     pub bot_id_hash: [u8; 32],
+
+    /// Discord 专用配置（PLATFORM=discord 或 both 时加载）
+    #[serde(skip)]
+    pub discord: Option<DiscordConfig>,
 }
 
 fn default_webhook_port() -> u16 {
@@ -62,6 +119,7 @@ fn default_multicast_timeout_ms() -> u64 {
 impl std::fmt::Debug for AgentConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AgentConfig")
+            .field("platform", &self.platform)
             .field("bot_token", &"[REDACTED]")
             .field("webhook_port", &self.webhook_port)
             .field("webhook_url", &self.webhook_url)
@@ -71,6 +129,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("multicast_timeout_ms", &self.multicast_timeout_ms)
             .field("execute_token", &self.execute_token.as_ref().map(|_| "[REDACTED]"))
             .field("bot_id_hash", &hex::encode(self.bot_id_hash))
+            .field("discord", &self.discord.as_ref().map(|_| "[configured]"))
             .finish()
     }
 }
@@ -78,16 +137,31 @@ impl std::fmt::Debug for AgentConfig {
 impl AgentConfig {
     /// 从环境变量加载配置
     pub fn from_env() -> anyhow::Result<Self> {
-        let bot_token = std::env::var("BOT_TOKEN")
-            .map_err(|_| anyhow::anyhow!("BOT_TOKEN 环境变量未设置"))?;
+        use sha2::{Sha256, Digest};
+
+        let platform = PlatformMode::from_str(
+            &std::env::var("PLATFORM").unwrap_or_else(|_| "telegram".to_string())
+        );
+
+        // ── Telegram 配置（PLATFORM=telegram 或 both 时必填）──
+        let bot_token = if platform.needs_telegram() {
+            std::env::var("BOT_TOKEN")
+                .map_err(|_| anyhow::anyhow!("BOT_TOKEN 环境变量未设置（PLATFORM={:?} 时必填）", platform))?
+        } else {
+            std::env::var("BOT_TOKEN").unwrap_or_default()
+        };
+
+        let webhook_url = if platform.needs_telegram() {
+            std::env::var("WEBHOOK_URL")
+                .map_err(|_| anyhow::anyhow!("WEBHOOK_URL 环境变量未设置（PLATFORM={:?} 时必填）", platform))?
+        } else {
+            std::env::var("WEBHOOK_URL").unwrap_or_default()
+        };
 
         let webhook_port = std::env::var("WEBHOOK_PORT")
             .unwrap_or_else(|_| "8443".to_string())
             .parse::<u16>()
             .unwrap_or(8443);
-
-        let webhook_url = std::env::var("WEBHOOK_URL")
-            .map_err(|_| anyhow::anyhow!("WEBHOOK_URL 环境变量未设置（必填，Telegram 需要可达的外部 URL）"))?;
 
         let webhook_secret = std::env::var("WEBHOOK_SECRET")
             .unwrap_or_else(|_| default_secret_token());
@@ -106,15 +180,52 @@ impl AgentConfig {
         let execute_token = std::env::var("EXECUTE_TOKEN").ok()
             .filter(|s| !s.is_empty());
 
-        // 计算 bot_id_hash = SHA256(bot_token)
-        use sha2::{Sha256, Digest};
-        let mut hasher = Sha256::new();
-        hasher.update(bot_token.as_bytes());
-        let hash = hasher.finalize();
-        let mut bot_id_hash = [0u8; 32];
-        bot_id_hash.copy_from_slice(&hash);
+        // 计算 TG bot_id_hash = SHA256(bot_token)
+        let bot_id_hash = if !bot_token.is_empty() {
+            let mut hasher = Sha256::new();
+            hasher.update(bot_token.as_bytes());
+            let hash = hasher.finalize();
+            let mut h = [0u8; 32];
+            h.copy_from_slice(&hash);
+            h
+        } else {
+            [0u8; 32]
+        };
+
+        // ── Discord 配置（PLATFORM=discord 或 both 时加载）──
+        let discord = if platform.needs_discord() {
+            let dc_token = std::env::var("DISCORD_BOT_TOKEN")
+                .map_err(|_| anyhow::anyhow!("DISCORD_BOT_TOKEN 环境变量未设置（PLATFORM={:?} 时必填）", platform))?;
+            let dc_app_id = std::env::var("DISCORD_APPLICATION_ID")
+                .map_err(|_| anyhow::anyhow!("DISCORD_APPLICATION_ID 环境变量未设置"))?;
+
+            // Discord Gateway Intents:
+            // GUILDS(1<<0) | GUILD_MEMBERS(1<<1) | GUILD_MESSAGES(1<<9) |
+            // GUILD_MESSAGE_REACTIONS(1<<10) | MESSAGE_CONTENT(1<<15)
+            let default_intents: u64 = (1 << 0) | (1 << 1) | (1 << 9) | (1 << 10) | (1 << 15);
+            let intents = std::env::var("DISCORD_INTENTS")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(default_intents);
+
+            let mut hasher = Sha256::new();
+            hasher.update(dc_token.as_bytes());
+            let hash = hasher.finalize();
+            let mut dc_hash = [0u8; 32];
+            dc_hash.copy_from_slice(&hash);
+
+            Some(DiscordConfig {
+                bot_token: dc_token,
+                application_id: dc_app_id,
+                intents,
+                bot_id_hash: dc_hash,
+            })
+        } else {
+            None
+        };
 
         Ok(Self {
+            platform,
             bot_token,
             webhook_port,
             webhook_url,
@@ -124,6 +235,7 @@ impl AgentConfig {
             multicast_timeout_ms,
             execute_token,
             bot_id_hash,
+            discord,
         })
     }
 
@@ -268,6 +380,96 @@ mod tests {
             || {
                 let config = AgentConfig::from_env().unwrap();
                 assert!(config.execute_token.is_none(), "空字符串应为 None");
+            },
+        );
+    }
+
+    #[test]
+    fn test_platform_mode_from_str() {
+        assert_eq!(PlatformMode::from_str("telegram"), PlatformMode::Telegram);
+        assert_eq!(PlatformMode::from_str("TELEGRAM"), PlatformMode::Telegram);
+        assert_eq!(PlatformMode::from_str("discord"), PlatformMode::Discord);
+        assert_eq!(PlatformMode::from_str("Discord"), PlatformMode::Discord);
+        assert_eq!(PlatformMode::from_str("both"), PlatformMode::Both);
+        assert_eq!(PlatformMode::from_str("BOTH"), PlatformMode::Both);
+        assert_eq!(PlatformMode::from_str("unknown"), PlatformMode::Telegram);
+    }
+
+    #[test]
+    fn test_platform_mode_needs() {
+        assert!(PlatformMode::Telegram.needs_telegram());
+        assert!(!PlatformMode::Telegram.needs_discord());
+        assert!(!PlatformMode::Discord.needs_telegram());
+        assert!(PlatformMode::Discord.needs_discord());
+        assert!(PlatformMode::Both.needs_telegram());
+        assert!(PlatformMode::Both.needs_discord());
+    }
+
+    #[test]
+    fn test_default_platform_is_telegram() {
+        with_env(
+            &[("BOT_TOKEN", "t"), ("WEBHOOK_URL", "https://a.com")],
+            &["PLATFORM", "DISCORD_BOT_TOKEN", "DISCORD_APPLICATION_ID"],
+            || {
+                let config = AgentConfig::from_env().unwrap();
+                assert_eq!(config.platform, PlatformMode::Telegram);
+                assert!(config.discord.is_none());
+            },
+        );
+    }
+
+    #[test]
+    fn test_discord_mode_requires_discord_token() {
+        with_env(
+            &[("PLATFORM", "discord")],
+            &["DISCORD_BOT_TOKEN", "DISCORD_APPLICATION_ID", "BOT_TOKEN", "WEBHOOK_URL"],
+            || {
+                let result = AgentConfig::from_env();
+                assert!(result.is_err());
+                assert!(result.unwrap_err().to_string().contains("DISCORD_BOT_TOKEN"));
+            },
+        );
+    }
+
+    #[test]
+    fn test_discord_mode_loads_config() {
+        with_env(
+            &[
+                ("PLATFORM", "discord"),
+                ("DISCORD_BOT_TOKEN", "dc_secret_token"),
+                ("DISCORD_APPLICATION_ID", "123456789"),
+            ],
+            &["BOT_TOKEN", "WEBHOOK_URL", "DISCORD_INTENTS"],
+            || {
+                let config = AgentConfig::from_env().unwrap();
+                assert_eq!(config.platform, PlatformMode::Discord);
+                let dc = config.discord.as_ref().unwrap();
+                assert_eq!(dc.bot_token, "dc_secret_token");
+                assert_eq!(dc.application_id, "123456789");
+                // default intents
+                let expected = (1u64 << 0) | (1 << 1) | (1 << 9) | (1 << 10) | (1 << 15);
+                assert_eq!(dc.intents, expected);
+                assert_eq!(dc.bot_id_hash_hex().len(), 64);
+            },
+        );
+    }
+
+    #[test]
+    fn test_both_mode_requires_all_tokens() {
+        with_env(
+            &[
+                ("PLATFORM", "both"),
+                ("BOT_TOKEN", "tg_token"),
+                ("WEBHOOK_URL", "https://a.com"),
+                ("DISCORD_BOT_TOKEN", "dc_token"),
+                ("DISCORD_APPLICATION_ID", "999"),
+            ],
+            &[],
+            || {
+                let config = AgentConfig::from_env().unwrap();
+                assert_eq!(config.platform, PlatformMode::Both);
+                assert_eq!(config.bot_token, "tg_token");
+                assert!(config.discord.is_some());
             },
         );
     }

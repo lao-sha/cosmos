@@ -50,6 +50,13 @@ atomicwrites = "0.4"
 # Regex (BlacklistRule)
 regex = "1"
 
+# WebSocket (Discord Gateway)
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+
+# URL parsing
+url = "2"
+
 [dev-dependencies]
 tempfile = "3"
 

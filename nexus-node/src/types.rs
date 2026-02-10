@@ -158,7 +158,8 @@ pub struct SignedMessage {
     pub sequence: u64,
     pub timestamp: u64,
     pub message_hash: String,
-    pub telegram_update: serde_json::Value,
+    #[serde(alias = "telegram_update")]
+    pub platform_event: serde_json::Value,
     pub owner_signature: String,
     pub platform: String,
 }

@@ -141,8 +141,8 @@ fn verify_ed25519_signature(message: &SignedMessage) -> Result<(), VerifyError> 
     verifying_key.verify(&sign_data, &signature)
         .map_err(|e| VerifyError::InvalidSignature(format!("Ed25519 验签失败: {}", e)))?;
 
-    // 额外: 验证 message_hash 与 telegram_update JSON 一致
-    let update_json = serde_json::to_vec(&message.telegram_update)
+    // 额外: 验证 message_hash 与 platform_event JSON 一致
+    let update_json = serde_json::to_vec(&message.platform_event)
         .map_err(|e| VerifyError::Other(format!("序列化失败: {}", e)))?;
     let mut hasher = Sha256::new();
     hasher.update(&update_json);
@@ -273,7 +273,7 @@ mod tests {
             sequence,
             timestamp,
             message_hash: hex::encode(msg_hash),
-            telegram_update: serde_json::from_slice(telegram_json).unwrap(),
+            platform_event: serde_json::from_slice(telegram_json).unwrap(),
             owner_signature: hex::encode(signature.to_bytes()),
             platform: "telegram".to_string(),
         };

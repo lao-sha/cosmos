@@ -6,6 +6,7 @@ use axum::{
 use std::sync::Arc;
 use tracing::{info, warn, error, debug};
 
+use crate::executor::PlatformExecutor;
 use crate::types::{TelegramUpdate, SignedMessage};
 use crate::AppState;
 
@@ -120,7 +121,7 @@ pub async fn handle_webhook(
         sequence,
         timestamp,
         message_hash: hex::encode(message_hash),
-        telegram_update: serde_json::from_slice(&raw_json).unwrap_or_default(),
+        platform_event: serde_json::from_slice(&raw_json).unwrap_or_default(),
         owner_signature: hex::encode(signature),
         platform: "telegram".to_string(),
     };
@@ -184,8 +185,8 @@ pub async fn handle_execute(
                     action_id: action.action_id.clone(),
                     success: false,
                     error: Some("Unauthorized: invalid or missing Bearer token".into()),
-                    tg_api_method: None,
-                    tg_api_response: None,
+                    api_method: None,
+                    api_response: None,
                     agent_signature: None,
                 }),
             );
@@ -201,8 +202,8 @@ pub async fn handle_execute(
                 action_id: action.action_id.clone(),
                 success: false,
                 error: Some("限流: 请求过多".into()),
-                tg_api_method: None,
-                tg_api_response: None,
+                api_method: None,
+                api_response: None,
                 agent_signature: None,
             }),
         );
@@ -225,8 +226,8 @@ pub async fn handle_execute(
                 action_id: action.action_id.clone(),
                 success: false,
                 error: Some(format!("验证失败: {}", e)),
-                tg_api_method: None,
-                tg_api_response: None,
+                api_method: None,
+                api_response: None,
                 agent_signature: None,
             }),
         );
@@ -246,7 +247,23 @@ pub async fn handle_execute(
         return (status, Json(result));
     }
 
-    let result = state.executor.execute(&action, &state.key_manager).await;
+    // 根据 platform 路由到对应执行器
+    let result = if action.platform == "discord" {
+        if let Some(ref dc_exec) = state.discord_executor {
+            dc_exec.execute(&action, &state.key_manager).await
+        } else {
+            crate::executor::ExecuteResult {
+                action_id: action.action_id.clone(),
+                success: false,
+                error: Some("Discord executor 未配置（PLATFORM 未设置为 discord 或 both）".into()),
+                api_method: None,
+                api_response: None,
+                agent_signature: None,
+            }
+        }
+    } else {
+        state.executor.execute(&action, &state.key_manager).await
+    };
 
     let status = if result.success {
         StatusCode::OK
@@ -383,8 +400,8 @@ async fn handle_config_update(
             action_id: action.action_id.clone(),
             success: false,
             error: Some(format!("Config save failed: {}", e)),
-            tg_api_method: None,
-            tg_api_response: None,
+            api_method: None,
+            api_response: None,
             agent_signature: None,
         };
     }
@@ -407,6 +424,7 @@ async fn handle_config_update(
             leader_signature: String::new(),
             leader_node_id: String::new(),
             consensus_nodes: vec![],
+            platform: action.platform.clone(),
         },
         &state.key_manager,
     ).await;
@@ -424,8 +442,8 @@ async fn handle_config_update(
         action_id: action.action_id.clone(),
         success: true,
         error: None,
-        tg_api_method: Some("ConfigUpdate".into()),
-        tg_api_response: Some(serde_json::json!({
+        api_method: Some("ConfigUpdate".into()),
+        api_response: Some(serde_json::json!({
             "ok": true,
             "version": config.version,
         })),
@@ -516,6 +534,7 @@ async fn handle_warn_action(
                     action_id: format!("{}_escalation", action.action_id),
                     action_type: escalation_action,
                     bot_id_hash: action.bot_id_hash.clone(),
+                    platform: action.platform.clone(),
                     chat_id,
                     params: serde_json::json!({
                         "user_id": user_id,
@@ -559,8 +578,8 @@ async fn handle_warn_action(
                 action_id: action.action_id.clone(),
                 success: false,
                 error: Some(format!("Unknown warn_action: {}", warn_op)),
-                tg_api_method: None,
-                tg_api_response: None,
+                api_method: None,
+                api_response: None,
                 agent_signature: None,
             };
         }
@@ -571,6 +590,7 @@ async fn handle_warn_action(
         action_id: format!("{}_reply", action.action_id),
         action_type: crate::executor::ActionType::Message(crate::executor::MessageAction::Send),
         bot_id_hash: action.bot_id_hash.clone(),
+        platform: action.platform.clone(),
         chat_id,
         params: serde_json::json!({ "text": confirm_text }),
         leader_signature: String::new(),
@@ -583,8 +603,8 @@ async fn handle_warn_action(
         action_id: action.action_id.clone(),
         success: true,
         error: None,
-        tg_api_method: Some("WarnAction".into()),
-        tg_api_response: Some(serde_json::json!({ "ok": true })),
+        api_method: Some("WarnAction".into()),
+        api_response: Some(serde_json::json!({ "ok": true })),
         agent_signature: None,
     }
 }
@@ -955,7 +975,7 @@ async fn submit_audit_log(
         sequence,
         timestamp,
         message_hash: hex::encode(message_hash),
-        telegram_update: audit_update,
+        platform_event: audit_update,
         owner_signature: hex::encode(signature),
         platform: "audit".to_string(),
     };

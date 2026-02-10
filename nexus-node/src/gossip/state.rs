@@ -269,7 +269,7 @@ mod tests {
             sequence: seq,
             timestamp: 1700000000,
             message_hash: hash.to_string(),
-            telegram_update: serde_json::json!({}),
+            platform_event: serde_json::json!({}),
             owner_signature: "cc".repeat(32),
             platform: "telegram".to_string(),
         }
